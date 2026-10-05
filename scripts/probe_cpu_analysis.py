@@ -17,7 +17,7 @@ IMAGE = '7e3fe7f349a9f45464708b564c67f1dd1c387fbe05ec898c8d82b60a074cac65'
 BASE = 0x041B0000
 
 
-def compare_original(image, directory, prepare=False, emission=False):
+def compare_original(image, directory, prepare=False, emission=False, memory_emission=False):
     import unicorn as U
     import unicorn.mips_const as M
     machine = U.Uc(U.UC_ARCH_MIPS, U.UC_MODE_MIPS32 | U.UC_MODE_LITTLE_ENDIAN)
@@ -36,6 +36,12 @@ def compare_original(image, directory, prepare=False, emission=False):
         values[0x1D0] = 0x09B80000
     for offset, value in values.items():
         machine.mem_write(0x10000 + offset, struct.pack('<I', value))
+    if memory_emission:
+        for slot in range(512):
+            registers = slot < 8 or slot in (12, 13)
+            machine.mem_write(0x11000 + slot * 8,
+                              struct.pack('<II', 0x8A54 if registers else 0x88BC,
+                                          0x8AA4 if registers else 0x89A0))
     for reg, value in ((M.UC_MIPS_REG_GP, 0x10000), (M.UC_MIPS_REG_SP, 0x0700F000),
                        (M.UC_MIPS_REG_A0, 0xBFC00000 if prepare else BASE), (M.UC_MIPS_REG_RA, 0x0700FFF0)):
         machine.reg_write(reg, value)
@@ -67,7 +73,7 @@ def compare_original(image, directory, prepare=False, emission=False):
             category = struct.unpack('<H', machine.mem_read(record + 4, 2))[0]
             if category == 0:
                 continue
-            if category not in (9, 0x13):
+            if category not in (9, 0x13) and not (memory_emission and category == 0x10):
                 break
             for reg, value in ((M.UC_MIPS_REG_A0, category), (M.UC_MIPS_REG_A1, record),
                                (M.UC_MIPS_REG_A2, cursor), (M.UC_MIPS_REG_A3, 0),
@@ -102,6 +108,10 @@ def compare_original(image, directory, prepare=False, emission=False):
         report['allegrex_emitted_bytes'] = len(emitted_code)
         report['allegrex_bytes_equal'] = emitted_code == (directory / 'allegrex.bin').read_bytes()
         report['excluded'] = 'one setup CACHE skipped; full record walk/linking and execution not performed'
+        if memory_emission:
+            report['stage'] = '06914_known_memory_probe_with_reset_table_fixture'
+            report['memory_emitter_sha256'] = hashlib.sha256((ROOT / 'src/native/pops_emit_memory.c').read_bytes()).hexdigest()
+            report['fixture'] = 'native reset default I/O table; whole reset and devices not executed'
     report['passed'] = not differences and report['scratch_equal'] and report['record_length_equal']
     if emission:
         report['passed'] &= report['allegrex_bytes_equal']
@@ -118,7 +128,10 @@ def main():
     parser.add_argument('--compare', action='store_true')
     parser.add_argument('--prepare', action='store_true', help='Include original compiler setup and cost pass before emission')
     parser.add_argument('--emit-immediates', action='store_true', help='Probe immediate emission after prepare; not full block compilation')
+    parser.add_argument('--emit-memory', action='store_true', help='Include known-base memory categories with the initial reset I/O table fixture')
     args = parser.parse_args()
+    if args.emit_memory:
+        args.emit_immediates = True
     if args.emit_immediates:
         args.prepare = True
     if args.out.exists():
@@ -132,7 +145,9 @@ def main():
     args.out.mkdir(parents=True)
     command = [str(ROOT / 'build/repops-analyze'),
                str((args.image / 'pops_image.bin').resolve()), str(args.out.resolve())]
-    if args.emit_immediates:
+    if args.emit_memory:
+        command.append('--emit-memory')
+    elif args.emit_immediates:
         command.append('--emit-immediates')
     elif args.prepare:
         command.append('--prepare')
@@ -150,7 +165,7 @@ def main():
     (args.out / 'records.json').write_text(json.dumps(rows, indent=2) + '\n')
     print(f'{len(rows)} nonempty record categories; includes boundary records, not executed instructions.')
     if args.compare:
-        compare_original(image, args.out, args.prepare, args.emit_immediates)
+        compare_original(image, args.out, args.prepare, args.emit_immediates, args.emit_memory)
     print('Output:', args.out)
 
 

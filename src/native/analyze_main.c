@@ -9,11 +9,12 @@
 
 int main(int argc, char **argv)
 {
-    const int emission = argc == 4 && strcmp(argv[3], "--emit-immediates") == 0;
+    const int memory_emission = argc == 4 && strcmp(argv[3], "--emit-memory") == 0;
+    const int emission = memory_emission || (argc == 4 && strcmp(argv[3], "--emit-immediates") == 0);
     const int prepare = emission || (argc == 4 && strcmp(argv[3], "--prepare") == 0);
     if (prepare) --argc;
     if (argc != 3) {
-        fprintf(stderr, "usage: %s <checked-native-image.bin> <new-output-directory> [--prepare|--emit-immediates]\n", argv[0]);
+        fprintf(stderr, "usage: %s <checked-native-image.bin> <new-output-directory> [--prepare|--emit-immediates|--emit-memory]\n", argv[0]);
         return 64;
     }
     rp_context *c = calloc(1, sizeof(*c));
@@ -43,6 +44,17 @@ int main(int argc, char **argv)
     rp_w32(c, c->gp + 0xB4C, buffer);
     rp_w32(c, c->gp + 0xB50, pc);
     rp_w32(c, c->gp + 0xB54, pc + 0xC00);
+    if (memory_emission) {
+        /* Probe input from the native reset's +0x1A0A8 table: default handlers,
+         * with register-backed overrides at +0x1000..103F and +0x1060..106F.
+         * This is an input fixture, not running the full reset in this probe.
+         */
+        for (unsigned slot = 0; slot < 512; ++slot) {
+            const bool registers = slot < 8 || slot == 12 || slot == 13;
+            rp_w32(c, c->gp + 0x1000 + slot * 8, registers ? 0x8A54 : 0x88BC);
+            rp_w32(c, c->gp + 0x1004 + slot * 8, registers ? 0x8AA4 : 0x89A0);
+        }
+    }
     int status = 0;
     uint32_t emission_cursor = 0;
     uint32_t emission_start = 0, emitted_records = 0;
@@ -59,7 +71,7 @@ int main(int argc, char **argv)
                 const uint8_t *r = rp_memory(c, record, 16);
                 const uint32_t category = r[4] | (uint32_t)r[5] << 8;
                 if (category == 0) continue;
-                if (category != 9 && category != 0x13) {
+                if (category != 9 && category != 0x13 && !(memory_emission && category == 0x10)) {
                     rp_event(c, "probe_boundary", "next_emitter_category", record, category);
                     break;
                 }
@@ -97,6 +109,7 @@ int main(int argc, char **argv)
                 "\"record_slots\":%u,\"native_function_entries\":%u,\"guest_executed\":false,"
                 "\"emission_cursor_not_executable\":%u,\"emitted_records\":%u,\"stage\":\"%s\"}\n",
                 pc, buffer, end, bytes / 16, c->functions, emission_cursor, emitted_records,
+                memory_emission ? "native_C_POPS_known_memory_emitter_probe" :
                 emission ? "native_C_POPS_immediate_emitter_probe" :
                 prepare ? "native_C_POPS_058C0_through_05D5B" : "native_C_reconstruction_of_POPS_05154");
         fclose(report);

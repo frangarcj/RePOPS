@@ -23,4 +23,11 @@ uint32_t rp_emit_debit(rp_context *, int32_t, uint32_t);
 uint32_t rp_emit_load_state(rp_context *, uint32_t, uint32_t, uint32_t);
 uint32_t rp_emit_known_value(rp_context *, uint32_t, uint32_t, uint32_t, uint32_t);
 uint32_t rp_emit_record(rp_context *, uint32_t, uint32_t, uint32_t, uint32_t);
+uint32_t rp_emit_spill_all(rp_context *, uint32_t);
+uint32_t rp_emit_argument(rp_context *, uint32_t, uint32_t, uint32_t);
+uint32_t rp_emit_result(rp_context *, uint32_t, uint32_t, uint32_t);
+uint32_t rp_pops_constant_read(rp_context *, uint32_t, uint32_t);
+uint32_t rp_emit_fixed_memory(rp_context *, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+uint32_t rp_emit_memory(rp_context *, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+uint32_t rp_emit_memory_record(rp_context *, uint32_t, uint32_t);
 #endif

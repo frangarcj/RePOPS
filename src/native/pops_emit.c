@@ -363,7 +363,7 @@ uint32_t rp_emit_known_value(rp_context *c, uint32_t dest, uint32_t value, uint3
     return out;
 }
 
-/* +0x6914, category 9 (immediates) and 0x13 (elided operation) only. Other
+/* +0x6914, immediate/elided and known-base memory categories. Other
  * categories remain the next reconstruction task, not successful no-ops.
  */
 uint32_t rp_emit_record(rp_context *c, uint32_t category, uint32_t record, uint32_t out, uint32_t cost)
@@ -371,6 +371,7 @@ uint32_t rp_emit_record(rp_context *c, uint32_t category, uint32_t record, uint3
     rp_function(c, 0x6914, "pops.emit_instruction_record_partial");
     (void)cost;
     if (category == 0x13) return out;
+    if (category == 0x10) return rp_emit_memory_record(c, record, out);
     if (category != 9) rp_block(c, "emitter_category_not_reconstructed", category);
     const uint32_t src = *(uint8_t *)rp_memory(c, record + 12, 1);
     const uint32_t dest = *(uint8_t *)rp_memory(c, record + 2, 1);

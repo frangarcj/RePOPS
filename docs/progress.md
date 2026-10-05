@@ -9,8 +9,11 @@ not PS1 execution. The +0x058C0 setup and cost-accounting prefix now also matche
 the same sample up to +0x5D5C, before instruction emission. The next focused
 probe reconstructs register helpers and the immediate category of +0x6914,
 producing the same first three Allegrex words with matching compiler state.
-Other emitter categories, the full controller walk and linking remain pending.
-See `cpu_register_emission.md` for the narrow validation scope.
+The known-base memory category now also matches: the first two BIOS stores
+produce a 24-byte Allegrex prefix with identical records and scratchpad.
+Dynamic addresses, other emitter categories, the full controller walk and
+linking remain pending. See `cpu_memory_emission.md` and
+`cpu_register_emission.md` for the narrow validation scope.
 See `cpu_analysis_records.md`. The integrated diagnostic still stops at
 +0x115B4, independently of this analysis probe.
 

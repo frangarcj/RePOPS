@@ -51,6 +51,25 @@ int main(void)
     assert(rp_u32(c, c->gp + 0x1AC) == 108);
     rp_pops_irq_write(c, 0x1070, 1);
     assert(rp_u32(c, c->gp + 0x2070) == 1 && rp_u32(c, c->gp + 0x134) == 0);
+    rp_w32(c, c->gp + 0x1AC, 200); rp_w32(c, c->gp + 0x1B0, 100);
+    rp_w32(c, c->gp + 0x1C4, 100); rp_w32(c, c->gp + 0x1C8, 100);
+    rp_w8(c, c->gp + 0x1C3, 4);
+    assert(rp_pops_irq_read(c, 0x1F801074) == 4);
+    assert(rp_u32(c, c->gp + 0x1B0) == 92);
+    assert(*(uint8_t *)rp_memory(c, c->gp + 0x1C3, 1) == 8);
+    assert(rp_pops_irq_read(c, 0x1F801074) == 4);
+    assert(rp_u32(c, c->gp + 0x1B0) == 76);
+    assert(*(uint8_t *)rp_memory(c, c->gp + 0x1C3, 1) == 16);
+    rp_w32(c, c->gp + 0x20F0, 0x77777777);
+    rp_pops_dma_control_write(c, 0x1F8010F0, 0x07654321, 2);
+    assert(rp_u32(c, c->gp + 0x20F0) == 0x07654321);
+    rp_pops_dma_control_write(c, 0x1F8010F0, 0x07654329, 2);
+    assert(rp_u32(c, c->gp + 0x20F0) == 0x07654329); /* Channel 0 remains idle. */
+    rp_w32(c, c->gp + 0x20F4, 0x01000000);
+    rp_pops_dma_control_write(c, 0x1F8010F4, 0x00800000, 2);
+    assert(rp_u32(c, c->gp + 0x20F4) == 0x81800000);
+    rp_pops_dma_control_write(c, 0x1F8010F4, 0x01800000, 2);
+    assert(rp_u32(c, c->gp + 0x20F4) == 0x00800000);
     fclose(c->trace); free(c);
     puts("Guest scheduler: unlink, callback debit, overshoot and future-event wait passed.");
     return 0;

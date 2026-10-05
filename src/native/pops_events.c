@@ -1,5 +1,103 @@
 #include "runtime.h"
 
+static uint32_t rotate_right(uint32_t value, unsigned shift)
+{
+    shift &= 31;
+    return (value >> shift) | (value << ((32 - shift) & 31));
+}
+
+/* +0x91BC. Newly enabled channels enter +0x8E4C, whose idle prefix is
+ * reconstructed here; an actual DMA request remains a separate boundary. */
+void rp_pops_dma_control_write(rp_context *c, uint32_t address, uint32_t value, uint32_t width)
+{
+    rp_function(c, 0x91BC, "pops.write_DMA_control");
+    const uint32_t slot = c->gp + 0x20F0 + (address & 4);
+    const uint32_t old = rp_u32(c, slot);
+    if (!(address & 4)) {
+        uint32_t newly_set = value & ~old;
+        rp_w32(c, slot, value);
+        for (unsigned channel = 0; newly_set; ++channel, newly_set >>= 4) {
+            if (!(newly_set & 8)) continue;
+            rp_function(c, 0x8E4C, "pops.try_DMA_channel_idle_prefix");
+            if (rp_u32(c, c->gp + 0x1EC + channel * 28)) continue;
+            const uint32_t chcr = rp_u32(c, c->gp + 0x2088 + channel * 16);
+            if (!(chcr & 0x01000000)) continue;
+            rp_event(c, "DMA_boundary", "newly_enabled_active_channel", channel, chcr);
+            rp_block(c, "active_DMA_channel_not_reconstructed", 0x8E4C);
+        }
+        return;
+    }
+    if (width != 2) {
+        const unsigned shift = (address * 8) & 31;
+        uint32_t merged = rotate_right(old & UINT32_C(0x80FF7FFF), shift);
+        const uint32_t mask = width == 0 ? 0xFF : 0xFFFF;
+        merged = (merged & ~mask) | (value & mask);
+        value = rotate_right(merged, 0u - shift);
+    }
+    value ^= ((old & ~value) ^ value) & UINT32_C(0x7F008000);
+    const uint32_t pending = ((value >> 24) & 0x7F) ? ((value >> 23) & 1) : 0;
+    rp_w32(c, slot, (value & UINT32_C(0x7FFFFFFF)) | (pending << 31));
+}
+
+uint32_t rp_pops_irq_read(rp_context *c, uint32_t address)
+{
+    rp_function(c, 0x9850, "pops.read_interrupt_register");
+    uint32_t downcount = rp_u32(c, c->gp + 0x1B0);
+    uint32_t now = rp_u32(c, c->gp + 0x1AC) - downcount;
+    uint32_t last_advance = 4;
+    if ((int32_t)downcount > 0 &&
+        (int32_t)(now - rp_u32(c, c->gp + 0x1C4)) < 40) {
+        uint32_t advance = (uint32_t)*(uint8_t *)rp_memory(c, c->gp + 0x1C3, 1) * 2;
+        if (advance > downcount) advance = downcount;
+        if (advance > 80) advance = 80;
+        downcount -= advance;
+        rp_w32(c, c->gp + 0x1C8, rp_u32(c, c->gp + 0x1C8) + advance);
+        now += advance;
+        rp_w32(c, c->gp + 0x1B0, downcount);
+        last_advance = advance;
+    }
+    rp_w8(c, c->gp + 0x1C3, (uint8_t)last_advance);
+    rp_w32(c, c->gp + 0x1C4, rp_u32(c, c->gp + 0x1C8));
+    rp_w32(c, c->gp + 0x1C8, now);
+    return rp_u32(c, c->gp + (address & 0xFFC) + 0x2000);
+}
+
+void rp_pops_timer_write(rp_context *c, uint32_t address, uint32_t value)
+{
+    rp_function(c, 0x9C60, "pops.write_timer_register_partial");
+    rp_event(c, "timer_write", "register_value", address, value);
+    const uint32_t channel = (address >> 4) & 3;
+    const uint32_t reg = address & 0xF;
+    if (channel >= 3)
+        rp_block(c, "timer_write_path_not_reconstructed", address);
+    const uint32_t timer = c->gp + 0x64C + channel * 0x20;
+    if (reg == 4 && (value & 0xFFFF) == 0) {
+        const uint32_t mode = rp_u32(c, timer + 0x18) & ~UINT32_C(0x3FF);
+        rp_w32(c, timer + 0x18, mode);
+        rp_w32(c, timer + 0x10, rp_u32(c, timer + 0x10) & 0x1FFFF);
+        rp_w32(c, timer + 0x14, rp_u32(c, c->gp + 0x1AC) - rp_u32(c, c->gp + 0x1B0));
+        rp_w8(c, timer + 0x1D, 0);
+        return;
+    }
+    if (reg == 8) {
+        const uint32_t target = (value & 0xFFFF) ? (value & 0xFFFF) : 0x10000;
+        const uint32_t old = rp_u32(c, timer + 0x10);
+        if ((old & 0x3FFFFFFF) != target)
+            rp_block(c, "timer_target_reschedule_not_reconstructed", address);
+        return;
+    }
+    if (reg == 0 && (value & 0xFFFF) == 0) {
+        if (rp_u32(c, timer + 4))
+            rp_block(c, "timer_counter_event_reschedule_not_reconstructed", address);
+        if (rp_u32(c, timer + 0x18) & 0x30)
+            rp_block(c, "timer_counter_mode_not_reconstructed", address);
+        rp_w32(c, timer + 0x14,
+               rp_u32(c, c->gp + 0x1AC) - rp_u32(c, c->gp + 0x1B0));
+        return;
+    }
+    rp_block(c, "timer_write_path_not_reconstructed", address);
+}
+
 /* +0x98C4: I_STAT acknowledges with AND; I_MASK replaces the mask. Only a
  * change in pending state updates COP0 cause and potentially brings an event
  * deadline forward. Access-width arguments are not used by the original.

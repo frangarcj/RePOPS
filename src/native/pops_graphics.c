@@ -313,8 +313,14 @@ static void refresh_disabled_display(rp_context *c)
         rp_block(c, "active_display_refresh_not_reconstructed", 0x115B4);
     if (initialized && !old_field && !dirty)
         rp_block(c, "repeat_idle_refresh_not_reconstructed", 0x1252C);
-    if (*(uint8_t *)rp_memory(c, gp + 0x3658, 1) & 0x80)
-        rp_block(c, "GE_previous_frame_sync_not_reconstructed", 0x12504);
+    if (*(uint8_t *)rp_memory(c, gp + 0x3658, 1) & 0x80) {
+        c->services += 2;
+        rp_event(c, "headless_adapter", "previous_GE_list_sync_completed", 0x12504,
+                 rp_u32(c, gp + 0x35CC));
+        rp_w32(c, gp + 0x35CC, ++c->next_id);
+        rp_event(c, "headless_adapter", "GE_list_enqueue_captured", 0x49A00000,
+                 c->next_id);
+    }
     uint32_t out = rp_u32(c, gp + 0x362C), start = out;
     out = graphics_word(c, out, 0x13041B92);
     out = graphics_word(c, out, 0x0A000000);

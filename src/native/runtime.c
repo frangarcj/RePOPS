@@ -7,7 +7,6 @@ void rp_event(rp_context *c, const char *kind, const char *name, uint32_t addres
     /* Names are source-controlled identifiers, never arbitrary path contents. */
     fprintf(c->trace, "{\"kind\":\"%s\",\"name\":\"%s\",\"address\":%u,\"value\":%u}\n",
             kind, name, address, value);
-    fflush(c->trace);
 }
 
 _Noreturn void rp_block(rp_context *c, const char *kind, uint32_t address)

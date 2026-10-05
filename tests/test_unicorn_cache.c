@@ -7,7 +7,7 @@ int main(void)
     rp_context *c = calloc(1, sizeof(*c));
     assert(c);
     c->trace = tmpfile(); c->gp = 0x10000;
-    c->regions[0] = (rp_region){0, 0x20000, calloc(1, 0x20000)};
+    c->regions[0] = (rp_region){0, 0x100000, calloc(1, 0x100000)};
     c->regions[2] = (rp_region){0x08000000, 0x2000000, calloc(1, 0x2000000)};
     assert(c->trace && c->regions[0].bytes && c->regions[2].bytes);
     if (setjmp(c->stop)) {
@@ -48,6 +48,20 @@ int main(void)
     rp_unicorn_run(c);
     assert(c->run_pc == 0x2888 && rp_u32(c, c->gp + 0x28) == 25);
     assert(rp_u32(c, c->gp + 0x24) == 7);
+    /* Same callsite: a RAM halfword write, then an I/O address. The latter
+     * must return to C instead of corrupting a RAM alias. */
+    const uint32_t probe = start + 0x100;
+    rp_w32(c, probe, 0x0C000000 | (RP_FAST_RAM_SH >> 2));
+    rp_w32(c, probe + 4, 0);
+    rp_w32(c, probe + 8, 0x0C000000 | (0x2888 >> 2));
+    rp_w32(c, probe + 12, 0);
+    rp_w32(c, c->gp + 0x1D0, probe + 16);
+    c->run_pc = probe; c->run_gpr[4] = 0x80000120; c->run_gpr[5] = 0xBEEF;
+    rp_unicorn_run(c);
+    assert(c->run_pc == 0x2888 && rp_u32(c, 0x09800120) == 0xBEEF);
+    c->run_pc = probe; c->run_gpr[4] = 0x1F801104;
+    rp_unicorn_run(c);
+    assert(c->run_pc == 0x2110 && c->run_gpr[4] == 0x1F801104);
     rp_unicorn_close(c);
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[2].bytes); free(c);
     puts("Unicorn cache: helper exits, delay slot, shared memory, FPR bits and native patch passed.");

@@ -90,10 +90,32 @@ static bool generated_address(rp_context *c, uint32_t address)
            (address >= 0x09540000 && address < rp_u32(c, c->gp + 0x1CC));
 }
 
+static void specialize_generated_call(rp_context *c, uint32_t return_address,
+                                      uint32_t target, const char *name)
+{
+    const uint32_t patch = return_address - 8;
+    if (!generated_address(c, patch))
+        rp_block(c, "memory_specialization_patch_outside_cache", patch);
+    const uint32_t word = rp_u32(c, patch);
+    if ((word >> 26) != 3)
+        rp_block(c, "memory_specialization_not_a_JAL", patch);
+    rp_w32(c, patch, 0x0C000000 | ((target >> 2) & 0x03FFFFFF));
+    rp_event(c, "milestone", name, patch, target);
+}
+
 static void native_helper(rp_context *c)
 {
     uint32_t *r = c->run_gpr;
     switch (c->run_pc) {
+    case 0x91BC:
+        rp_pops_dma_control_write(c, r[4], r[5], r[6]);
+        transfer(c, r[31]);
+        return;
+    case 0x94C4:
+        rp_pops_prepare_exception(c, r[4]);
+        r[2] = rp_u32(c, c->gp + 0x1B4);
+        transfer(c, r[31]);
+        return;
     case 0x98C4:
         rp_pops_irq_write(c, r[4], r[5]);
         transfer(c, r[31]);
@@ -119,63 +141,118 @@ static void native_helper(rp_context *c)
         r[2] = (r[4] >> 23) & 63;
         r[6] = 0x4C;
         if (r[2]) rp_block(c, "dynamic_byte_store_non_RAM_path", 0x1C70);
+        specialize_generated_call(c, r[31], RP_FAST_RAM_SB,
+                                  "byte_store_RAM_callsite_specialized");
         r[4] = (r[4] & 0x1FFFFF) | 0x09800000;
         rp_w8(c, r[4], (uint8_t)r[5]);
         transfer(c, r[31]);
         return;
+    case 0x2110: {
+        rp_function(c, 0x2110, "pops.dynamic_halfword_store");
+        const uint32_t address = r[4], region = (address >> 23) & 63;
+        r[6] = 0x4C;
+        if (!region) {
+            specialize_generated_call(c, r[31], RP_FAST_RAM_SH,
+                                      "halfword_store_RAM_callsite_specialized");
+            r[4] = (address & 0x1FFFFF) | 0x09800000;
+            if (r[4] & 1) rp_block(c, "dynamic_halfword_store_unaligned", r[4]);
+            rp_w8(c, r[4], (uint8_t)r[5]);
+            rp_w8(c, r[4] + 1, (uint8_t)(r[5] >> 8));
+        } else {
+            uint32_t index = (address + UINT32_C(0xE07FF000)) >> 3;
+            if (index > 0x1FF) index = 0x1FF;
+            const uint32_t handler = rp_u32(c, c->gp + 0x1004 + index * 8);
+            if (handler != 0x9C60 && handler != 0x98C4 && handler != 0x91BC)
+                rp_block(c, "dynamic_halfword_store_not_reconstructed", address);
+            rp_w32(c, c->gp + 0x1B0, r[25]);
+            if (handler == 0x98C4) rp_pops_irq_write(c, address, r[5]);
+            else if (handler == 0x91BC) rp_pops_dma_control_write(c, address, r[5], 1);
+            else rp_pops_timer_write(c, address, r[5]);
+            r[25] = rp_u32(c, c->gp + 0x1B0);
+        }
+        transfer(c, r[31]);
+        return;
+    }
     case 0x2128: case 0x2140: case 0x2160: case 0x2180:
+    case 0x267C: case 0x2694: case 0x26B4: case 0x26D4:
     case 0x1AA8: case 0x1AC8: case 0x1AE4:
     case 0x1A90: {
         const bool word_read = c->run_pc >= 0x2128 && c->run_pc <= 0x2180;
-        const uint32_t entry = word_read ? 0x2128 : 0x1A90;
-        rp_function(c, entry, word_read ? "pops.dynamic_word_read" : "pops.dynamic_signed_byte_read");
+        const bool half_read = c->run_pc >= 0x267C && c->run_pc <= 0x26D4;
+        const uint32_t entry = word_read ? 0x2128 : half_read ? 0x267C : 0x1A90;
+        rp_function(c, entry, word_read ? "pops.dynamic_word_read" :
+                    half_read ? "pops.dynamic_unsigned_halfword_read" : "pops.dynamic_signed_byte_read");
         const uint32_t address = r[4], region = (address >> 23) & 63;
         if (word_read && (address & 3)) rp_block(c, "dynamic_word_read_unaligned", address);
+        if (half_read && (address & 1)) rp_block(c, "dynamic_halfword_read_unaligned", address);
         r[6] = 0x4C;
+        uint32_t specialized = 0;
         if (!region) {
+            if (word_read)
+                specialized = RP_FAST_RAM_LW;
             r[4] = (address & 0x1FFFFF) | 0x09800000;
             if (word_read) r[2] = rp_u32(c, r[4]);
+            else if (half_read) {
+                const uint8_t *p = rp_memory(c, r[4], 2);
+                r[2] = p[0] | (uint32_t)p[1] << 8;
+            }
             else {
                 const uint8_t byte = *(uint8_t *)rp_memory(c, r[4], 1);
                 r[2] = byte < 128 ? byte : (uint32_t)((int32_t)byte - 256);
             }
         } else if (region == 63) {
-            uint32_t specialized = 0;
             if (((address >> 10) & 0x1FFF) == 0) {
-                specialized = word_read ? 0x2140 : 0x1AA8;
+                specialized = word_read ? 0x2140 : half_read ? 0x2694 : 0x1AA8;
                 r[4] = (address & 0x3FF) | 0x13000;
                 if (word_read) r[2] = rp_u32(c, r[4]);
+                else if (half_read) {
+                    const uint8_t *p = rp_memory(c, r[4], 2);
+                    r[2] = p[0] | (uint32_t)p[1] << 8;
+                }
                 else {
                     const uint8_t byte = *(uint8_t *)rp_memory(c, r[4], 1);
                     r[2] = byte < 128 ? byte : (uint32_t)((int32_t)byte - 256);
                 }
                 r[25] += 4;
             } else if ((address >> 19) == 0x17F8) {
-                specialized = word_read ? 0x2160 : 0x1AC8;
+                specialized = word_read ? 0x2160 : half_read ? 0x26B4 : 0x1AC8;
                 const uint32_t offset = 0x53C20 + (address & 0x7FFFF);
                 if (word_read) {
                     r[2] = rp_module_u32(c, offset);
                     r[25] -= 3;
+                } else if (half_read) {
+                    const uint8_t *p = rp_module_memory(c, offset, 2);
+                    r[2] = p[0] | (uint32_t)p[1] << 8;
+                    r[25] -= 1;
                 } else {
                     const uint8_t byte = *(uint8_t *)rp_module_memory(c, offset, 1);
                     r[2] = byte < 128 ? byte : (uint32_t)((int32_t)byte - 256);
                 }
             } else {
-                rp_block(c, "read_IO_specialization_not_reconstructed", address);
-            }
-            if (c->run_pc == entry) {
-                const uint32_t patch = r[31] - 8;
-                if (!generated_address(c, patch))
-                    rp_block(c, "memory_specialization_patch_outside_cache", patch);
-                rp_w32(c, patch, (UINT32_C(0x30000000) + specialized) >> 2);
-                rp_event(c, "milestone", "read_callsite_specialized", patch, specialized);
+                uint32_t index = (address + UINT32_C(0xE07FF000)) >> 3;
+                if (index > 0x1FF) index = 0x1FF;
+                const uint32_t handler = rp_u32(c, c->gp + 0x1000 + index * 8);
+                if ((word_read || half_read) && handler == 0x9850) {
+                    rp_w32(c, c->gp + 0x1B0, r[25]);
+                    r[2] = rp_pops_irq_read(c, address);
+                    r[25] = rp_u32(c, c->gp + 0x1B0);
+                } else {
+                    rp_block(c, "read_IO_specialization_not_reconstructed", address);
+                }
             }
         } else {
             /* +0x1C68 -> +0x8ADC: no call-site specialization in this path. */
-            r[5] = word_read ? 2 : 0;
+            r[5] = word_read ? 2 : half_read ? 5 : 0;
             rp_w32(c, c->gp + 0x1B0, r[25]);
             r[2] = rp_pops_constant_read(c, r[4], r[5]);
             r[25] = rp_u32(c, c->gp + 0x1B0);
+        }
+        if (specialized && c->run_pc == entry) {
+            const uint32_t patch = r[31] - 8;
+            if (!generated_address(c, patch))
+                rp_block(c, "memory_specialization_patch_outside_cache", patch);
+            rp_w32(c, patch, (UINT32_C(0x30000000) + specialized) >> 2);
+            rp_event(c, "milestone", "read_callsite_specialized", patch, specialized);
         }
         transfer(c, r[31]);
         return;
@@ -197,12 +274,54 @@ static void native_helper(rp_context *c)
         rp_function(c, 0x2450, "pops.dynamic_word_store_RAM_path");
         r[2] = (r[4] >> 23) & 63;
         r[6] = 0x4C;
-        if (r[2]) rp_block(c, "dynamic_word_store_non_RAM_path", 0x2314);
-        r[4] = (r[4] & 0x1FFFFF) | 0x09800000;
-        if (r[4] & 3) rp_block(c, "dynamic_word_store_unaligned", r[4]);
-        rp_w32(c, r[4], r[5]);
+        if (!r[2]) {
+            specialize_generated_call(c, r[31], RP_FAST_RAM_SW,
+                                      "word_store_RAM_callsite_specialized");
+            r[4] = (r[4] & 0x1FFFFF) | 0x09800000;
+            if (r[4] & 3) rp_block(c, "dynamic_word_store_unaligned", r[4]);
+            rp_w32(c, r[4], r[5]);
+        } else {
+            uint32_t index = (r[4] + UINT32_C(0xE07FF000)) >> 3;
+            if (index > 0x1FF) index = 0x1FF;
+            const uint32_t handler = rp_u32(c, c->gp + 0x1004 + index * 8);
+            if (handler != 0x98C4 && handler != 0x91BC && handler != 0x9C60)
+                rp_block(c, "dynamic_word_store_non_RAM_path", r[4]);
+            rp_w32(c, c->gp + 0x1B0, r[25]);
+            if (handler == 0x91BC) rp_pops_dma_control_write(c, r[4], r[5], 2);
+            else if (handler == 0x9C60) rp_pops_timer_write(c, r[4], r[5]);
+            else rp_pops_irq_write(c, r[4], r[5]);
+            r[25] = rp_u32(c, c->gp + 0x1B0);
+        }
         transfer(c, r[31]);
         return;
+    case 0x2468: {
+        rp_function(c, 0x2468, "pops.dynamic_unsigned_byte_read");
+        const uint32_t address = r[4];
+        const uint32_t physical = address & 0x1FFFFFFF;
+        const uint32_t region = (address >> 23) & 63;
+        r[6] = 0x4C;
+        if (!region) {
+            specialize_generated_call(c, r[31], RP_FAST_RAM_LBU,
+                                      "byte_read_RAM_callsite_specialized");
+            r[4] = (address & 0x1FFFFF) | 0x09800000;
+            r[2] = *(uint8_t *)rp_memory(c, r[4], 1);
+        } else if (physical >= 0x1FC00000 && physical < 0x1FC80000) {
+            specialize_generated_call(c, r[31], RP_FAST_BIOS_LBU,
+                                      "byte_read_BIOS_callsite_specialized");
+            r[2] = *(uint8_t *)rp_module_memory(c, 0x53C20 + physical - 0x1FC00000, 1);
+        } else if (region == 63 && ((address >> 10) & 0x1FFF) == 0) {
+            r[4] = (address & 0x3FF) | 0x13000;
+            r[2] = *(uint8_t *)rp_memory(c, r[4], 1);
+            r[25] += 4;
+        } else {
+            r[5] = 4;
+            rp_w32(c, c->gp + 0x1B0, r[25]);
+            r[2] = rp_pops_constant_read(c, address, 4);
+            r[25] = rp_u32(c, c->gp + 0x1B0);
+        }
+        transfer(c, r[31]);
+        return;
+    }
     case 0x96AC:
         r[2] = update_interrupt_deadline(c);
         transfer(c, r[31]);
@@ -266,7 +385,7 @@ void rp_pops_run_core(rp_context *c)
     c->run_gpr[25] = rp_u32(c, c->gp + 0x1B0);
     rp_unicorn_open(c);
     transfer(c, lookup_block(c, rp_u32(c, c->gp + 0x1A0)));
-    for (unsigned steps = 0; steps < 100000; ++steps) {
+    for (unsigned steps = 0; steps < 500000; ++steps) {
         if (generated_address(c, c->run_pc))
             rp_unicorn_run(c);
         else

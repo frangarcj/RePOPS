@@ -7,6 +7,12 @@
 #include "me_worker.h"
 
 #define RP_REGION_COUNT 4
+/* Execution-adapter addresses, not original POPS entry points. */
+enum {
+    RP_FAST_BIOS_LBU = 0x07000000, RP_FAST_RAM_SB = 0x07000040,
+    RP_FAST_RAM_LBU = 0x07000080, RP_FAST_RAM_LW = 0x070000C0,
+    RP_FAST_RAM_SW = 0x07000100, RP_FAST_RAM_SH = 0x07000140
+};
 typedef struct rp_region { uint32_t base, size; uint8_t *bytes; } rp_region;
 /* Recovered fields of the single-disc provider path, not a POPSMAN RAM image.
  * No PSP hardware mode is guessed when reading a header on the host.
@@ -93,6 +99,9 @@ void rp_pops_graphics_initialize(rp_context *);
 void rp_pops_graphics_event(rp_context *, uint32_t);
 uint32_t rp_pops_dispatch_events(rp_context *);
 void rp_pops_irq_write(rp_context *, uint32_t, uint32_t);
+uint32_t rp_pops_irq_read(rp_context *, uint32_t);
+void rp_pops_timer_write(rp_context *, uint32_t, uint32_t);
+void rp_pops_dma_control_write(rp_context *, uint32_t, uint32_t, uint32_t);
 void rp_pops_schedule_event(rp_context *, uint32_t, uint32_t);
 void rp_pops_remove_event(rp_context *, uint32_t);
 void rp_pops_spu_write_register(rp_context *, uint32_t, uint32_t, uint32_t);

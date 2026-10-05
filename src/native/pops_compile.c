@@ -1,4 +1,5 @@
 #include "runtime.h"
+#include "pops_ir.h"
 
 #define RECORD_BASE UINT32_C(0x041B0000)
 
@@ -41,7 +42,7 @@ static void account_costs(rp_context *c, uint32_t end)
             if (opcode - UINT32_C(0x20) < 7 && baseline == 0) {
                 const uint8_t dest = b(c, p + 2);
                 for (uint32_t q = p + 16; q < end; q += 16) {
-                    if (h(c, q + 4) == 0x10) break;
+                    if (h(c, q + 4) == RP_CAT_MEMORY) break;
                     if (q != p + 16 && (dest == b(c, q + 12) || dest == b(c, q + 13))) break;
                     remaining -= b(c, q + 15);
                     if (remaining < 2) { remaining = 1; break; }
@@ -59,7 +60,7 @@ static void account_costs(rp_context *c, uint32_t end)
                 }
                 for (uint32_t q = p + 16; q < end; q += 16) {
                     const uint8_t next_op = b(c, q + 3);
-                    if ((next_op == 0x12 && b(c, q + 2) != 0) || next_op == 0x3A) break;
+                    if ((next_op == RP_OP_COP2 && b(c, q + 2) != 0) || next_op == RP_OP_SWC2) break;
                     remaining -= b(c, q + 15);
                     if (remaining < 2) { remaining = 1; break; }
                     if (h(c, q) & 1) { remaining >>= 1; break; }
@@ -67,7 +68,7 @@ static void account_costs(rp_context *c, uint32_t end)
             } else if (opcode - UINT32_C(0x58) < 4) {
                 for (uint32_t q = p + 16; q < end; q += 16) {
                     const uint32_t next_op = b(c, q + 3);
-                    if (next_op == 0x50 || next_op == 0x52) break;
+                    if (next_op == RP_OP_MFHI || next_op == RP_OP_MFLO) break;
                     remaining -= b(c, q + 15);
                     if (next_op - UINT32_C(0x58) < 4 || remaining < 2) {
                         remaining = 1; break;

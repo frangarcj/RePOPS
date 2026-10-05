@@ -310,7 +310,7 @@ uint32_t rp_emit_immediate(rp_context *c, uint32_t op, uint32_t dest, uint32_t s
     rp_function(c, 0x31D0, "pops.emit_immediate_operation");
     uint32_t hd, hs;
     out = rp_emit_pair(c, out, dest, src, &hd, &hs);
-    if (op == 0x80) {
+    if (op == RP_EMIT_CONSTANT) {
         const int32_t mapped = signed_byte(c, 0x778 + dest);
         if (value != 0 || mapped >= -1) return rp_emit_constant(c, out, hd, value);
         for (unsigned slot = 0; slot < 12; ++slot) {
@@ -319,17 +319,17 @@ uint32_t rp_emit_immediate(rp_context *c, uint32_t op, uint32_t dest, uint32_t s
         }
         return emit(c, out, 0x44800000 | (((0u - (uint32_t)mapped) & 31) << 11));
     }
-    if (op == 0x81) return emit(c, out, 0x7C000420 | ((hs & 31) << 16) | ((hd & 31) << 11));
-    if (op == 0x82 || (op == 0xC && (value == 0xFF || value == 0xFFFF))) {
+    if (op == RP_EMIT_SIGN_BYTE) return emit(c, out, 0x7C000420 | ((hs & 31) << 16) | ((hd & 31) << 11));
+    if (op == RP_EMIT_SIGN_HALF || (op == RP_OP_ANDI && (value == 0xFF || value == 0xFFFF))) {
         if (rp_emit_previous_movable(c, out)) {
             const uint32_t last = rp_u32(c, out - 4), kind = (last >> 16) & 0xFC1F;
             if (kind == hs + 0x8C00 || kind == hs + 0x9400 || kind == hs + 0x8400) {
                 if (hd == hs) out -= 4;
-                const uint32_t load = op == 0x82 ? 0x84000000 : value == 0xFF ? 0x90000000 : 0x94000000;
+                const uint32_t load = op == RP_EMIT_SIGN_HALF ? 0x84000000 : value == 0xFF ? 0x90000000 : 0x94000000;
                 return emit(c, out, load | (last & 0x03E00000) | ((hd & 31) << 16) | (last & 0xFFFF));
             }
         }
-        if (op == 0x82) return emit(c, out, 0x7C000620 | ((hs & 31) << 16) | ((hd & 31) << 11));
+        if (op == RP_EMIT_SIGN_HALF) return emit(c, out, 0x7C000620 | ((hs & 31) << 16) | ((hd & 31) << 11));
     }
     return emit(c, out, (op << 26) | ((hs & 31) << 21) | ((hd & 31) << 16) | (value & 0xFFFF));
 }
@@ -343,21 +343,21 @@ uint32_t rp_emit_known_value(rp_context *c, uint32_t dest, uint32_t value, uint3
         const uint32_t next_dest = *(uint8_t *)rp_memory(c, record + 18, 1);
         const uint32_t next_op = *(uint8_t *)rp_memory(c, record + 19, 1);
         uint8_t *next_source = rp_memory(c, record + 28, 1);
-        if (next_dest == dest && *next_source == dest && (next_op == 9 || next_op == 0xD)) {
-            value = next_op == 9 ? value + sign16(half(c, record + 24)) : value | half(c, record + 24);
+        if (next_dest == dest && *next_source == dest && (next_op == RP_OP_ADDIU || next_op == RP_OP_ORI)) {
+            value = next_op == RP_OP_ADDIU ? value + sign16(half(c, record + 24)) : value | half(c, record + 24);
             put_half(c, record + 20, 0);
         } else if ((next_op & 0xF8) == 0x20 && (next_op & 3) != 2) {
             if (next_dest == dest && *next_source == dest) deferred = true;
             else if ((half(c, record + 16) & 0x8000) && *(uint8_t *)rp_memory(c, record + 34, 1) == dest) {
                 const uint32_t after_op = *(uint8_t *)rp_memory(c, record + 35, 1);
-                if (after_op == 0xF && *next_source == dest) {
+                if (after_op == RP_OP_LUI && *next_source == dest) {
                     *next_source = (uint8_t)next_dest; dest = next_dest; deferred = true;
                 }
                 if ((after_op & 0xF8) == 0x20 && (after_op & 3) != 2) deferred = true;
             }
         }
     }
-    if (!deferred) out = rp_emit_immediate(c, 0x80, dest, 0, value, out);
+    if (!deferred) out = rp_emit_immediate(c, RP_EMIT_CONSTANT, dest, 0, value, out);
     rp_w32(c, c->gp + 0xB5C + dest * 4, value);
     rp_w32(c, c->gp + 0xB58, rp_u32(c, c->gp + 0xB58) | (UINT32_C(0x80000000) >> (dest & 31)));
     return out;
@@ -397,10 +397,10 @@ static uint32_t emit_known_alu(rp_context *c, uint32_t record, uint32_t out)
         if (a == 0 || b == 0) {
             uint32_t value;
             switch (op) {
-            case 0x61: value = a + b; break;
-            case 0x63: value = a - b; break;
-            case 0x64: value = a & b; break;
-            case 0x65: value = a | b; break;
+            case RP_OP_ADDU: value = a + b; break;
+            case RP_OP_SUBU: value = a - b; break;
+            case RP_OP_AND: value = a & b; break;
+            case RP_OP_OR: value = a | b; break;
             default: rp_block(c, "ALU_opcode_not_reconstructed", op);
             }
             return rp_emit_known_value(c, dest, value, out, record);
@@ -459,28 +459,28 @@ uint32_t rp_emit_exit_target(rp_context *c, uint32_t target, uint32_t out)
 /* +0x6914, selected original categories. Unsupported paths remain explicit
  * boundaries rather than silently emitting a different execution strategy.
  */
-uint32_t rp_emit_record(rp_context *c, uint32_t category, uint32_t record, uint32_t out, uint32_t cost)
+uint32_t rp_emit_record(rp_context *c, rp_pops_category category, uint32_t record, uint32_t out, uint32_t cost)
 {
     rp_function(c, 0x6914, "pops.emit_instruction_record_partial");
     cost += rp_u32(c, c->gp + 0xB44);
     if ((int32_t)cost < 2) cost = 2;
-    if (category == 0x13) return out;
-    if (category == 0x10) return rp_emit_memory_record(c, record, out);
-    if (category == 0xE) return emit_forward_jump(c, record, out, cost);
-    if (category == 0xD) return emit_known_alu(c, record, out);
-    if (category == 0xA) {
+    if (category == RP_CAT_ELIDED) return out;
+    if (category == RP_CAT_MEMORY) return rp_emit_memory_record(c, record, out);
+    if (category == RP_CAT_JUMP_DIRECT) return emit_forward_jump(c, record, out, cost);
+    if (category == RP_CAT_ALU) return emit_known_alu(c, record, out);
+    if (category == RP_CAT_WRITE_COP) {
         const uint8_t *r = rp_memory(c, record, 16);
         if (r[14] == 0x43) rp_block(c, "special_state_write_not_reconstructed", 0x6914);
         const uint8_t policy = *(uint8_t *)rp_module_memory(c, 0xD42FC + r[14], 1);
         return rp_emit_store_state(c, policy, r[13], (uint32_t)r[14] * 4, out);
     }
-    if (category == 5) {
+    if (category == RP_CAT_EXIT) {
         out = rp_emit_debit(c, (int32_t)cost, out);
         out = rp_emit_exit_target(c, rp_u32(c, c->gp + 0xB50) + ((record - 0x041B0000) >> 2), out);
         rp_w32(c, c->gp + 0xB44, 0);
         return out;
     }
-    if (category != 9) rp_block(c, "emitter_category_not_reconstructed", category);
+    if (category != RP_CAT_IMMEDIATE) rp_block(c, "emitter_category_not_reconstructed", category);
     const uint32_t src = *(uint8_t *)rp_memory(c, record + 12, 1);
     const uint32_t dest = *(uint8_t *)rp_memory(c, record + 2, 1);
     const uint32_t op = *(uint8_t *)rp_memory(c, record + 3, 1);
@@ -488,12 +488,12 @@ uint32_t rp_emit_record(rp_context *c, uint32_t category, uint32_t record, uint3
     if (!known(c, src)) return rp_emit_immediate(c, op, dest, src, immediate, out);
     uint32_t value = rp_u32(c, c->gp + 0xB5C + src * 4);
     switch (op) {
-    case 0xA: value = (int32_t)value < (int32_t)sign16(immediate); break;
-    case 0xB: value = value < sign16(immediate); break;
-    case 0xC: value &= immediate; break;
-    case 0xD: value |= immediate; break;
-    case 0xE: value ^= immediate; break;
-    case 0xF: value = immediate << 16; break;
+    case RP_OP_SLTI: value = (int32_t)value < (int32_t)sign16(immediate); break;
+    case RP_OP_SLTIU: value = value < sign16(immediate); break;
+    case RP_OP_ANDI: value &= immediate; break;
+    case RP_OP_ORI: value |= immediate; break;
+    case RP_OP_XORI: value ^= immediate; break;
+    case RP_OP_LUI: value = immediate << 16; break;
     default: value += sign16(immediate); break;
     }
     return rp_emit_known_value(c, dest, value, out, record);

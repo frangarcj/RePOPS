@@ -31,6 +31,9 @@
   no full-emulator or on-device validation has been performed yet.
 - Save completed, tested work in small semantic commits as it progresses.
   Stage explicit source paths only; never include firmware or bulk outputs.
+- Name recovered record categories and opcodes with numeric-valued enums in
+  src/native/pops_ir.h. Keep normalized opcodes, helper selectors and emitted
+  machine words distinct; names do not change the original record layout.
 - Prioritize moving the integrated native execution path forward. Use focused
   build/smoke checks; defer exhaustive hardening and extra test infrastructure.
 - Primary deliverable is the reconstructed POPS emulator. A CPU backend or

@@ -1,5 +1,6 @@
 #ifndef REPOPS_POPS_EMIT_H
 #define REPOPS_POPS_EMIT_H
+#include "pops_ir.h"
 #include "runtime.h"
 
 /* All cursors/words are guest numeric addresses and Allegrex instructions.
@@ -22,7 +23,7 @@ uint32_t rp_emit_immediate(rp_context *, uint32_t, uint32_t, uint32_t, uint32_t,
 uint32_t rp_emit_debit(rp_context *, int32_t, uint32_t);
 uint32_t rp_emit_load_state(rp_context *, uint32_t, uint32_t, uint32_t);
 uint32_t rp_emit_known_value(rp_context *, uint32_t, uint32_t, uint32_t, uint32_t);
-uint32_t rp_emit_record(rp_context *, uint32_t, uint32_t, uint32_t, uint32_t);
+uint32_t rp_emit_record(rp_context *, rp_pops_category, uint32_t, uint32_t, uint32_t);
 uint32_t rp_emit_spill_all(rp_context *, uint32_t);
 uint32_t rp_emit_argument(rp_context *, uint32_t, uint32_t, uint32_t);
 uint32_t rp_emit_result(rp_context *, uint32_t, uint32_t, uint32_t);

@@ -1,4 +1,5 @@
 #include "runtime.h"
+#include "pops_ir.h"
 
 #define RECORD_BASE UINT32_C(0x041B0000)
 
@@ -34,7 +35,7 @@ static bool cached_entry(rp_context *c, uint32_t pc)
 
 /* Reconstructed +0x05154. Keep the original 16-byte record format and its
  * in-place flags/recursive target discovery; no host backend is chosen here.
- * Type names are deliberately numeric until the emitter is fully recovered.
+ * Recovered enum names preserve every numeric field in the original records.
  */
 static void analyze(rp_context *c, uint32_t p, unsigned depth)
 {
@@ -60,58 +61,58 @@ static void analyze(rp_context *c, uint32_t p, unsigned depth)
         uint32_t op = instruction >> 26;
         uint32_t rs = (instruction >> 21) & 31, rt = (instruction >> 16) & 31;
         uint32_t rd = (instruction >> 11) & 31;
-        uint16_t kind = 0;
+        uint16_t kind = RP_CAT_EMPTY;
         uint32_t cost = 1;
         if (pc == (rp_u32(c, c->gp + 0x6F4) & UINT32_C(0xFFFFFFFE))) flags |= 0x1000;
-        if (op == 0) op = (instruction & 63) | 0x40;
+        if (op == RP_OP_SPECIAL) op = (instruction & 63) | 0x40;
 
         switch (op) {
-        case 1:
+        case RP_OP_REGIMM:
             if (rt & 0xE) goto unsupported;
             if (rt & 0x10) rp_w8(c, p + 2, 31);
             op = (rt & 1) ^ 3;
             rt = 0; op += 0xBE;
             break;
-        case 2: rs = 0; rt = 0; break;
-        case 3: rp_w8(c, p + 2, 31); rs = 0; rt = 0; break;
-        case 6: case 7: rt = 0; op += 0xBE; break;
-        case 4: case 5: op += 0xBE; break;
-        case 0xF: rs = 0; /* fall through */
-        case 8: op |= 1; /* fall through */
-        case 9: case 0xA: case 0xB: case 0xC: case 0xD: case 0xE:
-            kind = rt ? 9 : 0x13; rp_w8(c, p + 2, (uint8_t)rt); rt = 0; break;
-        case 0x10:
+        case RP_OP_J: rs = 0; rt = 0; break;
+        case RP_OP_JAL: rp_w8(c, p + 2, 31); rs = 0; rt = 0; break;
+        case RP_OP_RAW_BLEZ: case RP_OP_RAW_BGTZ: rt = 0; op += 0xBE; break;
+        case RP_OP_RAW_BEQ: case RP_OP_RAW_BNE: op += 0xBE; break;
+        case RP_OP_LUI: rs = 0; /* fall through */
+        case RP_OP_ADDI: op |= 1; /* fall through */
+        case RP_OP_ADDIU: case RP_OP_SLTI: case RP_OP_SLTIU: case RP_OP_ANDI: case RP_OP_ORI: case RP_OP_XORI:
+            kind = rt ? RP_CAT_IMMEDIATE : RP_CAT_ELIDED; rp_w8(c, p + 2, (uint8_t)rt); rt = 0; break;
+        case RP_OP_COP0:
             rp_w8(c, p + 14, (uint8_t)(rd + 0x40));
             if (rs == 4) {
-                kind = 10;
+                kind = RP_CAT_WRITE_COP;
                 if (rd == 12 && !(flags & 1) && ((pc & 0x7FFFFFFF) >> 29) != 0) {
-                    wh(c, p + 20, 5); flags_or(c, p + 16, 0x10);
+                    wh(c, p + 20, RP_CAT_EXIT); flags_or(c, p + 16, 0x10);
                 }
             } else if (rs == 0) {
-                kind = rt ? 6 : 0x13; rp_w8(c, p + 2, (uint8_t)rt); rt = 0;
+                kind = rt ? RP_CAT_READ_COP : RP_CAT_ELIDED; rp_w8(c, p + 2, (uint8_t)rt); rt = 0;
             } else if (rs == 0x10) {
-                kind = 7; rt = 0;
+                kind = RP_CAT_COP0_CONTROL; rt = 0;
             } else {
-                kind = 0x13; rt = 0; rp_w8(c, p + 2, 0);
+                kind = RP_CAT_ELIDED; rt = 0; rp_w8(c, p + 2, 0);
             }
             rs = 0;
             break;
-        case 0x12:
+        case RP_OP_COP2:
             cost = 3;
             if (rs == 0 || rs == 2) {
                 if (rs == 2) rd += 32;
-                kind = rt ? 6 : 0x13;
+                kind = rt ? RP_CAT_READ_COP : RP_CAT_ELIDED;
                 if (rt) flags |= 0x40;
                 rp_w8(c, p + 2, rt ? (uint8_t)rt : 0xFF);
                 rt = 0;
             } else if (rs == 4 || rs == 6) {
                 if (rs == 6) rd += 32;
-                kind = 10;
+                kind = RP_CAT_WRITE_COP;
             } else {
                 rt = 0;
                 if (rs & 0x10) {
                     cost = *(const uint8_t *)rp_module_memory(c, 0xD46C4 + (instruction & 63), 1);
-                    kind = 0x12;
+                    kind = RP_CAT_GTE;
                     if (cost != 1) {
                         flags |= 0x4000;
                         rp_w8(c, p + 2, 0xFF);
@@ -119,52 +120,52 @@ static void analyze(rp_context *c, uint32_t p, unsigned depth)
                         break;
                     }
                 }
-                rp_w8(c, p + 2, 0); kind = 0x13; cost = 1;
+                rp_w8(c, p + 2, 0); kind = RP_CAT_ELIDED; cost = 1;
             }
             rs = 0; rp_w8(c, p + 14, (uint8_t)rd);
             break;
-        case 0x20: case 0x21: case 0x22: case 0x23: case 0x24: case 0x25: case 0x26:
+        case RP_OP_LB: case RP_OP_LH: case RP_OP_LWL: case RP_OP_LW: case RP_OP_LBU: case RP_OP_LHU: case RP_OP_LWR:
             rp_w8(c, p + 2, (uint8_t)rt);
             if (rt) flags |= 0x40;
-            kind = 0x10; cost = 5; rt = 0;
+            kind = RP_CAT_MEMORY; cost = 5; rt = 0;
             break;
-        case 0x28: case 0x29: case 0x2A: case 0x2B: case 0x2E:
-            kind = 0x10;
+        case RP_OP_SB: case RP_OP_SH: case RP_OP_SWL: case RP_OP_SW: case RP_OP_SWR:
+            kind = RP_CAT_MEMORY;
             if (!(rp_u32(c, c->gp + 0x130) & 0x10000)) break;
             /* fall through */
-        case 0x30: case 0x38:
-            kind = 0x13; rs = 0; rt = 0; rp_w8(c, p + 2, 0);
+        case RP_OP_LWC0: case RP_OP_SWC0:
+            kind = RP_CAT_ELIDED; rs = 0; rt = 0; rp_w8(c, p + 2, 0);
             break;
-        case 0x32: case 0x3A:
+        case RP_OP_LWC2: case RP_OP_SWC2:
             rp_w8(c, p + 14, (uint8_t)rt); rt = 0;
-            kind = op == 0x32 ? 8 : 4; cost = kind;
+            kind = op == 0x32 ? RP_CAT_LOAD_COP_MEMORY : RP_CAT_STORE_COP_MEMORY; cost = kind;
             break;
-        case 0x40: case 0x42: case 0x43:
-            kind = rd ? 0x11 : 0x13; rp_w8(c, p + 2, (uint8_t)rd); break;
-        case 0x60: case 0x62: op |= 1; /* fall through */
-        case 0x44: case 0x46: case 0x47: case 0x61: case 0x63:
-        case 0x64: case 0x65: case 0x66: case 0x67: case 0x6A: case 0x6B:
-            kind = rd ? 0xD : 0x13; rp_w8(c, p + 2, (uint8_t)rd); break;
-        case 0x49: rp_w8(c, p + 2, (uint8_t)rd); /* fall through */
-        case 0x48:
+        case RP_OP_SLL: case RP_OP_SRL: case RP_OP_SRA:
+            kind = rd ? RP_CAT_SHIFT_IMMEDIATE : RP_CAT_ELIDED; rp_w8(c, p + 2, (uint8_t)rd); break;
+        case RP_OP_ADD: case RP_OP_SUB: op |= 1; /* fall through */
+        case RP_OP_SLLV: case RP_OP_SRLV: case RP_OP_SRAV: case RP_OP_ADDU: case RP_OP_SUBU:
+        case RP_OP_AND: case RP_OP_OR: case RP_OP_XOR: case RP_OP_NOR: case RP_OP_SLT: case RP_OP_SLTU:
+            kind = rd ? RP_CAT_ALU : RP_CAT_ELIDED; rp_w8(c, p + 2, (uint8_t)rd); break;
+        case RP_OP_JALR: rp_w8(c, p + 2, (uint8_t)rd); /* fall through */
+        case RP_OP_JR:
             if (h(c, p + 20) == 0) {
                 if (!(h(c, c->gp + 0xB40) & 2) && b(c, p + 2) != 0)
                     flags_or(c, p + 32, 8);
                 else flags_or(c, p + 16, 0x10);
             }
-            flags_or(c, p + 16, 1); kind = 1; rt = 0;
+            flags_or(c, p + 16, 1); kind = RP_CAT_JUMP_REGISTER; rt = 0;
             break;
-        case 0x4C: case 0x4D:
-            kind = 0xF; flags |= 0x10; rs = 0; rt = 0; break;
-        case 0x50: case 0x52:
-            kind = rd ? 2 : 0x13; rs = 0; rt = 0;
+        case RP_OP_SYSCALL: case RP_OP_BREAK:
+            kind = RP_CAT_EXCEPTION; flags |= 0x10; rs = 0; rt = 0; break;
+        case RP_OP_MFHI: case RP_OP_MFLO:
+            kind = rd ? RP_CAT_READ_HILO : RP_CAT_ELIDED; rs = 0; rt = 0;
             rp_w8(c, p + 2, (uint8_t)rd); break;
-        case 0x51: case 0x53: kind = 0xB; rt = 0; break;
-        case 0x58: case 0x59: kind = 3; cost = 12; break;
-        case 0x5A: case 0x5B: kind = 3; cost = 35; break;
+        case RP_OP_MTHI: case RP_OP_MTLO: kind = RP_CAT_WRITE_HILO; rt = 0; break;
+        case RP_OP_MULT: case RP_OP_MULTU: kind = RP_CAT_MULT_DIV; cost = 12; break;
+        case RP_OP_DIV: case RP_OP_DIVU: kind = RP_CAT_MULT_DIV; cost = 35; break;
         default:
 unsupported:
-            kind = pc == base_pc ? 0xF : 5;
+            kind = pc == base_pc ? RP_CAT_EXCEPTION : RP_CAT_EXIT;
             flags |= 0x10; rs = 0; rt = 0;
             break;
         }
@@ -182,26 +183,26 @@ unsupported:
                 pc + 4 + (uint32_t)immediate * 4;
             const bool conditional = op >= 0xC0 && ((op & 1) || rs != rt);
             if (conditional && cached_entry(c, pc + 8)) {
-                wh(c, p + 36, 5); flags_or(c, p + 32, 0x10);
+                wh(c, p + 36, RP_CAT_EXIT); flags_or(c, p + 32, 0x10);
             }
             rp_w32(c, p + 8, target);
             uint32_t recurse = 0;
             if (target == pc + 8 && b(c, p + 2) == 0) {
-                wh(c, p + 4, 0x13); rp_w8(c, p + 2, 0);
+                wh(c, p + 4, RP_CAT_ELIDED); rp_w8(c, p + 2, 0);
             } else if (h(c, p + 20) != 0 && conditional) {
-                wh(c, p + 4, 5); flags_or(c, p, 0x10);
+                wh(c, p + 4, RP_CAT_EXIT); flags_or(c, p, 0x10);
             } else {
                 if (!(h(c, c->gp + 0xB40) & 2) && b(c, p + 2))
                     flags_or(c, p + 32, 8);
                 else if (!conditional && !(h(c, p + 16) & 8))
                     flags_or(c, p + 16, 0x10);
-                wh(c, p + 4, conditional ? 0xC : 0xE);
+                wh(c, p + 4, conditional ? RP_CAT_BRANCH : RP_CAT_JUMP_DIRECT);
                 flags_or(c, p + 16, 1);
                 if (!(h(c, c->gp + 0xB40) & 8) && target >= base_pc && target < ceiling &&
                         !cached_entry(c, target)) {
                     const uint32_t destination = RECORD_BASE + (target - base_pc) * 4;
                     const uint16_t destination_flags = h(c, destination);
-                    if (!((destination_flags & 1) && h(c, destination - 12) == 0xC) &&
+                    if (!((destination_flags & 1) && h(c, destination - 12) == RP_CAT_BRANCH) &&
                             !(destination_flags & 0x10)) {
                         flags_or(c, p, 4);
                         if (destination_flags & 8) wh(c, destination, destination_flags & 0xFCFF);
@@ -217,7 +218,7 @@ unsupported:
         if (h(c, p) & 0x10) break;
         pc += 4; p += 16;
         if (pc >= limit || (((pc & 0x1FFFFFFF) >> 23) == 0 && cached_entry(c, pc))) {
-            if (!(h(c, p) & 1)) { wh(c, p + 4, 5); flags_or(c, p, 0x10); }
+            if (!(h(c, p) & 1)) { wh(c, p + 4, RP_CAT_EXIT); flags_or(c, p, 0x10); }
         }
         if (h(c, p + 4)) break;
     }
@@ -226,9 +227,9 @@ unsupported:
     if (p >= RECORD_BASE + 32) {
         uint32_t back = p - 32;
         for (;;) {
-            const uint16_t kind = h(c, back + 4);
-            if (kind == 0) break;
-            if (kind != 0x10 && kind != 0x13 && h(c, back + 10) != 0x27BD &&
+            const uint16_t kind = h(c, back + RP_CAT_STORE_COP_MEMORY);
+            if (kind == RP_CAT_EMPTY) break;
+            if (kind != RP_CAT_MEMORY && kind != RP_CAT_ELIDED && h(c, back + 10) != 0x27BD &&
                     h(c, back + 10) != 0x2402) break;
             flags_or(c, back, 0x80);
             if (back == RECORD_BASE) break;

@@ -9,7 +9,7 @@ all: native
 native: build/repops-native
 analyze: build/repops-analyze
 
-build/repops-analyze: src/native/runtime.c src/native/pops_analyze.c src/native/pops_compile.c src/native/pops_emit.c src/native/pops_emit_memory.c src/native/analyze_main.c src/native/runtime.h src/native/me_worker.h src/native/pops_emit.h
+build/repops-analyze: src/native/runtime.c src/native/pops_analyze.c src/native/pops_compile.c src/native/pops_emit.c src/native/pops_emit_memory.c src/native/analyze_main.c src/native/runtime.h src/native/me_worker.h src/native/pops_emit.h src/native/pops_ir.h
 	mkdir -p build
 	$(CC) -std=c11 -Wall -Wextra -Werror $(CFLAGS) src/native/runtime.c src/native/pops_analyze.c src/native/pops_compile.c src/native/pops_emit.c src/native/pops_emit_memory.c src/native/analyze_main.c -o $@
 
@@ -48,7 +48,7 @@ build/test_native_spu: src/native/runtime.c src/native/runtime.h src/native/pops
 test-native-spu: build/test_native_spu
 	./build/test_native_spu
 
-build/test_native_emit: src/native/runtime.c src/native/pops_emit.c src/native/pops_emit_memory.c src/native/pops_emit.h src/native/runtime.h tests/test_native_emit.c
+build/test_native_emit: src/native/runtime.c src/native/pops_emit.c src/native/pops_emit_memory.c src/native/pops_emit.h src/native/pops_ir.h src/native/runtime.h tests/test_native_emit.c
 	mkdir -p build
 	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_emit.c src/native/pops_emit_memory.c tests/test_native_emit.c -o $@
 

@@ -21,6 +21,12 @@ original cache-table/slow-target sequence.
 bytes, the 49,168-byte record buffer and the entire 16 KiB scratchpad.
 The existing emitter smoke test also passes with sanitizers.
 
+`pops_ir.h` now names record categories and normalized opcodes without changing
+their stored values. Separate enums describe category, opcode and helper-only
+selectors. The Python report reads these numeric declarations from the header
+and retains both names and values. `out/cpu_flow_enums_01/` repeats the same
+348-byte match after the naming refactor.
+
 This is still a selected-record probe, not the complete +0x58C0 controller.
 The controller must also assign output addresses to records, flush at joins,
 schedule delay slots and patch links. General ALU paths, conditional/backward

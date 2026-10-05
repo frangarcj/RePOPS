@@ -151,14 +151,14 @@ uint32_t rp_emit_fixed_memory(rp_context *c, uint32_t out, uint32_t op, uint32_t
     uint32_t host = guest & 0x7F;
     if (host == guest) {
         int32_t mapped = -1;
-        if (op == 0x2B) mapped = rp_emit_lookup_register(c, guest);
-        if (op == 0x2B && mapped < -1) {
+        if (op == RP_OP_SW) mapped = rp_emit_lookup_register(c, guest);
+        if (op == RP_OP_SW && mapped < -1) {
             const uint32_t last = rp_u32(c, out - 4);
             host = 0u - (uint32_t)mapped;
             if (rp_emit_previous_movable(c, out) &&
                     (last & 0xFFE0FFFF) == 0x44800000 - (uint32_t)mapped * 0x800)
                 host = (last >> 16) & 31;
-            else op = 0x39;
+            else op = RP_OP_SWC1;
         } else {
             const uint32_t keep = store || (op & 0x13) == 2;
             const uint32_t allocation = rp_emit_allocate(c, out, guest, 0, 2 * keep + load);
@@ -190,7 +190,7 @@ uint32_t rp_emit_fixed_memory(rp_context *c, uint32_t out, uint32_t op, uint32_t
         return emit(c, out, (op << 26) | 0x03800000 | ((host & 31) << 16) | (offset & 0xFFFF));
     }
     if (kind == 3 && !store) {
-        const uint32_t value = rp_pops_constant_read(c, address & 0x1FFFFFFF, op == 0x23 ? 2 : op & 7);
+        const uint32_t value = rp_pops_constant_read(c, address & 0x1FFFFFFF, op == RP_OP_LW ? 2 : op & 7);
         out = rp_emit_constant(c, out, host, value);
         rp_w32(c, c->gp + 0xB5C + guest * 4, value);
         rp_w32(c, c->gp + 0xB58, rp_u32(c, c->gp + 0xB58) | (UINT32_C(0x80000000) >> (guest & 31)));
@@ -265,7 +265,7 @@ uint32_t rp_emit_memory_record(rp_context *c, uint32_t record, uint32_t out)
                 if (half(c, target_record) & 1) {
                     target_record -= 16; put_half(c, record, flags - 1);
                 }
-                put_half(c, target_record + 4, 5);
+                put_half(c, target_record + 4, RP_CAT_EXIT);
                 put_half(c, target_record, half(c, target_record) | 0x10);
             }
         }

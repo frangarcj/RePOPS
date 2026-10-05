@@ -5,8 +5,10 @@ Optional comparison executes the original analysis routine, not the PS1 BIOS,
 in Unicorn. This is one focused sample, not full CPU/Allegrex validation.
 """
 import argparse
+from enum import IntEnum
 import hashlib
 import json
+import re
 import struct
 import subprocess
 from pathlib import Path
@@ -15,6 +17,13 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = '6a4aea3f731336916db97194c1a27983c18297c2dfcb1a1a328fd4ff8b09c8e0'
 IMAGE = '7e3fe7f349a9f45464708b564c67f1dd1c387fbe05ec898c8d82b60a074cac65'
 BASE = 0x041B0000
+
+# The C header is the numeric source of truth; do not maintain a second list.
+_enum_header = (ROOT / 'src/native/pops_ir.h').read_text()
+Category = IntEnum('Category', {name: int(value, 0) for name, value in
+    re.findall(r'RP_CAT_(\w+)\s*=\s*(0x[0-9A-Fa-f]+)', _enum_header)})
+Opcode = IntEnum('Opcode', {name: int(value, 0) for name, value in
+    re.findall(r'RP_OP_(\w+)\s*=\s*(0x[0-9A-Fa-f]+)', _enum_header)})
 
 
 def compare_original(image, directory, prepare=False, emission=False, memory_emission=False, flow_emission=False):
@@ -71,10 +80,12 @@ def compare_original(image, directory, prepare=False, emission=False, memory_emi
         high_water = struct.unpack('<I', machine.mem_read(0x10B4C, 4))[0]
         for record in range(BASE, high_water + 1, 16):
             category = struct.unpack('<H', machine.mem_read(record + 4, 2))[0]
-            if category == 0:
+            if category == Category.EMPTY:
                 continue
-            if (category not in (9, 0x13) and not (memory_emission and category == 0x10)
-                    and not (flow_emission and category in (0xE, 0xD, 0xA, 5))):
+            if (category not in (Category.IMMEDIATE, Category.ELIDED)
+                    and not (memory_emission and category == Category.MEMORY)
+                    and not (flow_emission and category in
+                             (Category.JUMP_DIRECT, Category.ALU, Category.WRITE_COP, Category.EXIT))):
                 break
             for reg, value in ((M.UC_MIPS_REG_A0, category), (M.UC_MIPS_REG_A1, record),
                                (M.UC_MIPS_REG_A2, cursor), (M.UC_MIPS_REG_A3, 0),
@@ -164,10 +175,12 @@ def main():
     rows = []
     for offset in range(0, len(blob), 16):
         flags, dest, opcode, kind, boundary_cost, payload, rs, rt, auxiliary, cost = struct.unpack_from('<HBBHHIBBBB', blob, offset)
-        if kind == 0:
+        if kind == Category.EMPTY:
             continue
         rows.append({'guest_pc': f'0x{0xBFC00000 + offset // 4:08X}', 'flags': f'0x{flags:04X}',
                      'destination': dest, 'opcode': f'0x{opcode:02X}', 'category': kind,
+                     'opcode_name': Opcode(opcode).name if opcode in Opcode._value2member_map_ else 'UNKNOWN',
+                     'category_name': Category(kind).name if kind in Category._value2member_map_ else 'UNKNOWN',
                      'payload': f'0x{payload:08X}', 'source1': rs, 'source2': rt,
                      'auxiliary': auxiliary, 'cost_field': cost, 'boundary_cost': boundary_cost})
     (args.out / 'records.json').write_text(json.dumps(rows, indent=2) + '\n')

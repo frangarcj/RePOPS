@@ -70,11 +70,11 @@ int main(int argc, char **argv)
              */
             for (uint32_t record = buffer; record <= rp_u32(c, c->gp + 0xB4C); record += 16) {
                 const uint8_t *r = rp_memory(c, record, 16);
-                const uint32_t category = r[4] | (uint32_t)r[5] << 8;
-                if (category == 0) continue;
-                if (category != 9 && category != 0x13 && !(memory_emission && category == 0x10) &&
-                        !(flow_emission && (category == 0xE || category == 0xD || category == 0xA || category == 5))) {
-                    rp_event(c, "probe_boundary", "next_emitter_category", record, category);
+                const rp_pops_category category = (rp_pops_category)(r[4] | (uint32_t)r[5] << 8);
+                if (category == RP_CAT_EMPTY) continue;
+                if (category != RP_CAT_IMMEDIATE && category != RP_CAT_ELIDED && !(memory_emission && category == RP_CAT_MEMORY) &&
+                        !(flow_emission && (category == RP_CAT_JUMP_DIRECT || category == RP_CAT_ALU || category == RP_CAT_WRITE_COP || category == RP_CAT_EXIT))) {
+                    rp_event(c, "probe_boundary", rp_pops_category_name(category), record, category);
                     break;
                 }
                 emission_cursor = rp_emit_record(c, category, record, emission_cursor, 0);

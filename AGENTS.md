@@ -1,5 +1,12 @@
 # RePops analysis conventions
 
+- Current goal: reconstruct the PSP POPS-related PRX functions in C and execute
+  that C natively in a macOS harness. Not a Vita port, not a new PSP PRX target,
+  and not merely running the original firmware inside another emulator.
+- JPCSP may supply reference semantics and a comparison oracle. Original PRX
+  files are analysis inputs. Measure progress by the native C execution path.
+- Preserve earlier hybrid-PRX/isolated-test experiments, but prioritize an
+  integrated executable over perfect byte matching or exhaustive leaf tests.
 - Target the hash recorded in README.md; do not silently mix firmware versions.
 - Keep firmware binaries, reference disassembly, Ghidra databases and bulk
   decompiler output out of Git. Do not publish them implicitly.

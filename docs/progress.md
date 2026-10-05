@@ -18,7 +18,9 @@ The follow-up flow probe reaches the end of the initial record region and
 matches 348 emitted bytes, including the CPU-status write and exit sequence.
 See `cpu_flow_emission.md`. The BIOS controller's actual record walk now also
 matches 352 emitted bytes, records and scratchpad through +0x64F7. The final
-link/cache-publication pass remains pending; see `cpu_block_controller.md`.
+BIOS link/cache-publication pass now matches too, including the 2.5 MiB cache
+tables and returned entry. SV.Q clearing uses an explicit reset-row adapter
+in the comparison. See `cpu_block_controller.md`; emitted code is not executed.
 See `cpu_analysis_records.md`. The integrated diagnostic still stops at
 +0x115B4, independently of this analysis probe.
 

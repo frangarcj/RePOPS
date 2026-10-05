@@ -75,7 +75,7 @@ pops_660,0x9940,timer_gate,partial,src/native/pops_graphics.c,disabled_timer_gat
 pops_660,0x11410,begin_frame,partial,src/native/pops_graphics.c,event_scheduled_before_display_refresh_blocker,diagnostic_only
 pops_660,0x115B4,display_refresh,pending,,none,not_integrated
 pops_660,0x5154,analyze_instruction_records,complete,src/native/pops_analyze.c,one_BIOS_analysis_records_and_scratch_match,isolated
-pops_660,0x58C0,compile_block,partial,src/native/pops_compile.c,BIOS_controller_records_code_scratch_match_before_final_link,isolated
+pops_660,0x58C0,compile_block,partial,src/native/pops_compile.c,initial_BIOS_compile_code_records_scratch_cache_return_match_vector_adapter,isolated
 pops_660,0x2950,lookup_register_location,complete,src/native/pops_emit.c,synthetic_mapping_smoke,isolated
 pops_660,0x2990,previous_instruction_movable,complete,src/native/pops_emit.c,instruction_review,isolated
 pops_660,0x29C4,emit_register_reload,complete,src/native/pops_emit.c,FPR_and_memory_smoke,isolated

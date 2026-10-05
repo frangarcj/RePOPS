@@ -1,6 +1,7 @@
 #include "runtime.h"
 #include "pops_ir.h"
 #include "pops_emit.h"
+#include <string.h>
 
 #define RECORD_BASE UINT32_C(0x041B0000)
 
@@ -245,4 +246,49 @@ uint32_t rp_pops_emit_block_records(rp_context *c, uint32_t out)
     rp_w32(c, c->gp + 0x740, out);
     rp_event(c, "milestone", "POPS_BIOS_record_walk_complete_before_linking", 0x64F8, out);
     return out;
+}
+
+/* +0x64F8..+0x6767 for the BIOS profile. Cache-maintenance instructions have
+ * no host analogue here: the published addresses still refer to Allegrex data.
+ */
+uint32_t rp_pops_publish_bios_block(rp_context *c, uint32_t pc, uint32_t entry, uint32_t out)
+{
+    const uint16_t mode = h(c, c->gp + 0xB40);
+    if (!(mode & 0x8000) || (mode & 2))
+        rp_block(c, "non_BIOS_link_profile_not_reconstructed", 0x64F8);
+    if (!c->vfpu_zero_ready)
+        rp_block(c, "compiler_vector_fill_source_not_initialized", 0x665C);
+    const uint32_t end = rp_u32(c, c->gp + 0xB4C) + 16;
+    const uint32_t base_pc = rp_u32(c, c->gp + 0xB50);
+    for (uint32_t record = RECORD_BASE; record < end; record += 16) {
+        const uint16_t flags = h(c, record);
+        if (flags & 2) {
+            const uint32_t patch = rp_u32(c, record + 12);
+            const uint32_t target_record = RECORD_BASE + (rp_u32(c, record + 8) - base_pc) * 4;
+            const uint32_t target = rp_u32(c, target_record + 4);
+            uint32_t instruction = rp_u32(c, patch);
+            if (instruction >> 27 == 1) {
+                instruction = (instruction & 0xFC000000) | ((target >> 2) & 0x3FFFFFF);
+                if (target == patch) instruction = 0;
+            } else {
+                instruction = (instruction & 0xFFFF0000) | (((target - patch - 4) >> 2) & 0xFFFF);
+            }
+            rp_w32(c, patch, instruction);
+        }
+        if ((flags & 0x18) == 8) {
+            const uint32_t target_pc = base_pc + ((record - RECORD_BASE) >> 2);
+            const uint32_t table = ((target_pc & 0x1FFFFFFF) >> 23) ? 0x09E00000 : 0x09C00000;
+            rp_w32(c, table + (target_pc & 0x1FFFFC), rp_u32(c, record + 4));
+        }
+        memcpy(rp_memory(c, record, 16), c->vfpu_reset_rows[3], 16);
+    }
+    memcpy(rp_memory(c, end, 16), c->vfpu_reset_rows[3], 16);
+    if (h(c, c->gp + 0xB42))
+        rp_w32(c, c->gp + 0x1B0, rp_u32(c, c->gp + 0x1B0) - ((end - RECORD_BASE) >> 4));
+    rp_w32(c, c->gp + 0x1D0, out);
+    const uint32_t table = ((pc & 0x1FFFFFFF) >> 23) ? 0x09E00000 : 0x09C00000;
+    rp_w32(c, table + (pc & 0x1FFFFC), entry);
+    if (pc == 0x80000080) rp_w32(c, c->gp + 0x1D4, entry);
+    rp_event(c, "milestone", "POPS_BIOS_block_published_not_host_executable", entry, out - entry);
+    return entry;
 }

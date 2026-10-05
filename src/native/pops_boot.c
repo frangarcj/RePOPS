@@ -41,18 +41,18 @@ uint32_t rp_pops_patch_syscalls(rp_context *c)
     uint32_t end=0x3D494, first=0;
     for (uint32_t tries=0;;++tries) {
         if (end<8 || tries>0x10000) rp_block(c,"syscall_tail_not_found",end);
-        uint32_t a=rp_u32(c,end-8),b=rp_u32(c,end-4);
+        uint32_t a=rp_module_u32(c,end-8),b=rp_module_u32(c,end-4);
         if ((a==0x03E00008 && (b&0xFC00003F)==0xC) || ((a&0xFC000000)==0x08000000 && b==0)) break;
         end-=4;
     }
-    while ((rp_u32(c,first+4)&0xFC00003F)!=0xC) {
+    while ((rp_module_u32(c,first+4)&0xFC00003F)!=0xC) {
         first+=4;
         if (first>=end) rp_block(c,"syscall_head_not_found",first);
     }
     const uint32_t size=end-first;
     if (!size) return 0;
     const uint32_t copy=rp_alloc(c,size);
-    memcpy(rp_memory(c,copy,size),rp_memory(c,first,size),size);
+    memcpy(rp_memory(c,copy,size),rp_module_memory(c,first,size),size);
     rp_w32(c,0x14D088,copy-first); rp_w32(c,0x14D084,first);
     uint32_t patched=0, immediate=0x34020000;
     for (uint32_t p=first;p<end;p+=8,immediate+=8) {
@@ -62,6 +62,32 @@ uint32_t rp_pops_patch_syscalls(rp_context *c)
     }
     rp_event(c,"milestone","native_syscall_bridge_prepared",first,patched);
     return 0;
+}
+
+/* +0x1B004 up to its first provider call. Do not follow Ghidra's spurious
+ * fallthrough after ExitVSH into the next routine. This first-disc path has
+ * no outstanding asynchronous read; a later busy case remains a real blocker.
+ */
+static uint32_t select_disc(rp_context *c)
+{
+    rp_function(c,0x1B004,"pops.select_disc_prefix");
+    rp_function(c,0x287C4,"pops.get_selected_disc");
+    uint32_t selected=rp_u32(c,0x163240);
+    uint8_t active=*(uint8_t *)rp_memory(c,c->gp+0x3E45,1);
+    if (active==selected) return 0;
+    uint8_t count=*(uint8_t *)rp_memory(c,c->gp+0x3E44,1);
+    if (selected>=count) exit_vsh(c,(int32_t)UINT32_C(0x80000004));
+    rp_function(c,0xDEFC,"pops.wait_pending_cd_io");
+    if (rp_u32(c,c->gp+0x3E14)!=UINT32_MAX)
+        rp_block(c,"cd_io_wait_not_implemented",0xDEFC);
+    for (uint32_t i=0;i<17;++i) rp_w32(c,c->gp+0x3D08+i*16,0x80000000);
+    rp_w32(c,c->gp+0x3E1C,UINT32_MAX);
+    uint32_t offset=rp_u32(c,c->gp+0x3E38)+rp_u32(c,c->gp+0x3E24+selected*4);
+    if (rp_provider_read_at(c,0x09E80000,offset,0x400)!=0x400) return UINT32_MAX;
+    if (memcmp(rp_memory(c,0x09E80000,12),"PSISOIMG0000",12)!=0) return UINT32_MAX;
+    rp_event(c,"milestone","selected_disc_header_loaded",0x09E80000,selected);
+    rp_event(c,"unimplemented_provider","sceMeAudio_14447BA0",0x14447BA0,0x09E80000);
+    rp_block(c,"provider_service_not_reconstructed",0x1B004);
 }
 
 /* Reviewed prefix of +0x1B2F0 and +0x1B56C. The linked-list initialization is
@@ -89,7 +115,7 @@ uint32_t rp_pops_disc_init(rp_context *c)
     int32_t fd=rp_provider_open_image(c,c->gp+0x3E38);
     rp_w32(c,c->gp+0x3E40,(uint32_t)fd);
     if (fd<0) return (uint32_t)fd;
-    rp_function(c,0x36CF4,"pops.pbp_metadata_prefix");
+    rp_function(c,0x36CF4,"pops.pbp_metadata");
     rp_w32(c,0x4514F4,0);
     uint32_t header=rp_alloc(c,40);
     if (rp_provider_read_at(c,header,0,40)!=40 || rp_u32(c,header)!=0x50425000) return 0xFFFFFFFF;
@@ -99,14 +125,26 @@ uint32_t rp_pops_disc_init(rp_context *c)
     rp_w32(c,0x4514F4,length); rp_w32(c,0x450EE8,buffer);
     if (rp_provider_read_at(c,buffer,begin,length)!=(int32_t)length) return 0xFFFFFFFF;
     rp_event(c,"milestone","pbp_metadata_read",buffer,length);
-    rp_block(c,"function_not_reconstructed",0x39314);
+    uint32_t width=rp_pops_icon_info(c,buffer,length);
+    rp_pops_icon_tag(c,width);
+    uint32_t disc_header=rp_alloc(c,0x400);
+    if (rp_provider_read_at(c,disc_header,rp_u32(c,c->gp+0x3E38),0x400)!=0x400)
+        return UINT32_C(0x80000004);
+    const void *magic=rp_memory(c,disc_header,16);
+    if (memcmp(magic,"PSTITLEIMG000000",16)==0)
+        rp_block(c,"multidisc_path_not_reconstructed",0x1B2F0);
+    if (memcmp(magic,"PSISOIMG0000",12)!=0) return UINT32_MAX;
+    rp_event(c,"milestone","single_disc_PSISOIMG_header",disc_header,0x400);
+    uint32_t selected_result=select_disc(c);
+    if (selected_result&UINT32_C(0x80000000)) return selected_result;
+    rp_block(c,"function_not_reconstructed",0x3764C);
 }
 
 void rp_pops_main_thread(rp_context *c)
 {
     rp_function(c,0x16080,"pops.popsmain_prefix");
-    char *build=rp_memory(c,c->gp+0x3FC0,128);
-    snprintf(build,128,"branches/pops-660/pops/build(r%d)",0x321F);
+    char *build=rp_memory(c,c->gp+0x3FC0,64);
+    snprintf(build,64,"branches/pops-660/pops/build(r%d)",0x321F);
     rp_w8(c,c->gp+0x3F00,255);
     /* Headless single-threaded environment: store callback handles; there are
      * no synthetic power/hotplug events. Device behavior is not reproduced.

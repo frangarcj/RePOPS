@@ -19,6 +19,14 @@ _Noreturn void rp_block(rp_context *c, const char *kind, uint32_t address)
 
 void *rp_memory(rp_context *c, uint32_t address, size_t length)
 {
+    /* GP=0x10000 addresses PSP's 16-KiB scratchpad, not module-relative code.
+     * The analysis image also has offsets in this numerical range; code
+     * introspection must explicitly use rp_module_memory instead.
+     */
+    if (address >= 0x10000 && address < 0x14000) {
+        if (length > 0x14000 - address) rp_block(c,"scratchpad_access_overrun",address);
+        return c->scratchpad + (address - 0x10000);
+    }
     for (unsigned i = 0; i < 3; ++i) {
         rp_region *r = &c->regions[i];
         uint64_t offset = (uint64_t)address - r->base;
@@ -26,6 +34,19 @@ void *rp_memory(rp_context *c, uint32_t address, size_t length)
             return r->bytes + offset;
     }
     rp_block(c, "unmapped_guest_memory", address);
+}
+
+void *rp_module_memory(rp_context *c, uint32_t offset, size_t length)
+{
+    if (offset > c->regions[0].size || length > c->regions[0].size - offset)
+        rp_block(c,"module_relative_access_overrun",offset);
+    return c->regions[0].bytes + offset;
+}
+
+uint32_t rp_module_u32(rp_context *c, uint32_t offset)
+{
+    const uint8_t *p=rp_module_memory(c,offset,4);
+    return (uint32_t)p[0] | (uint32_t)p[1]<<8 | (uint32_t)p[2]<<16 | (uint32_t)p[3]<<24;
 }
 
 uint32_t rp_u32(rp_context *c, uint32_t address)

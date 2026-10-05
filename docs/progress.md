@@ -7,10 +7,17 @@ decompilation, or a replacement PSP PRX. See `native_harness.md` and run
 `./run_ffvi.sh` from the repository root.
 
 The native path now opens the real FFVI PBP, parses its 80-by-80 PNG icon,
-selects disc zero and reads its PSISOIMG header. It stops explicitly at the
-unreconstructed POPSMAN service `sceMeAudio_14447BA0` from POPS +0x1B004.
-There is no game CPU execution, framebuffer or audio output yet. The 12
-instrumented function entries include partial reconstructions.
+selects disc zero, loads the 736,384-byte extended header and validates
+`SCES03828`. It stops explicitly at per-game configuration +0x24770.
+There is no game CPU execution, framebuffer or audio output yet. The 15
+instrumented function entries include partial reconstructions. See
+`native_disc_header.md` for format restrictions and the current traces.
+
+Media Engine reconstruction is now explicitly in AGENTS.md and has a separate
+workstream in `media_engine_reverse.md`, including the sample producer, ME
+loop and shared-memory protocol. The nine-window audit does not mean the
+mixer has been implemented. `me_wrapper.prx` is a candidate dependency whose
+reachability still needs to be established.
 
 The complete archived 6.60 firmware corpus was extracted: all 288 PRX parse.
 The 114-module static dependency superset is not an actual load order; it
@@ -20,13 +27,15 @@ reference. Keep the old experiments and their results scoped to their hashes.
 
 Validated in this continuation:
 
-- Native C executable is Mach-O arm64; FFVI reaches the selected-disc provider
-  boundary under ASan/UBSan, without modifying the game or firmware.
+- Native C executable is Mach-O arm64; FFVI reaches +0x24770 under ASan/UBSan,
+  without modifying the game or firmware. The new header/ID C tests also pass
+  with sanitizers; these are not instruction-equivalence tests.
 - A scratchpad/module-address collision was fixed and regression-tested.
 - Fresh Ghidra data export reproduces SHA-256
   `7e3fe7f349a9f45464708b564c67f1dd1c387fbe05ec898c8d82b60a074cac65`.
-- 30 Python tests are collected: 29 pass in the default environment and the
-  optional Unicorn test is skipped there; all 30 pass in the verifier venv.
+- 41 Python tests are collected: 40 pass in the default environment and one
+  optional Unicorn test is skipped. The earlier 30-test suite also passed in
+  the verifier venv; the expanded suite was not rerun there in this pass.
 - Earlier ME startup/control comparisons passed 6,488 scripted-device cases,
   including registration integration, and four deliberate negative controls
   were rejected. These are not actual PSP hardware tests.

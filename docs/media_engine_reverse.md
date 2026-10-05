@@ -101,3 +101,10 @@ The audit reads local hash-pinned inputs and emits only JSON measurements in
 a new output directory. It neither executes the firmware nor dumps its bytes
 into Git. Further Ghidra work must use read-only processing or a fresh project,
 as required by AGENTS.md.
+
+The first run is `out/me_scope.eDtZlj/audit/audit.json`: all seven selected
+provider windows match the older ARK reference at the raw-byte level. The
+6,656-byte consumer callback candidate window contains 83 words not decoded
+by generic MIPS Capstone. This is not proof of invalid code or exactly 83
+unsupported Allegrex instructions; code/data separation and the Allegrex
+language still need to be consulted. Neither number measures reverse progress.

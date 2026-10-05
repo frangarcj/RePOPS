@@ -23,11 +23,13 @@ It uses `input/games/final_fantasy_vi/EBOOT.PBP`, falling back to the explicit
 Downloads filename above. The original game and firmware are never modified.
 
 **FFVI does not run yet.** The tested path reaches module startup, syscall-stub
-preparation, the real PBP icon (80 by 80), and the selected PSISOIMG disc header.
-It stops explicitly at the unreconstructed POPSMAN service
-`sceMeAudio_14447BA0`, called from POPS `+0x1B004`. The current trace records
-12 native function entries, several of which execute only a reviewed prefix.
-This is not a count of 12 completely reconstructed functions.
+preparation, the real PBP icon (80 by 80), the 736,384-byte extended PSISOIMG
+header and normalized ID `SCES03828`. It stops explicitly at the per-game
+configuration routine `+0x24770`. The current trace records 15 native function
+entries, several of which execute only a reviewed prefix. This is not a count
+of 15 completely reconstructed functions. The new provider path is an explicit
+single-disc, unprotected-format adapter; protected-file services are not
+silently treated as successful. See [the header notes](docs/native_disc_header.md).
 
 `trace.jsonl` records milestones and the precise blocker; `run.json` records
 provenance and `game_executed: false`. The wrapper exits zero when it captures

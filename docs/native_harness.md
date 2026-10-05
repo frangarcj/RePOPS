@@ -23,12 +23,17 @@ Observed with the supplied Final Fantasy VI PBP:
 8. The single-disc PSISOIMG header is read at file offset 65,536.
 9. +0x1B004, +0x287C4 and +0xDEFC select disc zero and load its header into
    guest address 0x09E80000.
-10. Execution stops at `sceMeAudio_14447BA0`, which is not yet reconstructed
-    in the integrated native runtime.
+10. The explicit unprotected-format adapter for `sceMeAudio_14447BA0` reads
+    another 735,360 bytes and reconstructs the observed single-disc field
+    updates. It does not implement the protected-file/BBMac path.
+11. +0x28730 preserves the provider result. +0x1B61C and +0x1AF90 normalize
+    and validate `SCES03828`.
+12. Execution stops at the per-game configuration routine +0x24770. The active
+    disc byte is not updated prematurely to pretend that configuration passed.
 
 The successful diagnostic path is recorded in
-`out/ffvi_run.YsyaFW/result/`. It reports 12 instrumented function entries and
-12 logged host calls. These are not complete-function coverage, CPU coverage,
+`out/ffvi_run.c93OG9/result/`. It reports 15 instrumented function entries and
+14 logged host calls. These are not complete-function coverage, CPU coverage,
 or percentages of the overall project. Several C functions are explicit
 prefixes ending at an unreconstructed callee.
 
@@ -67,19 +72,24 @@ disc-offset and PSAR loads. No disc offset was manually forced to pass the run.
   environment. Their asynchronous behavior is not implemented.
 - Import slots are metadata for the reconstructed self-patcher. Preparing 159
   slots does not mean 159 services have been implemented.
-- The file path/PSAR offset are supplied by a host PBP adapter. POPSMAN's full
-  startup, UID object flags and protected-file semantics are not reconstructed.
+- The file path/PSAR offset and DATA.PSP first word are supplied by a bounded
+  host PBP adapter. POPSMAN's full startup, UID object flags and protected-file
+  semantics are not reconstructed. The extended-header adapter admits only a
+  bare-ELF DATA.PSP and a structurally supported plain single-disc header;
+  those checks are format admission, not authentication.
+- Reading BC100040 for the provider's ME bootstrap mode is explicitly deferred,
+  not replaced with a made-up hardware value. See `native_disc_header.md`.
 - `scePaf`'s observed libpng metadata path uses the installed native libpng,
   not the old PSP libpng ABI. Pixel decode is absent. Native cleanup differs
   from the apparent original early-return allocation lifetime.
 - Unsupported paths stop through a recorded blocker; they do not return a
   fabricated success result.
 
-The older POPSMAN listing places the next service at +0x050C and its reader
-at +0x0D3C. Their raw code ranges (408 and 368 bytes) match the newly extracted
-6.60 provider, but that does not establish identical module state or relocations.
-The service calls a protected-file reader and can perform BBMac verification;
-the native runtime must implement or explicitly separate those semantics.
+The header service is at provider +0x050C and its reader at +0x0D3C. A fresh
+Ghidra import of the corpus provider, followed by a seeded read-only pass,
+confirms the field-update path used for the reconstruction. The supported
+native path explicitly separates plain file I/O from the original protected
+reader and BBMac branch. The earlier ARK provider remains a distinct input.
 
 ## Firmware corpus
 

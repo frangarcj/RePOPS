@@ -59,15 +59,19 @@ reconstructed POPS compiler. Original PRX pages remain nonexecutable; known
 helper PCs stop the engine and return to reconstructed C. We are not building
 a separate optimized ARM64 backend. The former `generated_code.c` experiment
 is retained but no longer linked into the native executable.
-The latest run reaches guest BIOS PC `0xBFC0039C` after 731 instruction-hook
-observations and five compiled-entry transfers. Compiling the next region
-stops at the dynamic-memory-base emitter `+0x3A90`. These instruction/transfer
-counts do not measure original-function coverage. FFVI has not booted.
+The diagnostic now dispatches the first video event, resumes the BIOS RAM
+clear, writes SPU registers through C and executes calls/returns in the
+`BFC06EC4` region. The latest run stops at the byte-read helper `+0x1A90`
+after 29,339 instruction-hook observations and 11 compiled-entry transfers.
+These counts do not measure original-function coverage. FFVI has not booted.
 
 See [the current Unicorn integration](docs/unicorn_execution.md),
 [the earlier generated-execution experiment](docs/generated_code_execution.md),
 [conditional flow](docs/cpu_conditional_flow.md), and
-[state writes](docs/cpu_state_writes.md). Active-voice mixing, the renderer,
+[state writes](docs/cpu_state_writes.md),
+[guest events](docs/guest_event_dispatch.md),
+[SPU register writes](docs/spu_register_writer.md), and
+[stack accesses/returns](docs/cpu_stack_and_returns.md). Active-voice mixing, the renderer,
 complete CPU behavior and PSP UI remain incomplete.
 
 Requirements: a C11 compiler, Python dependencies from `requirements.txt`,

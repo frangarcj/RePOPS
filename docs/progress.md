@@ -1,6 +1,29 @@
 # RePops progress
 
-## Current executor: Unicorn instead of a handwritten interpreter
+## Current: guest events, SPU writes and BIOS function calls
+
+The resumed pass starts at bf8ac95 and adds three executable increments:
+
+- 391388c: +0x953C guest event dispatch and the initial video-phase callback.
+  The cycle handoff returns to the BIOS rather than skipping expired events.
+- 7603384: +0x7F00 SPU register writes, FIFO/key/dirty state and event requests.
+  The ME shares their backing memory; the active mixer is still incomplete.
+- 3dda1ac: cached stack accesses, internal links, constant branches and
+  indirect returns in the original POPS compilation path.
+
+`out/ffvi_run.kujVtA/result/` contains the integrated continuation. It reaches
+the byte-read helper +0x1A90 after 29,339 generated-code hook observations and
+11 compiled-entry transfers, including the BFC06EC4/01A60/03990 call chain.
+The last saved guest block PC is BFC06ED4, not a per-instruction trace.
+The normal startup still requires the PSP UI at +0x28DF8. There is no FFVI
+gameplay, rendered framebuffer or active-voice audio.
+
+Focused scheduler, SPU writer, disabled-SPU, emitter and Unicorn-cache checks
+pass. These are contract/smoke tests plus a host run, not an assertion of
+full firmware equivalence. See `guest_event_dispatch.md`,
+`spu_register_writer.md` and `cpu_stack_and_returns.md`.
+
+## Earlier executor change: Unicorn instead of a handwritten interpreter
 
 The native build now links Unicorn 2.1.4 through its C API. The reconstructed
 POPS compiler still emits its own cache, while the existing MIPS engine runs

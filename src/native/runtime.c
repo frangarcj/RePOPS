@@ -104,8 +104,31 @@ int32_t rp_provider_open_image(rp_context *c, uint32_t psar_output)
     if (fread(header, 1, sizeof(header), c->disc) != sizeof(header) ||
         memcmp(header, "\0PBP", 4) != 0)
         rp_block(c, "input_is_not_a_pbp", 0x1B56C);
+    if (fseek(c->disc, 0, SEEK_END) != 0)
+        rp_block(c, "pbp_size_query_failed", 0x1B56C);
+    const long file_size = ftell(c->disc);
+    if (file_size < 40) rp_block(c, "truncated_pbp", 0x1B56C);
+    c->disc_bytes = (uint64_t)file_size;
+    uint32_t previous = 40;
+    for (unsigned i = 0; i < 8; ++i) {
+        const uint8_t *p = header + 8 + i * 4;
+        const uint32_t offset = (uint32_t)p[0] | (uint32_t)p[1] << 8 |
+                                (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+        if (offset < previous || offset > c->disc_bytes)
+            rp_block(c, "invalid_pbp_component_offsets", 0x1B56C);
+        previous = offset;
+    }
     c->psar_offset = (uint32_t)header[36] | (uint32_t)header[37] << 8 |
                      (uint32_t)header[38] << 16 | (uint32_t)header[39] << 24;
+    const uint32_t psp_offset = (uint32_t)header[32] | (uint32_t)header[33] << 8 |
+                                (uint32_t)header[34] << 16 | (uint32_t)header[35] << 24;
+    uint8_t tag[4];
+    if (c->psar_offset - psp_offset < 4 ||
+        fseek(c->disc, (long)psp_offset, SEEK_SET) != 0 || fread(tag, 1, 4, c->disc) != 4)
+        rp_block(c, "truncated_data_psp_tag", 0x1B56C);
+    c->data_psp_word = (uint32_t)tag[0] | (uint32_t)tag[1] << 8 |
+                       (uint32_t)tag[2] << 16 | (uint32_t)tag[3] << 24;
+    c->disc_header.valid = 0;
     rp_w32(c, psar_output, c->psar_offset);
     rewind(c->disc);
     rp_event(c, "milestone", "opened_local_pbp", 0x1B56C, c->psar_offset);

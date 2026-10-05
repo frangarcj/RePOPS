@@ -64,7 +64,7 @@ uint32_t rp_pops_patch_syscalls(rp_context *c)
     return 0;
 }
 
-/* +0x1B004 up to its first provider call. Do not follow Ghidra's spurious
+/* +0x1B004 through header loading and disc-ID validation. Do not follow Ghidra's spurious
  * fallthrough after ExitVSH into the next routine. This first-disc path has
  * no outstanding asynchronous read; a later busy case remains a real blocker.
  */
@@ -86,8 +86,16 @@ static uint32_t select_disc(rp_context *c)
     if (rp_provider_read_at(c,0x09E80000,offset,0x400)!=0x400) return UINT32_MAX;
     if (memcmp(rp_memory(c,0x09E80000,12),"PSISOIMG0000",12)!=0) return UINT32_MAX;
     rp_event(c,"milestone","selected_disc_header_loaded",0x09E80000,selected);
-    rp_event(c,"unimplemented_provider","sceMeAudio_14447BA0",0x14447BA0,0x09E80000);
-    rp_block(c,"provider_service_not_reconstructed",0x1B004);
+    uint32_t result = rp_provider_plain_disc_header(c, 0x09E80000, selected);
+    result = rp_pops_remember_provider_result(c, result);
+    if (result & UINT32_C(0x80000000)) return UINT32_MAX;
+    const uint32_t id = rp_pops_normalize_disc_id(c, 0x09E80400, 0x20);
+    if (rp_pops_check_disc_id(c, id) != 0) return UINT32_MAX;
+    rp_event(c, "milestone", "disc_identifier_validated", id, rp_u32(c, id));
+    /* The next call consumes ID, header versions and config data. Do not mark
+     * the disc active before this unreconstructed call has actually succeeded.
+     */
+    rp_block(c, "function_not_reconstructed", 0x24770);
 }
 
 /* Reviewed prefix of +0x1B2F0 and +0x1B56C. The linked-list initialization is

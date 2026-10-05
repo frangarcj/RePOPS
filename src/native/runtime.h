@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <setjmp.h>
+#include "me_worker.h"
 
 #define RP_REGION_COUNT 4
 typedef struct rp_region { uint32_t base, size; uint8_t *bytes; } rp_region;
@@ -24,6 +25,8 @@ typedef struct rp_context {
     uint32_t cd_thread_entry, cd_event_bits;
     uint32_t mc_thread_entry, mc_semaphore_count;
     uint32_t me_callback, me_request, me_ack, me_value;
+    uint32_t me_stack_hi, me_stack_lo, me_output_words, me_last_output;
+    rp_me_worker me_worker;
     uint32_t vfpu_s330_bits;
     float vfpu_reset_rows[4][4];
     int diagnostic_skip_ui, vfpu_zero_ready;
@@ -70,4 +73,5 @@ void rp_pops_finish_disc_boot(rp_context *);
 uint32_t rp_pops_mc_init(rp_context *);
 uint32_t rp_pops_controller_init(rp_context *);
 void rp_pops_initialize_core(rp_context *);
+void rp_pops_start_me(rp_context *);
 #endif

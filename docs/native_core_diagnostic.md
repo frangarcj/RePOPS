@@ -21,6 +21,11 @@ For that path the original returns without waiting, so the host need not invent
 an ACK. The native codec and clock service boundaries remain headless adapters;
 this does not constitute sound output or the ME worker's live integration.
 
+Follow-up: the diagnostic now reaches the registered ME worker through an
+explicit native output adapter. `out/ffvi_run.M0dYHv/result/` stops at the
+unimplemented sample callback at POPS offset zero, with ACK still zero.
+See `native_me_worker.md` for the startup/output adaptations.
+
 The first run is `out/ffvi_run.QcgrY1/result/`, stopping at +0x1A494 after
 51 instrumented calls (including repeated calls), not 51 complete functions.
 The normal-path regression `out/ffvi_run.qtndeA/result/` still stops at +0x28DF8.

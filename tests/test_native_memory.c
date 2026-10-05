@@ -24,6 +24,12 @@ int main(void)
         assert(!"expected bounds stop");
     }
     assert(strcmp(c->stop_kind,"scratchpad_access_overrun")==0);
+    c->regions[2]=(rp_region){0x09F40000,0x1000,calloc(1,0x1000)};
+    assert(c->regions[2].bytes);
+    rp_w32(c,0x49F40294,0x12345678);
+    assert(rp_u32(c,0x09F40294)==0x12345678);
+    assert(rp_memory(c,0x49F40294,4)==rp_memory(c,0x09F40294,4));
+    free(c->regions[2].bytes);
     fclose(c->trace); free(c->regions[0].bytes); free(c);
     puts("Native memory: scratchpad/module separation and bounds passed.");
     return 0;

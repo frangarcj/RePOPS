@@ -19,6 +19,10 @@ _Noreturn void rp_block(rp_context *c, const char *kind, uint32_t address)
 
 void *rp_memory(rp_context *c, uint32_t address, size_t length)
 {
+    /* One native backing store for the cached/uncached RAM aliases used by
+     * POPS and its ME callback. This is not PSP cache-coherency emulation.
+     */
+    if (address >= 0x48000000 && address < 0x4A000000) address -= 0x40000000;
     /* GP=0x10000 addresses PSP's 16-KiB scratchpad, not module-relative code.
      * The analysis image also has offsets in this numerical range; code
      * introspection must explicitly use rp_module_memory instead.

@@ -44,8 +44,9 @@ REPOPS_DIAGNOSTIC_SKIP_UI=1 ./run_ffvi.sh
 ```
 
 This is an explicit [diagnostic bypass](docs/native_core_diagnostic.md), not a
-reconstructed menu or proven startup state. It currently prepares reset state
-and device-handler tables, then stops at `+0x1A494`.
+reconstructed menu or proven startup state. It currently prepares device and
+SPU state, starts the native ME worker, and stops at the unimplemented POPS
+sample callback (module offset zero).
 
 Requirements: a C11 compiler, Python dependencies from `requirements.txt`,
 `pkg-config`, `libpng`, and Ghidra with the Allegrex extension for initial data

@@ -2,13 +2,13 @@ CC ?= cc
 CFLAGS ?= -O2 -g
 PNG_CFLAGS = $(shell pkg-config --cflags libpng)
 PNG_LIBS = $(shell pkg-config --libs libpng)
-NATIVE_SRC = src/bootstrap.c src/me_startup.c src/native/runtime.c src/native/pops_boot.c src/native/pops_image.c src/native/pops_disc.c src/native/pops_config.c src/native/pops_metadata.c src/native/pops_reset.c src/native/main.c
+NATIVE_SRC = src/bootstrap.c src/me_startup.c src/me_registration.c src/native/runtime.c src/native/pops_boot.c src/native/pops_image.c src/native/pops_disc.c src/native/pops_config.c src/native/pops_metadata.c src/native/pops_reset.c src/native/me_worker.c src/native/pops_me.c src/native/main.c
 
 .PHONY: all native test test-native-disc test-native-config test-native-me clean-help
 all: native
 native: build/repops-native
 
-build/repops-native: $(NATIVE_SRC) src/native/runtime.h src/bootstrap.h
+build/repops-native: $(NATIVE_SRC) src/native/runtime.h src/bootstrap.h src/me_startup.h src/me_registration.h src/native/me_worker.h
 	mkdir -p build
 	$(CC) -std=c11 -Wall -Wextra -Werror $(CFLAGS) $(PNG_CFLAGS) $(NATIVE_SRC) $(PNG_LIBS) -o $@
 

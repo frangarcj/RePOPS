@@ -21,6 +21,7 @@ typedef struct rp_context {
     const char *disc_path;
     uint32_t gp, heap_next, next_id, thread_entry, psar_offset;
     uint32_t data_psp_word;
+    uint32_t cd_thread_entry, cd_event_bits;
     uint64_t disc_bytes;
     rp_disc_header_state disc_header;
     uint32_t functions, services, imports, last_function;
@@ -56,4 +57,9 @@ uint32_t rp_pops_patch_syscalls(rp_context *);
 uint32_t rp_pops_disc_init(rp_context *);
 uint32_t rp_pops_icon_info(rp_context *, uint32_t, uint32_t);
 void rp_pops_icon_tag(rp_context *, uint32_t);
+void rp_pops_savedata_metadata(rp_context *, uint32_t, uint32_t);
+uint32_t rp_pops_halfword_length(rp_context *, uint32_t, int32_t);
+void rp_pops_optional_metadata(rp_context *, uint32_t, uint32_t, uint32_t);
+uint32_t rp_pops_optional_auxiliary(rp_context *, uint32_t);
+void rp_pops_finish_disc_boot(rp_context *);
 #endif

@@ -27,9 +27,10 @@ popsman_ark_660,0x3514,ME_control,complete,src/me_startup.c,binary_comparison_sc
 pops_660,0x24770,per_game_configuration,partial,src/native/pops_config.c,normalized_ID_domain_synthetic_and_host_run,integrated
 pops_660,0x1B6EC,configuration_postprocess,complete,src/native/pops_config.c,synthetic_contract_and_instruction_review,integrated
 pops_660,0xADE8,bcd_to_sector,complete,src/native/pops_config.c,synthetic_contract_and_instruction_review,integrated
-pops_660,0x3764C,savedata_metadata,pending,,none,not_integrated
-pops_660,0x24CC8,optional_header_metadata,pending,,none,not_integrated
-pops_660,0x1C590,optional_auxiliary_data,pending,,none,not_integrated
+pops_660,0x3764C,savedata_metadata,partial,src/native/pops_metadata.c,no_savedata_list_path_host_run,integrated
+pops_660,0x24CC8,optional_header_metadata,partial,src/native/pops_metadata.c,in_header_paths_absent_path_host_run,integrated
+pops_660,0x24CA0,halfword_length,complete,src/native/pops_metadata.c,instruction_review_not_yet_runtime_exercised,integrated
+pops_660,0x1C590,optional_auxiliary_data,partial,src/native/pops_metadata.c,absent_payload_path_host_run,integrated
 pops_660,0x28DF8,startup_UI_orchestration,pending,,none,not_integrated
 pops_660,0x1A950,post_menu_initialization,pending,,none,not_integrated
 pops_660,0x1A57C,additional_initialization,pending,,none,not_integrated

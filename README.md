@@ -24,10 +24,11 @@ Downloads filename above. The original game and firmware are never modified.
 
 **FFVI does not run yet.** The tested path reaches module startup, syscall-stub
 preparation, the real PBP icon (80 by 80), the 736,384-byte extended PSISOIMG
-header and normalized ID `SCES03828`. It stops explicitly at the per-game
-configuration routine `+0x24770`. The current trace records 15 native function
-entries, several of which execute only a reviewed prefix. This is not a count
-of 15 completely reconstructed functions. The new provider path is an explicit
+header and normalized ID `SCES03828`. It applies the real game-configuration
+row, prepares 7,141 disc-block entries and savedata metadata, then stops at
+startup UI `+0x28DF8`. The current trace records 21 native function entries,
+several of which execute only a reviewed prefix. This is not a count of 21
+completely reconstructed functions. The provider path is an explicit
 single-disc, unprotected-format adapter; protected-file services are not
 silently treated as successful. See [the header notes](docs/native_disc_header.md).
 
@@ -69,6 +70,9 @@ startup stubs. The target includes the POPS callback at module offset zero,
 the provider's ME loop, sample production and shared-memory communication.
 The existing registration/startup models remain useful but do not constitute
 a recovered mixer. See [the ME reverse plan](docs/media_engine_reverse.md).
+
+The cooperative [native ME worker](docs/native_me_worker.md) is implemented
+as an isolated model; the POPS sample callback and live integration are pending.
 
 ```sh
 python3 scripts/audit_me_targets.py --out out/me_target_audit_new

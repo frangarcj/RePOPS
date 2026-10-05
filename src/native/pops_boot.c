@@ -145,7 +145,8 @@ uint32_t rp_pops_disc_init(rp_context *c)
     rp_event(c,"milestone","single_disc_PSISOIMG_header",disc_header,0x400);
     uint32_t selected_result=select_disc(c);
     if (selected_result&UINT32_C(0x80000000)) return selected_result;
-    rp_block(c,"function_not_reconstructed",0x3764C);
+    rp_pops_finish_disc_boot(c);
+    return 0;
 }
 
 void rp_pops_main_thread(rp_context *c)

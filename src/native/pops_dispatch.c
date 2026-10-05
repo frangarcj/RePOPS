@@ -88,6 +88,15 @@ static void native_helper(rp_context *c)
 {
     uint32_t *r = c->run_gpr;
     switch (c->run_pc) {
+    case 0x2648:
+        rp_w32(c, c->gp + 0x1B0, r[25]);
+        if ((int32_t)r[25] <= 0) {
+            r[2] = rp_pops_dispatch_events(c);
+            r[25] = rp_u32(c, c->gp + 0x1B0);
+        }
+        r[4] = rp_u32(c, c->gp + 0x1A0);
+        transfer(c, lookup_block(c, r[4]));
+        return;
     case 0x7F00:
         rp_pops_spu_write_register(c, r[4], r[5], r[6]);
         transfer(c, r[31]);

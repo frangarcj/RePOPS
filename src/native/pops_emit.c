@@ -363,6 +363,27 @@ uint32_t rp_emit_known_value(rp_context *c, uint32_t dest, uint32_t value, uint3
     return out;
 }
 
+/* +0x42A4: leave the target field for the final linker and preserve the
+ * previous instruction as a delay slot only when its cost is zero.
+ */
+static uint32_t emit_link_jump(rp_context *c, uint32_t out, uint32_t patch_slot,
+                               int32_t cost, uint32_t target)
+{
+    rp_function(c, 0x42A4, "pops.emit_linkable_jump");
+    out = rp_emit_spill_all(c, out);
+    uint32_t delay;
+    if (cost == 0 && rp_emit_previous_movable(c, out)) {
+        out -= 4;
+        delay = rp_u32(c, out);
+    } else {
+        if (cost < 0) cost = 0;
+        delay = 0x27390000 | ((0u - (uint32_t)cost) & 0xFFFF);
+    }
+    rp_w32(c, patch_slot, out);
+    out = emit(c, out, (target + UINT32_C(0x30000000)) >> 2);
+    return emit(c, out, delay);
+}
+
 /* +0x6914 category 0x0E: a forward jump over empty records can become
  * fallthrough. Keep the cycle debit even when no branch word is needed.
  */
@@ -377,13 +398,27 @@ static uint32_t emit_forward_jump(rp_context *c, uint32_t record, uint32_t out, 
     }
     const uint32_t target = 0x041B0000 +
         (rp_u32(c, record + 8) - rp_u32(c, c->gp + 0xB50)) * 4;
-    if (target <= record)
-        rp_block(c, "backward_jump_emitter_not_reconstructed", 0x6914);
+    if (target <= record) {
+        out = rp_emit_debit(c, (int32_t)cost, out);
+        out = rp_emit_spill_all(c, out);
+        const uint32_t entry = rp_u32(c, target + 4);
+        out = emit(c, out, 0x1F200000 | (((entry - out - 4) >> 2) & 0xFFFF));
+        out = rp_emit_constant(c, out, 31, entry);
+        out = rp_emit_constant(c, out, 2, rp_u32(c, record + 8));
+        const uint32_t delay = rp_u32(c, out - 4);
+        rp_w32(c, out - 4, 0x0800069A);
+        out = emit(c, out, delay);
+        rp_w32(c, c->gp + 0xB44, 0);
+        return out;
+    }
     uint32_t next = record + 32;
     while (next < target && half(c, next + 4) == 0) next += 16;
-    if (next != target)
-        rp_block(c, "forward_jump_link_not_reconstructed", 0x42A4);
-    out = rp_emit_debit(c, (int32_t)cost, out);
+    if (next != target) {
+        put_half(c, record, half(c, record) | 2);
+        out = emit_link_jump(c, out, record + 12, (int32_t)cost, 0);
+    } else {
+        out = rp_emit_debit(c, (int32_t)cost, out);
+    }
     rp_w32(c, c->gp + 0xB44, 0);
     return out;
 }
@@ -617,6 +652,11 @@ uint32_t rp_emit_record(rp_context *c, rp_pops_category category, uint32_t recor
     if ((int32_t)cost < 2) cost = 2;
     if (category == RP_CAT_ELIDED) return out;
     if (category == RP_CAT_MEMORY) return rp_emit_memory_record(c, record, out);
+    if (category == RP_CAT_JUMP_REGISTER) {
+        out = emit_link_jump(c, out, record + 12, (int32_t)cost, 0x2648);
+        rp_w32(c, c->gp + 0xB44, 0);
+        return out;
+    }
     if (category == RP_CAT_JUMP_DIRECT) return emit_forward_jump(c, record, out, cost);
     if (category == RP_CAT_BRANCH) return emit_branch_record(c, record, out, cost);
     if (category == RP_CAT_ALU) return emit_known_alu(c, record, out);

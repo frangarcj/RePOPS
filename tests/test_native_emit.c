@@ -91,6 +91,23 @@ int main(void)
     rp_w8(c, record + 12, 8); rp_w8(c, record + 13, 9);
     cursor = rp_emit_record(c, RP_CAT_ALU, record, cursor, 2);
     assert(rp_u32(c, cursor - 4) == ((16u << 21) | (17u << 16) | (18u << 11) | 0x2B));
+    /* First stack access classifies A0; a following access reuses that base. */
+    mapping[29] = 30;
+    rp_emit_init_registers(c, cursor);
+    const uint32_t stack_start = cursor;
+    cursor = rp_emit_memory(c, RP_OP_SW, 8, 29, 0x14, cursor, 0);
+    assert(rp_u32(c, stack_start) == 0x27C40014);
+    assert(rp_u32(c, stack_start + 4) == 0x7C8805C0);
+    assert(rp_u32(c, cursor - 4) == 0xAC900000);
+    const uint32_t stack_reuse = cursor;
+    cursor = rp_emit_memory(c, RP_OP_SW, 8, 29, 0x18, cursor, 0);
+    assert(cursor == stack_reuse + 4 && rp_u32(c, stack_reuse) == 0xAC900004);
+    cursor = rp_emit_memory(c, RP_OP_LW, 10, 29, 0x1C, cursor, 1);
+    assert(rp_u32(c, cursor - 4) == ((0x31u << 26) | (4u << 21) | (20u << 16) | 8));
+    cursor = rp_emit_record(c, RP_CAT_JUMP_REGISTER, record, cursor, 3);
+    const uint32_t indirect = rp_u32(c, record + 12);
+    assert(rp_u32(c, indirect) == (0x30002648u >> 2));
+    assert(rp_u32(c, indirect + 4) == 0x2739FFFD && cursor == indirect + 8);
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[2].bytes); free(c);
     puts("Emitter smoke: FPR/memory locations, temporary state, constants and debit passed; not exhaustive equivalence.");
     return 0;

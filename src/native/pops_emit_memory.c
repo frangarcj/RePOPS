@@ -198,6 +198,92 @@ uint32_t rp_emit_fixed_memory(rp_context *c, uint32_t out, uint32_t op, uint32_t
     return out;
 }
 
+/* +0x3CA8..+0x3FE4: cached stack/scratchpad address specialization. A0 keeps
+ * the translated base and GP+0x748 its displacement; branch-likely selects
+ * the scratchpad mapping without an out-of-line memory helper.
+ */
+static uint32_t emit_cached_memory(rp_context *c, uint32_t op, uint32_t guest,
+                                   uint32_t base, uint32_t displacement,
+                                   uint32_t out, uint32_t direct)
+{
+    uint32_t offset = sign16(displacement), temporary = 0;
+    if (base == byte(c, 0x750) && out != rp_u32(c, c->gp + 0x740)) {
+        const uint32_t cached = rp_u32(c, c->gp + 0x748), delta = offset - cached;
+        if (delta == sign16(delta)) offset = delta;
+        else {
+            out = emit(c, out, 0x24840000 | ((0u - cached) & 0xFFFF));
+            rp_w32(c, c->gp + 0x748, 0);
+        }
+    } else {
+        int32_t source = rp_emit_lookup_register(c, base);
+        if (source < 0) { out = rp_emit_load_register(c, out, 4, base); source = 4; }
+        if (source != 4 || offset)
+            out = emit(c, out, 0x24040000 | (((uint32_t)source & 31) << 21) | (offset & 0xFFFF));
+        temporary = rp_emit_temp(c, 2, 0);
+        out = emit(c, out, 0x7C8005C0 | ((temporary & 31) << 16));
+        rp_w32(c, c->gp + 0x748, offset);
+        rp_w8(c, c->gp + 0x750, (uint8_t)base);
+        offset = 0;
+    }
+
+    uint32_t host = guest & 0x7F;
+    if (host == guest) {
+        int32_t floating = 0;
+        uint32_t mode;
+        if (op & 8) {
+            if (op == RP_OP_SW) floating = rp_emit_lookup_register(c, guest);
+            mode = 2;
+        } else if ((op & 0x13) == 2) {
+            mode = 3;
+        } else {
+            mode = 1;
+            if (direct && op == RP_OP_LW && location(c, guest) < -1) {
+                for (unsigned i = 0; i < 12; ++i) {
+                    if (byte(c, 0x760 + i) != guest) continue;
+                    rp_w8(c, c->gp + 0x754 + i, 0);
+                    rp_w8(c, c->gp + 0x760 + i, 0);
+                    break;
+                }
+                floating = location(c, guest);
+            }
+        }
+        if (floating < -1) {
+            host = (0u - (uint32_t)floating) & 31;
+            op = op & 8 ? 0x39 : 0x31; /* Emitted SWC1/LWC1, not a guest opcode. */
+        } else {
+            const uint32_t allocation = rp_emit_allocate(c, out, guest, 1u << (base & 31), mode);
+            host = allocation & 31; out = (allocation >> 5) << 2;
+        }
+    } else if (host == 2) rp_w32(c, c->gp + 0x744, 0);
+
+    if (temporary) {
+        out = emit(c, out, 0x3406004C);
+        out = emit(c, out, 0x7CC4FD44);
+        out = emit(c, out, 0x54000001 | ((temporary & 31) << 21));
+        out = emit(c, out, 0x7CC4FA84);
+        rp_emit_release_temp(c, temporary);
+    }
+    if ((op & 0x11) == 0x10) {
+        if (base == 29 && !((rp_u32(c, c->gp + 0x748) + offset) & 3)) {
+            out = emit(c, out, (((op & 8) + 0x23) << 26) | 0x00800000 |
+                       ((host & 31) << 16) | (offset & 0xFFFF));
+        } else {
+            out = emit(c, out, (((op & 8) + 0x22) << 26) | 0x00800000 |
+                       ((host & 31) << 16) | ((offset + 3) & 0xFFFF));
+            out = emit(c, out, (((op & 8) + 0x26) << 26) | 0x00800000 |
+                       ((host & 31) << 16) | (offset & 0xFFFF));
+        }
+    } else if (rp_emit_previous_movable(c, out) && op == RP_OP_LW &&
+               (rp_u32(c, out - 4) & 0xFFE0FFFF) == offset + UINT32_C(0xAC800000)) {
+        const uint32_t source = (rp_u32(c, out - 4) >> 16) & 31;
+        if (source != host) out = emit(c, out, (source << 21) | ((host & 31) << 11) | 0x21);
+    } else {
+        out = emit(c, out, (op << 26) | 0x00800000 | ((host & 31) << 16) | (offset & 0xFFFF));
+    }
+    if (guest != base && !(op & 8)) rp_w8(c, c->gp + 0x750, (uint8_t)base);
+    return out;
+}
+
 /* +0x3FE8..+0x4264: non-specialized dynamic base. Preserve the original
  * argument setup, flush policy, offset folding and selected helper address.
  */
@@ -213,7 +299,7 @@ static uint32_t emit_dynamic_memory(rp_context *c, uint32_t op, uint32_t guest,
     if ((base == 29 && !(rp_u32(c, c->gp + 0x6AC) & 0x80000)) ||
             base == byte(c, 0x750) || (op & 0xB) == 0xA ||
             ((op & 0xB) == 2 && out < 0x09B80000))
-        rp_block(c, "specialized_dynamic_base_path_not_reconstructed", 0x3CA8);
+        return emit_cached_memory(c, op, guest, base, displacement, out, direct);
 
     bool retargeted = false;
     if (!store && base == guest && (op & 0x13) != 2 && rp_emit_previous_movable(c, out)) {

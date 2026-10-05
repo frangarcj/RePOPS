@@ -4,9 +4,14 @@ PNG_CFLAGS = $(shell pkg-config --cflags libpng)
 PNG_LIBS = $(shell pkg-config --libs libpng)
 NATIVE_SRC = src/bootstrap.c src/me_startup.c src/me_registration.c src/native/runtime.c src/native/pops_boot.c src/native/pops_image.c src/native/pops_disc.c src/native/pops_config.c src/native/pops_metadata.c src/native/pops_reset.c src/native/pops_graphics.c src/native/me_worker.c src/native/pops_me.c src/native/pops_spu.c src/native/main.c
 
-.PHONY: all native test test-native-disc test-native-config test-native-me test-native-spu clean-help
+.PHONY: all native analyze test test-native-disc test-native-config test-native-me test-native-spu clean-help
 all: native
 native: build/repops-native
+analyze: build/repops-analyze
+
+build/repops-analyze: src/native/runtime.c src/native/pops_analyze.c src/native/analyze_main.c src/native/runtime.h src/native/me_worker.h
+	mkdir -p build
+	$(CC) -std=c11 -Wall -Wextra -Werror $(CFLAGS) src/native/runtime.c src/native/pops_analyze.c src/native/analyze_main.c -o $@
 
 build/repops-native: $(NATIVE_SRC) src/native/runtime.h src/bootstrap.h src/me_startup.h src/me_registration.h src/native/me_worker.h
 	mkdir -p build

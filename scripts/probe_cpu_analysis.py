@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""Run reconstructed POPS +0x05154 on the first BIOS region.
+
+Optional comparison executes the original analysis routine, not the PS1 BIOS,
+in Unicorn. This is one focused sample, not full CPU/Allegrex validation.
+"""
+import argparse
+import hashlib
+import json
+import struct
+import subprocess
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SOURCE = '6a4aea3f731336916db97194c1a27983c18297c2dfcb1a1a328fd4ff8b09c8e0'
+IMAGE = '7e3fe7f349a9f45464708b564c67f1dd1c387fbe05ec898c8d82b60a074cac65'
+BASE = 0x041B0000
+
+
+def compare_original(image, directory):
+    import unicorn as U
+    import unicorn.mips_const as M
+    machine = U.Uc(U.UC_ARCH_MIPS, U.UC_MODE_MIPS32 | U.UC_MODE_LITTLE_ENDIAN)
+    machine.ctl_set_cpu_model(M.UC_CPU_MIPS32_24KF)
+    for address, size in ((0, 0x800000), (BASE, 0x20000),
+                          (0x09C00000, 0x300000), (0x07000000, 0x10000)):
+        machine.mem_map(address, size)
+    machine.mem_write(0, image)
+    # Scratchpad replaces unused module bytes only in this isolated executor.
+    # The native implementation keeps these two address spaces separate.
+    machine.mem_write(0x10000, bytes(0x4000))
+    values = {0x130: 0x400000, 0x6F4: 0xFFFFFFFF, 0xB40: 0x28000,
+              0xB48: (0x53C20 - 0xBFC00000) & 0xFFFFFFFF,
+              0xB4C: BASE, 0xB50: 0xBFC00000, 0xB54: 0xBFC00C00}
+    for offset, value in values.items():
+        machine.mem_write(0x10000 + offset, struct.pack('<I', value))
+    for reg, value in ((M.UC_MIPS_REG_GP, 0x10000), (M.UC_MIPS_REG_SP, 0x0700F000),
+                       (M.UC_MIPS_REG_A0, BASE), (M.UC_MIPS_REG_RA, 0x0700FFF0)):
+        machine.reg_write(reg, value)
+    machine.emu_start(0x5154, 0x0700FFF0, count=200000)
+    if machine.reg_read(M.UC_MIPS_REG_PC) != 0x0700FFF0:
+        raise RuntimeError('Original analyzer did not return within the budget')
+    expected = bytes(machine.mem_read(BASE, 0xC010))
+    native = (directory / 'records.bin').read_bytes().ljust(len(expected), b'\0')
+    expected_scratch = bytes(machine.mem_read(0x10000, 0x4000))
+    actual_scratch = (directory / 'scratch.bin').read_bytes()
+    differences = [i for i, (a, b) in enumerate(zip(native, expected)) if a != b]
+    report = {'unicorn_version': U.__version__, 'cpu_model': 'MIPS32_24KF',
+              'sample': 'one initial BIOS analysis, PS1 instructions are not executed',
+              'compared_record_bytes': len(expected), 'record_difference_count': len(differences),
+              'first_differences': differences[:16],
+              'scratch_equal': actual_scratch == expected_scratch,
+              'record_length_equal': len(native) == len(expected),
+              'high_water': struct.unpack_from('<I', expected_scratch, 0xB4C)[0],
+              'image_sha256': IMAGE,
+              'model_sha256': hashlib.sha256((ROOT / 'src/native/pops_analyze.c').read_bytes()).hexdigest()}
+    report['passed'] = not differences and report['scratch_equal'] and report['record_length_equal']
+    (directory / 'comparison.json').write_text(json.dumps(report, indent=2) + '\n')
+    if not report['passed']:
+        raise RuntimeError('Native/original analyzer mismatch; see comparison.json')
+    print('Original/native records and scratchpad match for this BIOS analysis sample.')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--image', type=Path, default=ROOT / 'build/native_image')
+    parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--compare', action='store_true')
+    args = parser.parse_args()
+    if args.out.exists():
+        parser.error('Use a new output directory; earlier outputs are preserved')
+    manifest = json.loads((args.image / 'manifest.json').read_text())
+    image = (args.image / 'pops_image.bin').read_bytes()
+    if (manifest.get('source_sha256') != SOURCE or manifest.get('image_sha256') != IMAGE or
+            hashlib.sha256(image).hexdigest() != IMAGE):
+        parser.error('Wrong POPS image/source fingerprint')
+    subprocess.run(['make', 'analyze'], cwd=ROOT, check=True)
+    args.out.mkdir(parents=True)
+    subprocess.run([str(ROOT / 'build/repops-analyze'),
+                    str((args.image / 'pops_image.bin').resolve()), str(args.out.resolve())], check=True)
+    blob = (args.out / 'records.bin').read_bytes()
+    rows = []
+    for offset in range(0, len(blob), 16):
+        flags, dest, opcode, kind, reserved, payload, rs, rt, auxiliary, cost = struct.unpack_from('<HBBHHIBBBB', blob, offset)
+        if kind == 0:
+            continue
+        rows.append({'guest_pc': f'0x{0xBFC00000 + offset // 4:08X}', 'flags': f'0x{flags:04X}',
+                     'destination': dest, 'opcode': f'0x{opcode:02X}', 'category': kind,
+                     'payload': f'0x{payload:08X}', 'source1': rs, 'source2': rt,
+                     'auxiliary': auxiliary, 'cost_field': cost, 'reserved': reserved})
+    (args.out / 'records.json').write_text(json.dumps(rows, indent=2) + '\n')
+    print(f'{len(rows)} nonempty record categories; includes boundary records, not executed instructions.')
+    if args.compare:
+        compare_original(image, args.out)
+    print('Output:', args.out)
+
+
+if __name__ == '__main__':
+    main()

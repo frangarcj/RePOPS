@@ -62,6 +62,22 @@ remaining limitations, firmware provenance, and reproduction commands.
 
 ## Function progress
 
+The CPU analysis routine at `+0x05154` is reconstructed without choosing a
+new CPU backend. It preserves POPS's own 16-byte records, branch discovery and
+flags. A focused BIOS sample matches the original routine's record buffer and
+scratchpad; this analyzes instructions, it does not execute PS1 code:
+
+```sh
+python3 scripts/probe_cpu_analysis.py --out out/cpu_analysis_new
+# Optional original-routine comparison with the existing Unicorn environment:
+.tools/verify-env/bin/python scripts/probe_cpu_analysis.py \
+  --out out/cpu_analysis_comparison_new --compare
+```
+
+See [the recovered record layout](docs/cpu_analysis_records.md). Reconstructing
+POPS remains the goal; a temporary executor/backend is support, not a separate
+optimization project.
+
 ```sh
 python3 scripts/function_progress.py
 # Compare the register with a particular native run:

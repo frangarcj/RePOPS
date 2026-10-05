@@ -33,6 +33,10 @@
   Stage explicit source paths only; never include firmware or bulk outputs.
 - Prioritize moving the integrated native execution path forward. Use focused
   build/smoke checks; defer exhaustive hardening and extra test infrastructure.
+- Primary deliverable is the reconstructed POPS emulator. A CPU backend or
+  provisional execution bridge is support work to avoid blocking that reverse,
+  not a separate optimization/recompiler project. Preserve original behavior
+  and distinguish temporary execution adapters from reconstructed functions.
 - Maintain data/function_progress.csv when reconstructing a function. Count
   original functions once per module/profile and entry, not calls, helpers or
   decompiler outputs. Separate complete bodies, partial paths, adapters and

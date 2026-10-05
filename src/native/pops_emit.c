@@ -384,6 +384,93 @@ static uint32_t emit_forward_jump(rp_context *c, uint32_t record, uint32_t out, 
     return out;
 }
 
+/* +0x5064: preserve the pre-delay condition when the slot overwrites a source.
+ * The temporary has the original synthetic guest tag 0x20. */
+uint32_t rp_emit_capture_branch(rp_context *c, uint32_t record, uint32_t out)
+{
+    rp_function(c, 0x5064, "pops.capture_branch_condition_before_delay");
+    const uint8_t *r = rp_memory(c, record, 16);
+    const uint32_t left = r[12], right = r[13];
+    const uint32_t temporary = rp_emit_temp(c, 4, 1);
+    if (left && right) {
+        const uint32_t a = rp_emit_allocate(c, out, left, 1u << right, 2);
+        const uint32_t b = rp_emit_allocate(c, (a >> 5) << 2, right, 1u << left, 2);
+        out = emit(c, (b >> 5) << 2,
+                   ((a & 31) << 21) | ((b & 31) << 16) | ((temporary & 31) << 11) | 0x26);
+    } else {
+        out = rp_emit_argument(c, out, temporary, left | right);
+    }
+    if (temporary == 4) out = emit(c, out, 0xAF8401A0);
+    return out;
+}
+
+/* +0x4340. Store the patch address in the record before adding a debit in
+ * the branch's delay slot. A negative source consumes a captured condition. */
+uint32_t rp_emit_conditional_branch(rp_context *c, uint32_t opcode, uint32_t left,
+                                  uint32_t right, uint32_t cost, uint32_t patch_slot, uint32_t out)
+{
+    rp_function(c, 0x4340, "pops.emit_conditional_branch");
+    uint32_t a = 4, b = 0;
+    if ((int32_t)left < 0) {
+        bool found = false;
+        for (unsigned i = 0; i < 12; ++i) {
+            if (byte(c, 0x760 + i) <= 31) continue;
+            a = byte(c, 0x76C + i);
+            rp_w8(c, c->gp + 0x754 + i, 0);
+            found = true;
+            break;
+        }
+        if (!found) {
+            rp_w8(c, c->gp + 0x750, 0);
+            out = emit(c, out, 0x8F8401A0);
+        }
+    } else {
+        const uint32_t x = rp_emit_allocate(c, out, left, 1u << (right & 31), 2);
+        const uint32_t y = rp_emit_allocate(c, (x >> 5) << 2, right, 1u << (left & 31), 2);
+        out = (y >> 5) << 2; a = x & 31; b = y & 31;
+    }
+    out = rp_emit_spill_all(c, out);
+    rp_w32(c, patch_slot, out);
+    const uint32_t branch = opcode >= RP_OP_BEQ && opcode <= RP_OP_BGTZ ?
+        ((opcode - 0xBE) << 26) | (a << 21) | (b << 16) :
+        0x04000000 | (a << 21) | (((opcode ^ 1) & 1) << 16);
+    out = emit(c, out, branch);
+    if ((int32_t)left < 0) rp_emit_release_temp(c, a);
+    return emit(c, out, 0x27390000 | ((0u - cost) & 0xFFFF));
+}
+
+/* +0x6914 category 0x0C. Backward edges retain the T9 event check and the
+ * +0x1A68 handoff, rather than becoming an unbounded host loop. */
+static uint32_t emit_branch_record(rp_context *c, uint32_t record, uint32_t out, uint32_t cost)
+{
+    const uint8_t *r = rp_memory(c, record, 16);
+    const uint32_t flags = half(c, record), opcode = r[3], right = r[13];
+    const uint32_t left = flags & 0x20 ? UINT32_MAX : r[12];
+    const uint32_t target_pc = rp_u32(c, record + 8);
+    const uint32_t target_record = 0x041B0000 + (target_pc - rp_u32(c, c->gp + 0xB50)) * 4;
+    if ((flags & 4) && target_record > record) {
+        put_half(c, record, (uint16_t)(flags | 2));
+        out = rp_emit_conditional_branch(c, opcode, left, right, cost, record + 12, out);
+    } else {
+        out = rp_emit_conditional_branch(c, opcode ^ 1, left, right, cost, record + 12, out);
+        if (flags & 4) {
+            const uint32_t target = rp_u32(c, target_record + 4);
+            out = emit(c, out, 0x1F200000 | (((target - out - 4) >> 2) & 0xFFFF));
+            out = rp_emit_constant(c, out, 31, target);
+            out = rp_emit_constant(c, out, 2, target_pc);
+            const uint32_t last = rp_u32(c, out - 4);
+            rp_w32(c, out - 4, 0x0800069A);
+            out = emit(c, out, last);
+        } else {
+            out = rp_emit_exit_target(c, target_pc, out);
+        }
+        const uint32_t patch = rp_u32(c, record + 12), word = rp_u32(c, patch);
+        rp_w32(c, patch, (word & 0xFFFF0000) | (((out - patch - 4) >> 2) & 0xFFFF));
+    }
+    rp_w32(c, c->gp + 0xB44, 0);
+    return out;
+}
+
 /* The original folds these four ALU operations when both sources are known
  * and at least one is zero. Other ALU paths still need the original allocator.
  */
@@ -467,6 +554,7 @@ uint32_t rp_emit_record(rp_context *c, rp_pops_category category, uint32_t recor
     if (category == RP_CAT_ELIDED) return out;
     if (category == RP_CAT_MEMORY) return rp_emit_memory_record(c, record, out);
     if (category == RP_CAT_JUMP_DIRECT) return emit_forward_jump(c, record, out, cost);
+    if (category == RP_CAT_BRANCH) return emit_branch_record(c, record, out, cost);
     if (category == RP_CAT_ALU) return emit_known_alu(c, record, out);
     if (category == RP_CAT_WRITE_COP) {
         const uint8_t *r = rp_memory(c, record, 16);

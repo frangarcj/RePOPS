@@ -227,12 +227,29 @@ uint32_t rp_pops_emit_block_records(rp_context *c, uint32_t out)
             continue;
         }
 
-        /* Direct J/JAL with an ordinary delay slot. Conditional, indirect and
-         * nested-delay hazards remain explicit until their paths are recovered.
+        /* +0x62D4..0x63FC: capture a conditional source before an ordinary
+         * delay slot overwrites it. Nested branches/load hazards stay explicit.
          */
-        if (category != RP_CAT_JUMP_DIRECT || (next_flags & 0x40) ||
-                (h(c, record + 32) & 1))
+        if ((category != RP_CAT_JUMP_DIRECT && category != RP_CAT_BRANCH) || (next_flags & 0x40) ||
+                (h(c, record + 32) & 1)) {
+            const uint32_t pc = rp_u32(c, c->gp + 0xB50) + ((record - RECORD_BASE) >> 2);
+            rp_event(c, "compiler_boundary", "delay_record_category", pc, category);
+            rp_event(c, "compiler_boundary", "delay_record_flags_and_next", flags, next_flags);
+            rp_event(c, "compiler_boundary", "delay_record_sources_and_opcode", rp_u32(c, record + 12), b(c, record + 3));
             rp_block(c, "complex_delay_slot_controller_not_reconstructed", 0x61B0);
+        }
+        if (category == RP_CAT_BRANCH && !(flags & 0x20)) {
+            const uint32_t rs = b(c, record + 12), rt = b(c, record + 13);
+            const uint32_t mask = rp_u32(c, c->gp + 0xB58);
+            if ((mask & (0x80000000u >> rs)) && (mask & (0x80000000u >> rt)))
+                rp_block(c, "constant_branch_controller_not_reconstructed", 0x6224);
+            const uint32_t dest = b(c, record + 18), link = b(c, record + 2);
+            if ((dest && (dest == rs || dest == rt)) || (link && (link == rs || link == rt))) {
+                out = rp_emit_capture_branch(c, record, out);
+                flags = h(c, record) | 0x20;
+                wh(c, record, flags);
+            }
+        }
         const uint32_t link = b(c, record + 2);
         if (link) {
             const uint32_t pc = rp_u32(c, c->gp + 0xB50) + ((record - RECORD_BASE) >> 2);

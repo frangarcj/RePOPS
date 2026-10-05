@@ -50,6 +50,22 @@ static void transfer(rp_context *c, uint32_t target)
     c->run_next_pc = target + 4;
 }
 
+/* +0x96AC: make an enabled pending CPU interrupt due immediately. */
+static uint32_t update_interrupt_deadline(rp_context *c)
+{
+    rp_function(c, 0x96AC, "pops.update_interrupt_deadline");
+    const uint32_t status = rp_u32(c, c->gp + 0x130);
+    const uint32_t cause = rp_u32(c, c->gp + 0x134);
+    const uint32_t pending = status & 1 ? status & cause & 0xFF00 : 0;
+    const uint32_t downcount = rp_u32(c, c->gp + 0x1B0);
+    if (pending) {
+        const uint32_t deadline = rp_u32(c, c->gp + 0x1AC);
+        rp_w32(c, c->gp + 0x1B0, 0);
+        rp_w32(c, c->gp + 0x1AC, deadline - downcount);
+    }
+    return pending;
+}
+
 /* +0x2650 cache address computation. Cache misses use the reconstructed
  * +0x58C0; unsupported records stop there, never in a firmware interpreter.
  */
@@ -72,6 +88,10 @@ static void native_helper(rp_context *c)
 {
     uint32_t *r = c->run_gpr;
     switch (c->run_pc) {
+    case 0x96AC:
+        r[2] = update_interrupt_deadline(c);
+        transfer(c, r[31]);
+        return;
     case 0x89A0:
         rp_pops_default_write(c, r[4], r[5], r[6]);
         transfer(c, r[31]);

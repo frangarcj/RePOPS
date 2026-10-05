@@ -57,6 +57,17 @@ int main(void)
     for (unsigned i = 0; i < 12; ++i) assert(rp_emit_temp(c, 2, 0) == 8 + i);
     rp_w32(c, c->gp + 0x744, 123);
     assert(rp_emit_temp(c, 2, 0) == 2 && rp_u32(c, c->gp + 0x744) == 0);
+    /* Capture S0 before a delay-slot write; the branch consumes that temporary
+     * rather than comparing the later value of the guest register. */
+    rp_emit_init_registers(c, cursor);
+    const uint32_t record = 0x200;
+    rp_w8(c, record + 12, 8); rp_w8(c, record + 13, 0);
+    cursor = rp_emit_capture_branch(c, record, cursor);
+    assert(rp_u32(c, cursor - 4) == ((16u << 21) | (8u << 11) | 0x21));
+    cursor = rp_emit_conditional_branch(c, RP_OP_BNE, UINT32_MAX, 0, 7, record + 12, cursor);
+    const uint32_t branch = rp_u32(c, record + 12);
+    assert(rp_u32(c, branch) == (0x14000000 | (8u << 21)));
+    assert(rp_u32(c, branch + 4) == 0x2739FFF9 && cursor == branch + 8);
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[2].bytes); free(c);
     puts("Emitter smoke: FPR/memory locations, temporary state, constants and debit passed; not exhaustive equivalence.");
     return 0;

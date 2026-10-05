@@ -1,6 +1,24 @@
 # RePops progress
 
-## Current: BIOS requests execution from RAM
+## Current: RAM-derived blocks execute and program interrupts
+
+cb2fa59 adds the RAM branch of +0x58C0, code-guard emission, publication and
+execution of the second generated cache through the existing Unicorn engine.
+The game selects RAM mode 0x8003, whose initial-prologue rules differ from
+mode 3. Guest RAM and original PRX pages stay nonexecutable.
+
+01e0a29 adds generic SLL/SRL/SRA emission and the +0x98C4 interrupt-register
+writer. The initialization path now moves between RAM and BIOS-derived
+blocks, resets additional SPU registers and writes interrupt status/mask.
+
+`out/ffvi_run.LDgfH0/result/` reaches +0x2468, an unsigned-byte helper not yet
+reconstructed, with 169,448 instruction-hook observations and 94 block-entry
+transfers. No FFVI boot, rendered image or active voice mixing is claimed.
+The cache, emitter and event smoke tests pass; the cache test now includes
+a RAM-to-BIOS-generated-code transfer. See `ram_compiler.md` and
+`ram_boot_followup.md` for unverified/unsupported paths.
+
+## Earlier: BIOS requests execution from RAM
 
 ce13509 connects expansion/BIOS byte reads and their call-site specialization.
 It also corrects default-read width values and adapts the original 24-bit

@@ -61,10 +61,11 @@ a separate optimized ARM64 backend. The former `generated_code.c` experiment
 is retained but no longer linked into the native executable.
 The diagnostic now dispatches the first video event, resumes the BIOS RAM
 clear, writes SPU registers through C and executes calls/returns in the
-`BFC06EC4` region. It now executes the subsequent byte/word copies and requests
-execution of the RAM-resident program at `A0000500`. The latest run stops at
-the RAM compiler path in `+0x58C0`, after 146,695 instruction-hook observations
-and 34 compiled-entry transfers. No RAM block is executed yet.
+`BFC06EC4` region. It also executes the copied RAM program through POPS's
+second generated-code cache, returning to BIOS helpers and programming the
+interrupt registers. The latest run stops at the unsigned-byte reader
+`+0x2468`, after 169,448 instruction-hook observations and 94 block-entry
+transfers. Both RAM-derived and BIOS-derived blocks now execute in Unicorn.
 These counts do not measure original-function coverage. FFVI has not booted.
 
 See [the current Unicorn integration](docs/unicorn_execution.md),
@@ -72,9 +73,10 @@ See [the current Unicorn integration](docs/unicorn_execution.md),
 [conditional flow](docs/cpu_conditional_flow.md), and
 [state writes](docs/cpu_state_writes.md),
 [guest events](docs/guest_event_dispatch.md),
-[SPU register writes](docs/spu_register_writer.md), and
-[stack accesses/returns](docs/cpu_stack_and_returns.md), and
-[the BIOS-to-RAM handoff](docs/bios_ram_handoff.md). Active-voice mixing, the renderer,
+[SPU register writes](docs/spu_register_writer.md),
+[stack accesses/returns](docs/cpu_stack_and_returns.md),
+[RAM compilation](docs/ram_compiler.md), and
+[RAM boot follow-up](docs/ram_boot_followup.md). Active-voice mixing, the renderer,
 complete CPU behavior and PSP UI remain incomplete.
 
 Requirements: a C11 compiler, Python dependencies from `requirements.txt`,

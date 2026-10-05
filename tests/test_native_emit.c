@@ -112,6 +112,16 @@ int main(void)
     assert(rp_pops_constant_read(c, 0x1F802030, 0) == 0xFFFF);
     assert(rp_pops_constant_read(c, 0x1F802030, 4) == 0xFF);
     assert(rp_pops_constant_read(c, 0x1F802030, 5) == UINT32_MAX);
+    rp_emit_init_registers(c, cursor);
+    memset(rp_memory(c, record, 16), 0, 16);
+    rp_w8(c, record + 2, 1); rp_w8(c, record + 14, 0x4C);
+    cursor = rp_emit_record(c, RP_CAT_READ_COP, record, cursor, 2);
+    assert(rp_u32(c, cursor - 4) == 0x8F920130);
+    const uint32_t rfe = cursor;
+    cursor = rp_emit_record(c, RP_CAT_COP0_CONTROL, record, cursor, 2);
+    assert(rp_u32(c, rfe) == 0x8F850130 && rp_u32(c, rfe + 4) == 0x00053082);
+    assert(rp_u32(c, rfe + 8) == 0x7CC51804 && rp_u32(c, rfe + 12) == 0xAF850130);
+    assert(rp_u32(c, cursor - 12) == 0x0C0025AB);
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[2].bytes); free(c);
     puts("Emitter smoke: FPR/memory locations, temporary state, constants and debit passed; not exhaustive equivalence.");
     return 0;

@@ -88,42 +88,67 @@ static void native_helper(rp_context *c)
 {
     uint32_t *r = c->run_gpr;
     switch (c->run_pc) {
+    case 0x1DD0:
+        rp_function(c, 0x1DD0, "pops.dynamic_byte_store_RAM_path");
+        r[2] = (r[4] >> 23) & 63;
+        r[6] = 0x4C;
+        if (r[2]) rp_block(c, "dynamic_byte_store_non_RAM_path", 0x1C70);
+        r[4] = (r[4] & 0x1FFFFF) | 0x09800000;
+        rp_w8(c, r[4], (uint8_t)r[5]);
+        transfer(c, r[31]);
+        return;
+    case 0x2128: case 0x2140: case 0x2160: case 0x2180:
     case 0x1AA8: case 0x1AC8: case 0x1AE4:
     case 0x1A90: {
-        rp_function(c, 0x1A90, "pops.dynamic_signed_byte_read");
+        const bool word_read = c->run_pc >= 0x2128 && c->run_pc <= 0x2180;
+        const uint32_t entry = word_read ? 0x2128 : 0x1A90;
+        rp_function(c, entry, word_read ? "pops.dynamic_word_read" : "pops.dynamic_signed_byte_read");
         const uint32_t address = r[4], region = (address >> 23) & 63;
+        if (word_read && (address & 3)) rp_block(c, "dynamic_word_read_unaligned", address);
         r[6] = 0x4C;
         if (!region) {
             r[4] = (address & 0x1FFFFF) | 0x09800000;
-            const uint8_t byte = *(uint8_t *)rp_memory(c, r[4], 1);
-            r[2] = byte < 128 ? byte : (uint32_t)((int32_t)byte - 256);
+            if (word_read) r[2] = rp_u32(c, r[4]);
+            else {
+                const uint8_t byte = *(uint8_t *)rp_memory(c, r[4], 1);
+                r[2] = byte < 128 ? byte : (uint32_t)((int32_t)byte - 256);
+            }
         } else if (region == 63) {
             uint32_t specialized = 0;
             if (((address >> 10) & 0x1FFF) == 0) {
-                specialized = 0x1AA8;
+                specialized = word_read ? 0x2140 : 0x1AA8;
                 r[4] = (address & 0x3FF) | 0x13000;
-                const uint8_t byte = *(uint8_t *)rp_memory(c, r[4], 1);
-                r[2] = byte < 128 ? byte : (uint32_t)((int32_t)byte - 256);
+                if (word_read) r[2] = rp_u32(c, r[4]);
+                else {
+                    const uint8_t byte = *(uint8_t *)rp_memory(c, r[4], 1);
+                    r[2] = byte < 128 ? byte : (uint32_t)((int32_t)byte - 256);
+                }
                 r[25] += 4;
             } else if ((address >> 19) == 0x17F8) {
-                specialized = 0x1AC8;
-                const uint8_t byte = *(uint8_t *)rp_module_memory(c, 0x53C20 + (address & 0x7FFFF), 1);
-                r[2] = byte < 128 ? byte : (uint32_t)((int32_t)byte - 256);
+                specialized = word_read ? 0x2160 : 0x1AC8;
+                const uint32_t offset = 0x53C20 + (address & 0x7FFFF);
+                if (word_read) {
+                    r[2] = rp_module_u32(c, offset);
+                    r[25] -= 3;
+                } else {
+                    const uint8_t byte = *(uint8_t *)rp_module_memory(c, offset, 1);
+                    r[2] = byte < 128 ? byte : (uint32_t)((int32_t)byte - 256);
+                }
             } else {
-                rp_block(c, "byte_read_IO_specialization_not_reconstructed", address);
+                rp_block(c, "read_IO_specialization_not_reconstructed", address);
             }
-            if (c->run_pc == 0x1A90) {
+            if (c->run_pc == entry) {
                 const uint32_t patch = r[31] - 8;
                 if (patch < 0x09B80000 || patch >= rp_u32(c, c->gp + 0x1D0))
                     rp_block(c, "memory_specialization_patch_outside_cache", patch);
                 rp_w32(c, patch, (UINT32_C(0x30000000) + specialized) >> 2);
-                rp_event(c, "milestone", "byte_read_callsite_specialized", patch, specialized);
+                rp_event(c, "milestone", "read_callsite_specialized", patch, specialized);
             }
         } else {
             /* +0x1C68 -> +0x8ADC: no call-site specialization in this path. */
-            r[5] = 0;
+            r[5] = word_read ? 2 : 0;
             rp_w32(c, c->gp + 0x1B0, r[25]);
-            r[2] = rp_pops_constant_read(c, r[4], 0);
+            r[2] = rp_pops_constant_read(c, r[4], r[5]);
             r[25] = rp_u32(c, c->gp + 0x1B0);
         }
         transfer(c, r[31]);

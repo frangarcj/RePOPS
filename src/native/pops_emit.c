@@ -651,6 +651,23 @@ uint32_t rp_emit_record(rp_context *c, rp_pops_category category, uint32_t recor
     cost += rp_u32(c, c->gp + 0xB44);
     if ((int32_t)cost < 2) cost = 2;
     if (category == RP_CAT_ELIDED) return out;
+    if (category == RP_CAT_READ_COP) {
+        const uint8_t *r = rp_memory(c, record, 16);
+        out = rp_emit_load_state(c, out, r[2], (uint32_t)r[14] << 2);
+        if (r[14] == 0x3A)
+            out = rp_emit_immediate(c, RP_EMIT_SIGN_HALF, r[2], r[2], 0, out);
+        return out;
+    }
+    if (category == RP_CAT_COP0_CONTROL) {
+        out = emit(c, out, 0x8F850130);
+        out = emit(c, out, 0x00053082);
+        out = emit(c, out, 0x7CC51804);
+        out = emit(c, out, 0xAF850130);
+        out = rp_emit_flush_registers(c, out, 11);
+        out = emit(c, out, 0x0C0025AB);
+        out = emit(c, out, 0xAF9901B0);
+        return emit(c, out, 0x8F9901B0);
+    }
     if (category == RP_CAT_MEMORY) return rp_emit_memory_record(c, record, out);
     if (category == RP_CAT_JUMP_REGISTER) {
         out = emit_link_jump(c, out, record + 12, (int32_t)cost, 0x2648);

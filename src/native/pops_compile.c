@@ -231,13 +231,26 @@ uint32_t rp_pops_emit_block_records(rp_context *c, uint32_t out)
          * delay slot overwrites it. Nested branches/load hazards stay explicit.
          */
         if ((category != RP_CAT_JUMP_DIRECT && category != RP_CAT_BRANCH &&
-                category != RP_CAT_JUMP_REGISTER) || (next_flags & 0x40) ||
+                category != RP_CAT_JUMP_REGISTER) ||
                 (h(c, record + 32) & 1)) {
             const uint32_t pc = rp_u32(c, c->gp + 0xB50) + ((record - RECORD_BASE) >> 2);
             rp_event(c, "compiler_boundary", "delay_record_category", pc, category);
             rp_event(c, "compiler_boundary", "delay_record_flags_and_next", flags, next_flags);
             rp_event(c, "compiler_boundary", "delay_record_sources_and_opcode", rp_u32(c, record + 12), b(c, record + 3));
             rp_block(c, "complex_delay_slot_controller_not_reconstructed", 0x61B0);
+        }
+        if ((next_flags & 0x40) && category != RP_CAT_JUMP_REGISTER) {
+            /* +0x6164: a load in the slot is not automatically hazardous.
+             * Inspect the target's first instruction before moving it ahead.
+             * The special deferred-load emission path is still separate.
+             */
+            const uint32_t loaded = b(c, record + 18);
+            const uint32_t target = rp_u32(c, record + 8);
+            const uint32_t word = rp_module_u32(c, target + rp_u32(c, c->gp + 0xB48));
+            if ((int32_t)word >> 16 == (int32_t)(0x4880 + loaded) ||
+                    (((word >> 26) & 0x38) == 0x28 &&
+                     (((word >> 16) & 31) == loaded || ((word >> 21) & 31) == loaded)))
+                rp_block(c, "deferred_branch_slot_load_not_reconstructed", 0x61AC);
         }
         rp_pops_category emitted_category = category;
         if (category == RP_CAT_BRANCH && !(flags & 0x20)) {

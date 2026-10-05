@@ -1,6 +1,25 @@
 # RePops progress
 
-## Current: guest events, SPU writes and BIOS function calls
+## Current: BIOS requests execution from RAM
+
+ce13509 connects expansion/BIOS byte reads and their call-site specialization.
+It also corrects default-read width values and adapts the original 24-bit
+SWL code-link patch to our base-zero helper addresses. Without that address
+adaptation a reused block could jump to 01B8071C instead of 09B8071C.
+
+0faef46 adds the reached nonhazard load-delay-slot controller path, byte RAM
+stores, word reads, COP state reads and RFE emission. The ROM-resident BIOS
+then reaches its program-copy loop and attempts to dispatch to A0000500.
+
+`out/ffvi_run.AaJVia/result/` records 146,695 generated-code hook observations,
+34 block-entry transfers and `non_BIOS_compiler_controller_not_reconstructed`
+at +0x58C0. No RAM code or game has executed yet. This is an integrated
+execution trace, not a separate byte-equality audit of the copied program.
+Focused emitter, Unicorn-cache and event tests pass; see `cpu_byte_reads.md`
+and `bios_ram_handoff.md`. The next workstream is the original RAM compiler
+prologue, publication/invalidation and generated-code cache execution range.
+
+## Earlier: guest events, SPU writes and BIOS function calls
 
 The resumed pass starts at bf8ac95 and adds three executable increments:
 

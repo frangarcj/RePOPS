@@ -61,8 +61,10 @@ a separate optimized ARM64 backend. The former `generated_code.c` experiment
 is retained but no longer linked into the native executable.
 The diagnostic now dispatches the first video event, resumes the BIOS RAM
 clear, writes SPU registers through C and executes calls/returns in the
-`BFC06EC4` region. The latest run stops at the byte-read helper `+0x1A90`
-after 29,339 instruction-hook observations and 11 compiled-entry transfers.
+`BFC06EC4` region. It now executes the subsequent byte/word copies and requests
+execution of the RAM-resident program at `A0000500`. The latest run stops at
+the RAM compiler path in `+0x58C0`, after 146,695 instruction-hook observations
+and 34 compiled-entry transfers. No RAM block is executed yet.
 These counts do not measure original-function coverage. FFVI has not booted.
 
 See [the current Unicorn integration](docs/unicorn_execution.md),
@@ -71,7 +73,8 @@ See [the current Unicorn integration](docs/unicorn_execution.md),
 [state writes](docs/cpu_state_writes.md),
 [guest events](docs/guest_event_dispatch.md),
 [SPU register writes](docs/spu_register_writer.md), and
-[stack accesses/returns](docs/cpu_stack_and_returns.md). Active-voice mixing, the renderer,
+[stack accesses/returns](docs/cpu_stack_and_returns.md), and
+[the BIOS-to-RAM handoff](docs/bios_ram_handoff.md). Active-voice mixing, the renderer,
 complete CPU behavior and PSP UI remain incomplete.
 
 Requirements: a C11 compiler, Python dependencies from `requirements.txt`,

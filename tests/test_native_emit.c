@@ -122,6 +122,15 @@ int main(void)
     assert(rp_u32(c, rfe) == 0x8F850130 && rp_u32(c, rfe + 4) == 0x00053082);
     assert(rp_u32(c, rfe + 8) == 0x7CC51804 && rp_u32(c, rfe + 12) == 0xAF850130);
     assert(rp_u32(c, cursor - 12) == 0x0C0025AB);
+    rp_emit_init_registers(c, cursor);
+    memset(rp_memory(c, record, 32), 0, 32);
+    rp_w8(c, record + 2, 1); rp_w8(c, record + 3, RP_OP_SRL); rp_w8(c, record + 13, 8);
+    rp_w32(c, record + 8, 1u << 6);
+    rp_w32(c, c->gp + 0xB58, 0x80800000);
+    rp_w32(c, c->gp + 0xB5C + 8 * 4, 0x80000001);
+    cursor = rp_emit_record(c, RP_CAT_SHIFT_IMMEDIATE, record, cursor, 2);
+    assert(rp_u32(c, cursor - 4) == ((16u << 16) | (18u << 11) | (1u << 6) | 2));
+    assert(rp_u32(c, c->gp + 0xB5C + 4) == 0x40000000);
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[2].bytes); free(c);
     puts("Emitter smoke: FPR/memory locations, temporary state, constants and debit passed; not exhaustive equivalence.");
     return 0;

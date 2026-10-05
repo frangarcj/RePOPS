@@ -1,5 +1,31 @@
 #include "runtime.h"
 
+/* +0x98C4: I_STAT acknowledges with AND; I_MASK replaces the mask. Only a
+ * change in pending state updates COP0 cause and potentially brings an event
+ * deadline forward. Access-width arguments are not used by the original.
+ */
+void rp_pops_irq_write(rp_context *c, uint32_t address, uint32_t value)
+{
+    rp_function(c, 0x98C4, "pops.write_interrupt_register");
+    const uint32_t old_status = rp_u32(c, c->gp + 0x2070);
+    const uint32_t old_mask = rp_u32(c, c->gp + 0x2074);
+    const uint32_t offset = address & 12;
+    if (!offset) value &= old_status;
+    rp_w32(c, c->gp + 0x2070 + offset, value);
+    const bool was_pending = (old_status & old_mask) != 0;
+    const bool pending = (rp_u32(c, c->gp + 0x2070) & rp_u32(c, c->gp + 0x2074)) != 0;
+    if (pending != was_pending) {
+        const uint32_t cause = (rp_u32(c, c->gp + 0x134) & ~UINT32_C(0x400)) | (uint32_t)pending << 10;
+        const uint32_t status = rp_u32(c, c->gp + 0x130);
+        rp_w32(c, c->gp + 0x134, cause);
+        if ((status & 1) && (status & cause & 0xFF00)) {
+            const uint32_t remaining = rp_u32(c, c->gp + 0x1B0);
+            rp_w32(c, c->gp + 0x1B0, 0);
+            rp_w32(c, c->gp + 0x1AC, rp_u32(c, c->gp + 0x1AC) - remaining);
+        }
+    }
+}
+
 /* +0x9668: unlink and adjust the remaining time when removing the first node. */
 void rp_pops_remove_event(rp_context *c, uint32_t event)
 {

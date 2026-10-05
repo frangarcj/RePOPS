@@ -92,6 +92,7 @@ void rp_pops_initialize_core(rp_context *);
 void rp_pops_graphics_initialize(rp_context *);
 void rp_pops_graphics_event(rp_context *, uint32_t);
 uint32_t rp_pops_dispatch_events(rp_context *);
+void rp_pops_irq_write(rp_context *, uint32_t, uint32_t);
 void rp_pops_schedule_event(rp_context *, uint32_t, uint32_t);
 void rp_pops_remove_event(rp_context *, uint32_t);
 void rp_pops_spu_write_register(rp_context *, uint32_t, uint32_t, uint32_t);

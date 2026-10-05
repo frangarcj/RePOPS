@@ -651,6 +651,35 @@ uint32_t rp_emit_record(rp_context *c, rp_pops_category category, uint32_t recor
     cost += rp_u32(c, c->gp + 0xB44);
     if ((int32_t)cost < 2) cost = 2;
     if (category == RP_CAT_ELIDED) return out;
+    if (category == RP_CAT_SHIFT_IMMEDIATE) {
+        const uint8_t *r = rp_memory(c, record, 32);
+        const uint32_t source = r[13], dest = r[2], op = r[3];
+        const uint32_t amount = (rp_u32(c, record + 8) >> 6) & 31;
+        const bool was_known = known(c, source);
+        uint32_t value = rp_u32(c, c->gp + 0xB5C + source * 4);
+        if ((half(c, record) & 0x8000) && half(c, record + 20) == RP_CAT_SHIFT_IMMEDIATE &&
+                r[29] == r[18] && dest == r[29]) {
+            const uint32_t next_amount = (rp_u32(c, record + 24) >> 6) & 31;
+            if ((dest == source && amount == next_amount &&
+                 (op == RP_OP_SRL || op == RP_OP_SRA) && r[19] == RP_OP_SLL) ||
+                (op == RP_OP_SLL && r[19] == RP_OP_SRL && next_amount >= amount) ||
+                (op == RP_OP_SLL && r[19] == RP_OP_SRA && next_amount == amount &&
+                 (amount == 16 || amount == 24)))
+                rp_block(c, "shift_pair_peephole_not_reconstructed", 0x6914);
+        }
+        uint32_t host_dest, host_source;
+        out = rp_emit_pair(c, out, dest, source, &host_dest, &host_source);
+        out = emit(c, out, (op & ~0x40u) | (amount << 6) |
+                   ((host_source & 31) << 16) | ((host_dest & 31) << 11));
+        if (was_known) {
+            if (op == RP_OP_SLL) value <<= amount;
+            else if (op == RP_OP_SRL) value >>= amount;
+            else value = (uint32_t)((int32_t)value >> amount);
+            rp_w32(c, c->gp + 0xB5C + dest * 4, value);
+            rp_w32(c, c->gp + 0xB58, rp_u32(c, c->gp + 0xB58) | (0x80000000u >> (dest & 31)));
+        }
+        return out;
+    }
     if (category == RP_CAT_READ_COP) {
         const uint8_t *r = rp_memory(c, record, 16);
         out = rp_emit_load_state(c, out, r[2], (uint32_t)r[14] << 2);

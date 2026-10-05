@@ -44,6 +44,13 @@ int main(void)
     assert(rp_u32(c, head) == later && rp_u32(c, later + 4) == head);
     assert(!rp_u32(c, event + 4) && rp_u32(c, c->gp + 0x1B0) == 192);
     assert(rp_u32(c, c->gp + 0x1AC) == 300);
+    rp_w32(c, c->gp + 0x2070, 5); rp_w32(c, c->gp + 0x2074, 0);
+    rp_w32(c, c->gp + 0x130, 0x401);
+    rp_pops_irq_write(c, 0x1074, 4);
+    assert(rp_u32(c, c->gp + 0x134) == 0x400 && rp_u32(c, c->gp + 0x1B0) == 0);
+    assert(rp_u32(c, c->gp + 0x1AC) == 108);
+    rp_pops_irq_write(c, 0x1070, 1);
+    assert(rp_u32(c, c->gp + 0x2070) == 1 && rp_u32(c, c->gp + 0x134) == 0);
     fclose(c->trace); free(c);
     puts("Guest scheduler: unlink, callback debit, overshoot and future-event wait passed.");
     return 0;

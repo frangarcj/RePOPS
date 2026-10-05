@@ -94,6 +94,10 @@ static void native_helper(rp_context *c)
 {
     uint32_t *r = c->run_gpr;
     switch (c->run_pc) {
+    case 0x98C4:
+        rp_pops_irq_write(c, r[4], r[5]);
+        transfer(c, r[31]);
+        return;
     case 0x2878:
         rp_block(c, "RAM_code_changed_recompile_not_reconstructed", 0x4E18);
     case 0x2918: {

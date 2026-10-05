@@ -36,6 +36,18 @@ int main(void)
     c->run_pc = start + 16;
     rp_unicorn_run(c);
     assert(c->run_pc == 0x2888 && rp_u32(c, c->gp + 0x24) == 7);
+    /* A RAM-derived block lives in the second generated-code cache, not in
+     * executable PS1 RAM. Its call can cross back to the BIOS-derived cache.
+     */
+    const uint32_t ram = 0x09540000;
+    rp_w32(c, ram, 0x24020019);
+    rp_w32(c, ram + 4, 0x0C000000 | ((start + 16) >> 2));
+    rp_w32(c, ram + 8, 0xAF820028);
+    rp_w32(c, c->gp + 0x1CC, ram + 12);
+    c->run_pc = ram;
+    rp_unicorn_run(c);
+    assert(c->run_pc == 0x2888 && rp_u32(c, c->gp + 0x28) == 25);
+    assert(rp_u32(c, c->gp + 0x24) == 7);
     rp_unicorn_close(c);
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[2].bytes); free(c);
     puts("Unicorn cache: helper exits, delay slot, shared memory, FPR bits and native patch passed.");

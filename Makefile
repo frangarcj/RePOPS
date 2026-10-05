@@ -10,6 +10,7 @@ UNICORN_CFLAGS = -I"$(UNICORN_ROOT)/include"
 UNICORN_LIBS = "$(UNICORN_ROOT)/lib/libunicorn.a" -lpthread -lm
 NATIVE_SRC += src/native/generated_unicorn.c src/native/pops_dispatch.c src/native/pops_events.c
 NATIVE_SRC += src/native/pops_spu_registers.c
+NATIVE_SRC += src/native/pops_compile_ram.c
 
 .PHONY: all native analyze test test-native-disc test-native-config test-native-me test-native-spu test-native-emit test-native-memory-card test-generated-code test-unicorn-cache clean-help
 all: native

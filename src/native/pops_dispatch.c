@@ -76,7 +76,7 @@ static uint32_t lookup_block(rp_context *c, uint32_t pc)
     uint32_t block = rp_u32(c, table);
     if (!block) {
         rp_w32(c, c->gp + 0x1B0, c->run_gpr[25]);
-        block = rp_pops_compile_bios_block(c, pc);
+        block = ((pc >> 23) & 63) ? rp_pops_compile_bios_block(c, pc) : rp_pops_compile_ram_block(c, pc);
         c->run_gpr[25] = rp_u32(c, c->gp + 0x1B0);
     }
     ++c->compiled_transfers;
@@ -84,10 +84,32 @@ static uint32_t lookup_block(rp_context *c, uint32_t pc)
     return block;
 }
 
+static bool generated_address(rp_context *c, uint32_t address)
+{
+    return (address >= 0x09B80000 && address < rp_u32(c, c->gp + 0x1D0)) ||
+           (address >= 0x09540000 && address < rp_u32(c, c->gp + 0x1CC));
+}
+
 static void native_helper(rp_context *c)
 {
     uint32_t *r = c->run_gpr;
     switch (c->run_pc) {
+    case 0x2878:
+        rp_block(c, "RAM_code_changed_recompile_not_reconstructed", 0x4E18);
+    case 0x2918: {
+        rp_function(c, 0x2918, "pops.check_RAM_code_sum");
+        unsigned steps = 0;
+        do {
+            if (++steps > 0x10000) rp_block(c, "RAM_code_sum_range_not_supported", r[4]);
+            for (unsigned i = 0; i < 4; ++i) {
+                r[8 + i] = rp_u32(c, r[4] + i * 4);
+                r[6] -= r[8 + i];
+            }
+            r[4] += 16;
+        } while (r[4] != r[5]);
+        transfer(c, r[6] ? 0x2878 : r[31]);
+        return;
+    }
     case 0x1DD0:
         rp_function(c, 0x1DD0, "pops.dynamic_byte_store_RAM_path");
         r[2] = (r[4] >> 23) & 63;
@@ -139,7 +161,7 @@ static void native_helper(rp_context *c)
             }
             if (c->run_pc == entry) {
                 const uint32_t patch = r[31] - 8;
-                if (patch < 0x09B80000 || patch >= rp_u32(c, c->gp + 0x1D0))
+                if (!generated_address(c, patch))
                     rp_block(c, "memory_specialization_patch_outside_cache", patch);
                 rp_w32(c, patch, (UINT32_C(0x30000000) + specialized) >> 2);
                 rp_event(c, "milestone", "read_callsite_specialized", patch, specialized);
@@ -198,7 +220,7 @@ static void native_helper(rp_context *c)
         r[2] = target;
         r[31] = rp_u32(c, c->gp + 0xFC);
         const uint32_t patch = r[31] - 8;
-        if (patch < 0x09B80000 || patch >= rp_u32(c, c->gp + 0x1D0))
+        if (!generated_address(c, patch))
             rp_block(c, "link_patch_outside_generated_cache", patch);
         /* Original SWL changes only 24 target bits: PRX and cache share the
          * remaining bits on PSP. Our base-zero helper addresses do not, so
@@ -241,7 +263,7 @@ void rp_pops_run_core(rp_context *c)
     rp_unicorn_open(c);
     transfer(c, lookup_block(c, rp_u32(c, c->gp + 0x1A0)));
     for (unsigned steps = 0; steps < 100000; ++steps) {
-        if (c->run_pc >= 0x09B80000 && c->run_pc < rp_u32(c, c->gp + 0x1D0))
+        if (generated_address(c, c->run_pc))
             rp_unicorn_run(c);
         else
             native_helper(c);

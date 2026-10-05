@@ -153,15 +153,14 @@ static uint32_t allocate_source(rp_context *c, uint32_t out, uint32_t reg, uint3
     return (rp_emit_allocate(c, out, reg, protect, 2) >> 5) << 2;
 }
 
-/* +0x5E78..+0x64F7, BIOS record-walk path. Entry setup has already run.
+/* +0x5E78..+0x64F7, shared RAM/BIOS record walk. Entry setup has already run.
  * Output addresses replace category/cost at record+4 for join entries, so
  * the current category must be saved before those in-place writes.
  * The final linking/cache-table pass is deliberately a separate boundary.
  */
 uint32_t rp_pops_emit_block_records(rp_context *c, uint32_t out)
 {
-    if (!(h(c, c->gp + 0xB40) & 0x8000))
-        rp_block(c, "RAM_record_controller_not_reconstructed", 0x58C0);
+    const uint32_t empty_known_mask = ((rp_u32(c, c->gp + 0xB50) >> 23) & 63) ? 0x80000000 : 0;
     const uint32_t end = rp_u32(c, c->gp + 0xB4C) + 16;
     for (uint32_t record = RECORD_BASE; record < end;) {
         const rp_pops_category category = (rp_pops_category)h(c, record + 4);
@@ -177,7 +176,7 @@ uint32_t rp_pops_emit_block_records(rp_context *c, uint32_t out)
             out = rp_emit_flush_registers(c, out, 11);
             rp_w32(c, c->gp + 0x740, out);
             record_entry = true;
-        } else if (rp_u32(c, c->gp + 0xB58) == 0x80000000) {
+        } else if (rp_u32(c, c->gp + 0xB58) == empty_known_mask) {
             uint32_t busy = rp_u32(c, c->gp + 0x744) |
                 b(c, c->gp + 0x750) | b(c, c->gp + 0x752);
             for (unsigned i = 0; i < 12; ++i) busy |= b(c, c->gp + 0x760 + i);
@@ -246,7 +245,7 @@ uint32_t rp_pops_emit_block_records(rp_context *c, uint32_t out)
              */
             const uint32_t loaded = b(c, record + 18);
             const uint32_t target = rp_u32(c, record + 8);
-            const uint32_t word = rp_module_u32(c, target + rp_u32(c, c->gp + 0xB48));
+            const uint32_t word = rp_u32(c, target + rp_u32(c, c->gp + 0xB48));
             if ((int32_t)word >> 16 == (int32_t)(0x4880 + loaded) ||
                     (((word >> 26) & 0x38) == 0x28 &&
                      (((word >> 16) & 31) == loaded || ((word >> 21) & 31) == loaded)))
@@ -308,7 +307,8 @@ uint32_t rp_pops_emit_block_records(rp_context *c, uint32_t out)
     }
     out = rp_emit_flush_registers(c, out, 11);
     rp_w32(c, c->gp + 0x740, out);
-    rp_event(c, "milestone", "POPS_BIOS_record_walk_complete_before_linking", 0x64F8, out);
+    rp_event(c, "milestone", empty_known_mask ? "POPS_BIOS_record_walk_complete_before_linking" :
+             "POPS_RAM_record_walk_complete_before_linking", 0x64F8, out);
     return out;
 }
 

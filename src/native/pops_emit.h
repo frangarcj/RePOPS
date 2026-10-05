@@ -38,4 +38,6 @@ uint32_t rp_emit_conditional_branch(rp_context *, uint32_t, uint32_t, uint32_t, 
 uint32_t rp_pops_emit_block_records(rp_context *, uint32_t);
 uint32_t rp_pops_publish_bios_block(rp_context *, uint32_t, uint32_t, uint32_t);
 uint32_t rp_pops_compile_bios_block(rp_context *, uint32_t);
+uint32_t rp_emit_ram_guard(rp_context *, uint32_t, uint32_t, uint32_t);
+uint32_t rp_pops_compile_ram_block(rp_context *, uint32_t);
 #endif

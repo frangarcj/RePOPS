@@ -9,13 +9,15 @@
 
 #define CODE_BEGIN UINT32_C(0x09B80000)
 #define CODE_END   UINT32_C(0x09C00000)
+#define RAM_CODE_BEGIN UINT32_C(0x09540000)
+#define RAM_CODE_END UINT32_C(0x097C0000)
 #define READ_WRITE (UC_PROT_READ | UC_PROT_WRITE)
 
 typedef struct generated_engine {
     uc_engine *uc;
-    uc_hook trace;
+    uc_hook trace, ram_trace;
     rp_context *context;
-    uint32_t published_end;
+    uint32_t published_end, ram_published_end;
     uint64_t outside_published_code;
 } generated_engine;
 
@@ -31,7 +33,8 @@ static void observe_generated(uc_engine *uc, uint64_t address, uint32_t size, vo
 {
     (void)size;
     generated_engine *engine = opaque;
-    if (address >= engine->published_end) {
+    if (!((address >= CODE_BEGIN && address < engine->published_end) ||
+          (address >= RAM_CODE_BEGIN && address < engine->ram_published_end))) {
         engine->outside_published_code = address;
         uc_emu_stop(uc);
         return;
@@ -55,7 +58,7 @@ void rp_unicorn_open(rp_context *c)
     checked(c, uc_ctl_set_cpu_model(engine->uc, UC_CPU_MIPS32_24KF), 0);
     const uint64_t helpers[] = {0x89A0, 0x2888, 0x96AC, 0x1A80, 0x1A68, 0x2450, 0x7F00, 0x2648,
                                0x1A90, 0x1AA8, 0x1AC8, 0x1AE4, 0x1DD0,
-                               0x2128, 0x2140, 0x2160, 0x2180};
+                               0x2128, 0x2140, 0x2160, 0x2180, 0x2878, 0x2918};
     checked(c, uc_ctl_exits_enable(engine->uc), 0);
     checked(c, uc_ctl_set_exits(engine->uc, helpers, sizeof(helpers) / sizeof(helpers[0])), 0);
     for (unsigned i = 0; i < RP_REGION_COUNT; ++i) {
@@ -72,8 +75,11 @@ void rp_unicorn_open(rp_context *c)
     }
     map_region(c, engine->uc, 0x10000, sizeof(c->scratchpad), c->scratchpad);
     checked(c, uc_mem_protect(engine->uc, CODE_BEGIN, CODE_END - CODE_BEGIN, UC_PROT_ALL), CODE_BEGIN);
+    checked(c, uc_mem_protect(engine->uc, RAM_CODE_BEGIN, RAM_CODE_END - RAM_CODE_BEGIN, UC_PROT_ALL), RAM_CODE_BEGIN);
     checked(c, uc_hook_add(engine->uc, &engine->trace, UC_HOOK_CODE,
                           observe_generated, engine, CODE_BEGIN, CODE_END - 1), CODE_BEGIN);
+    checked(c, uc_hook_add(engine->uc, &engine->ram_trace, UC_HOOK_CODE,
+                          observe_generated, engine, RAM_CODE_BEGIN, RAM_CODE_END - 1), RAM_CODE_BEGIN);
     c->generated_executor = "unicorn_MIPS32_24KF";
     rp_event(c, "execution_adapter", "Unicorn_generated_cache_PRX_nonexecutable", CODE_BEGIN, CODE_END);
 }
@@ -84,14 +90,17 @@ void rp_unicorn_run(rp_context *c)
     if (!engine || !engine->uc) rp_block(c, "unicorn_not_initialized", c->run_pc);
     uc_engine *uc = engine->uc;
     engine->published_end = rp_u32(c, c->gp + 0x1D0);
+    engine->ram_published_end = rp_u32(c, c->gp + 0x1CC);
     engine->outside_published_code = 0;
-    if (c->run_pc < CODE_BEGIN || c->run_pc >= engine->published_end)
+    if (!((c->run_pc >= CODE_BEGIN && c->run_pc < engine->published_end) ||
+          (c->run_pc >= RAM_CODE_BEGIN && c->run_pc < engine->ram_published_end)))
         rp_block(c, "unicorn_entry_outside_generated_cache", c->run_pc);
 
     /* Native reconstruction can patch and extend the cache between runs.
      * Its memory is shared, but Unicorn's translated blocks need invalidation.
      */
     checked(c, uc_ctl_remove_cache(uc, (uint64_t)CODE_BEGIN, (uint64_t)CODE_END), CODE_BEGIN);
+    checked(c, uc_ctl_remove_cache(uc, (uint64_t)RAM_CODE_BEGIN, (uint64_t)RAM_CODE_END), RAM_CODE_BEGIN);
     for (unsigned i = 0; i < 32; ++i) {
         checked(c, uc_reg_write(uc, UC_MIPS_REG_0 + i, &c->run_gpr[i]), c->run_pc);
         uint64_t bits = c->run_fpr[i];

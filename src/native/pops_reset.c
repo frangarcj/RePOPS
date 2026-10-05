@@ -404,5 +404,6 @@ void rp_pops_initialize_core(rp_context *c)
     (void)set_run_mode(c, 0);
     update_me_control(c);
     rp_event(c, "milestone", "native_ME_start_and_resume_complete", 0xBFC007F0, c->me_ack);
-    rp_block(c, "function_not_reconstructed", 0x1B9C4);
+    rp_pops_graphics_initialize(c);
+    rp_block(c, "remaining_post_graphics_reset_not_reconstructed", 0x24B58);
 }

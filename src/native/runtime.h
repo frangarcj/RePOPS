@@ -26,6 +26,8 @@ typedef struct rp_context {
     uint32_t mc_thread_entry, mc_semaphore_count;
     uint32_t me_callback, me_request, me_ack, me_value;
     uint32_t me_stack_hi, me_stack_lo, me_output_words, me_last_output;
+    uint32_t ge_commands[512], ge_command_count, ge_lists_captured;
+    uint32_t ge_stalled_list, ge_edram_translation;
     rp_me_worker me_worker;
     uint32_t vfpu_s330_bits;
     float vfpu_reset_rows[4][4];
@@ -73,6 +75,7 @@ void rp_pops_finish_disc_boot(rp_context *);
 uint32_t rp_pops_mc_init(rp_context *);
 uint32_t rp_pops_controller_init(rp_context *);
 void rp_pops_initialize_core(rp_context *);
+void rp_pops_graphics_initialize(rp_context *);
 void rp_pops_start_me(rp_context *);
 void rp_pops_me_poll(rp_context *);
 bool rp_pops_spu_inactive_sample(rp_context *, uint32_t *);

@@ -46,7 +46,8 @@ REPOPS_DIAGNOSTIC_SKIP_UI=1 ./run_ffvi.sh
 This is an explicit [diagnostic bypass](docs/native_core_diagnostic.md), not a
 reconstructed menu or proven startup state. It currently prepares device and
 SPU state, runs the disabled-SPU callback and the native ME request/acknowledgement
-loop, then stops at graphics initialization `+0x1B9C4`. Active-voice mixing,
+loop, prepares graphics tables and schedules the first refresh event, then
+stops at display refresh `+0x115B4`. Active-voice mixing,
 graphics rendering and PS1 instruction execution are still unimplemented.
 
 Requirements: a C11 compiler, Python dependencies from `requirements.txt`,

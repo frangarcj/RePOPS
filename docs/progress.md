@@ -1,6 +1,6 @@
 # RePops progress
 
-## Current: native reset reaches graphics initialization
+## Current: native reset reaches the first display-refresh call
 
 The normal FFVI startup path now applies the game configuration, prepares the
 disc index and savedata metadata, and stops at PSP UI +0x28DF8. An explicit
@@ -9,7 +9,9 @@ as reconstructed) to investigate core initialization.
 
 The diagnostic initializes CPU/device/SPU state, executes the disabled-SPU
 callback in C, and obtains the start/resume ACKs from the native ME worker.
-It stops at graphics initialization +0x1B9C4. Enabled mixing, the full UI,
+It also builds the graphics tables, captures the initial GE state lists and
+inserts the first guest refresh event. It stops at display refresh +0x115B4.
+See `native_graphics_init.md` for the latest run. Enabled mixing, the full UI,
 renderer and PS1 instruction execution remain incomplete. No sound or gameplay
 is claimed. See `native_spu_disabled.md` for the successful optimized and
 sanitized runs and `data/function_progress.csv` for per-function scope.

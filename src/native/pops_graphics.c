@@ -422,5 +422,8 @@ void rp_pops_graphics_initialize(rp_context *c)
     rp_w32(c, c->gp + 0x362C, output + 20);
     rp_event(c, "milestone", "graphics_command_buffer_initialized", output, 5);
     begin_frame(c);
-    rp_block(c, "post_frame_graphics_initialization_not_reconstructed", 0x1BA98);
+    rp_pops_install_dma(c, 2, 0x12C74);
+    rp_pops_map_io(c, 0x1F801810, 8, 0x12FBC, 0x127D8);
+    rp_w32(c, 0x49CBD4, 0);
+    rp_event(c, "milestone", "GPU_IO_and_DMA_registered", 0x1F801810, 2);
 }

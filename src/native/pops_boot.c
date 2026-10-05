@@ -176,5 +176,16 @@ void rp_pops_main_thread(rp_context *c)
     result=rp_pops_controller_init(c);
     if (result&0x80000000) exit_vsh(c,(int32_t)UINT32_C(0x80000004));
     rp_pops_initialize_core(c);
-    rp_block(c,"function_not_reconstructed",0x1C964);
+    rp_function(c, 0x1C964, "pops.query_pending_state_restore");
+    if (rp_u32(c, 0x14D07C)) rp_block(c, "state_restore_not_reconstructed", 0x1BF30);
+    rp_function(c, 0x1A908, "pops.wait_startup_thread_handoff");
+    if ((int32_t)rp_u32(c, 0x14CC64) >= 0) {
+        /* Original waits on the producer in another thread. A diagnostic that
+         * bypassed UI must not fabricate that producer's completion signal.
+         */
+        rp_block(c, "startup_thread_handoff_pending", 0x1A908);
+    }
+    ++c->services;
+    rp_event(c, "headless_adapter", "core_thread_priority_request", 0, 0x11);
+    rp_block(c, "compiled_Allegrex_execution_bridge_not_implemented", 0x1A00);
 }

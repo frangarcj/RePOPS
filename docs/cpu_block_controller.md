@@ -41,3 +41,29 @@ This completes one supported BIOS compiler path, not every path through the
 compiler. RAM profiles, more instruction categories, dynamic bases and complex
 delay slots remain explicit boundaries. This result must not be reported as
 PS1 BIOS execution or as an already portable executable code block.
+
+## Integrated reset
+
+The same C compiler is now linked into `repops-native`, not just the analyzer
+probe. The end of +0x24B58 resets 2 MiB of guest RAM, then +0x94C4 selects
+the reset exception vector and compiles it on a cache miss. Its returned
+entry is stored at GP+0x1B4. This run uses the actual reconstructed device
+initialization and game configuration, not the probe's I/O-table fixture.
+
+`REPOPS_DIAGNOSTIC_SKIP_UI=1 ./run_ffvi.sh` produced
+`out/ffvi_run.VzSqXd/result/`: initial disabled-display command list, GPU
+handler registration, block publication at 0x09B80000 (352 bytes), then
+`startup_thread_handoff_pending` at +0x1A908. The original routine waits on
+module state +0x14CC64 written by another thread. The diagnostic UI bypass
+does not satisfy that wait, and this run does not force it to.
+
+Normal startup still stops at unreconstructed +0x28DF8. If the real producer
+later signals completion, a separate explicit boundary remains at +0x1A00:
+executing generated Allegrex on the native host is not implemented. The
+integrated run is a host execution test, not an original-vs-C comparison of
+the entire reset or the headless display services.
+
+The same diagnostic path passed an AddressSanitizer/UBSan build in
+`out/ffvi_run.6wFNWG/result/`. A subsequent optimized build preserved the
+normal UI stop in `out/ffvi_run.uK0qcD/result/`. The Python suite ran 49 tests
+with one optional-Unicorn skip, and the existing emitter smoke passed.

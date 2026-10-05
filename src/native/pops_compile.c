@@ -292,3 +292,13 @@ uint32_t rp_pops_publish_bios_block(rp_context *c, uint32_t pc, uint32_t entry, 
     rp_event(c, "milestone", "POPS_BIOS_block_published_not_host_executable", entry, out - entry);
     return entry;
 }
+
+uint32_t rp_pops_compile_bios_block(rp_context *c, uint32_t pc)
+{
+    if ((pc & 0x1FFFFFFF) < 0x1FC00000 || (pc & 0x1FFFFFFF) >= 0x1FC80000)
+        rp_block(c, "non_BIOS_compiler_controller_not_reconstructed", 0x58C0);
+    const uint32_t entry = rp_pops_prepare_compile(c, pc);
+    rp_emit_init_registers(c, entry);
+    const uint32_t out = rp_pops_emit_block_records(c, entry);
+    return rp_pops_publish_bios_block(c, pc, entry, out);
+}

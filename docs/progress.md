@@ -11,8 +11,8 @@ probe reconstructs register helpers and the immediate category of +0x6914,
 producing the same first three Allegrex words with matching compiler state.
 The known-base memory category now also matches: the first two BIOS stores
 produce a 24-byte Allegrex prefix with identical records and scratchpad.
-Dynamic addresses, other emitter categories, the full controller walk and
-linking remain pending. See `cpu_memory_emission.md` and
+Dynamic addresses and other emitter categories remain pending. The initial
+BIOS controller/link path was added below. See `cpu_memory_emission.md` and
 `cpu_register_emission.md` for the narrow validation scope.
 The follow-up flow probe reaches the end of the initial record region and
 matches 348 emitted bytes, including the CPU-status write and exit sequence.
@@ -21,10 +21,11 @@ matches 352 emitted bytes, records and scratchpad through +0x64F7. The final
 BIOS link/cache-publication pass now matches too, including the 2.5 MiB cache
 tables and returned entry. SV.Q clearing uses an explicit reset-row adapter
 in the comparison. See `cpu_block_controller.md`; emitted code is not executed.
-See `cpu_analysis_records.md`. The integrated diagnostic still stops at
-+0x115B4, independently of this analysis probe.
+These functions are now linked into the integrated native diagnostic too.
+The first reset's +0x94C4 exception-vector setup calls the reconstructed
+compiler and publishes its 352-byte block at 0x09B80000. It is not executed.
 
-## Current: native reset reaches the first display-refresh call
+## Current: native reset compiles the initial BIOS block
 
 The normal FFVI startup path now applies the game configuration, prepares the
 disc index and savedata metadata, and stops at PSP UI +0x28DF8. An explicit
@@ -34,8 +35,11 @@ as reconstructed) to investigate core initialization.
 The diagnostic initializes CPU/device/SPU state, executes the disabled-SPU
 callback in C, and obtains the start/resume ACKs from the native ME worker.
 It also builds the graphics tables, captures the initial GE state lists and
-inserts the first guest refresh event. It stops at display refresh +0x115B4.
-See `native_graphics_init.md` for the latest run. Enabled mixing, the full UI,
+inserts the first guest refresh event. The disabled-display path now returns,
+GPU handlers are registered, RAM is cleared, and the actual reset calls the
+native compiler. `out/ffvi_run.VzSqXd/result/` reaches the wait at +0x1A908;
+the missing producer signal is not replaced with success. See
+`disabled_display_refresh.md` and `cpu_block_controller.md`. Enabled mixing, the full UI,
 renderer and PS1 instruction execution remain incomplete. No sound or gameplay
 is claimed. See `native_spu_disabled.md` for the successful optimized and
 sanitized runs and `data/function_progress.csv` for per-function scope.

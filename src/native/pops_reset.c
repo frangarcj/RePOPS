@@ -1,4 +1,5 @@
 #include "runtime.h"
+#include "pops_emit.h"
 #include "../me_startup.h"
 #include <string.h>
 #include <time.h>
@@ -166,7 +167,7 @@ static void cpu_reset(rp_context *c)
 /* +0x1A050. Write original numeric handler entries to the guest table. Having
  * these addresses in memory does not mean the corresponding C handlers exist.
  */
-static void map_io(rp_context *c, uint32_t address, uint32_t length, uint32_t reader, uint32_t writer)
+void rp_pops_map_io(rp_context *c, uint32_t address, uint32_t length, uint32_t reader, uint32_t writer)
 {
     rp_function(c, 0x1A050, "pops.install_io_handler_entries");
     if (!reader) reader = 0x8A54;
@@ -184,9 +185,9 @@ static void io_reset(rp_context *c)
     rp_function(c, 0x1A0A8, "pops.io_map_reset");
     const uint32_t value = rp_u32(c, c->gp + 0x71C) + 1;
     for (uint32_t i = 0; i < 0x400; i += 4) rp_w32(c, c->gp + 0x3000 + i, value);
-    map_io(c, 0x1F801000, 0x1000, 0x88BC, 0x89A0);
-    map_io(c, 0x1F801060, 0x10, 0, 0);
-    map_io(c, 0x1F801000, 0x40, 0, 0);
+    rp_pops_map_io(c, 0x1F801000, 0x1000, 0x88BC, 0x89A0);
+    rp_pops_map_io(c, 0x1F801060, 0x10, 0, 0);
+    rp_pops_map_io(c, 0x1F801000, 0x40, 0, 0);
 }
 static void dma_reset(rp_context *c)
 {
@@ -196,11 +197,11 @@ static void dma_reset(rp_context *c)
     rp_w32(c, c->gp + 0x29C, 0x8B1C);
     rp_w32(c, c->gp + 0x20F0, 0x77777777);
     rp_w32(c, c->gp + 0x2A0, 0x9364);
-    map_io(c, 0x1F8010E0, 8, 0x9158, 0);
-    map_io(c, 0x1F8010E8, 8, 0x9158, 0x92A4);
-    map_io(c, 0x1F8010F0, 8, 0, 0x91BC);
+    rp_pops_map_io(c, 0x1F8010E0, 8, 0x9158, 0);
+    rp_pops_map_io(c, 0x1F8010E8, 8, 0x9158, 0x92A4);
+    rp_pops_map_io(c, 0x1F8010F0, 8, 0, 0x91BC);
 }
-static void dma_channel(rp_context *c, uint32_t channel, uint32_t handler)
+void rp_pops_install_dma(rp_context *c, uint32_t channel, uint32_t handler)
 {
     rp_function(c, 0x1A1F0, "pops.install_dma_channel");
     channel &= 0xFF;
@@ -208,22 +209,22 @@ static void dma_channel(rp_context *c, uint32_t channel, uint32_t handler)
     rp_w32(c, c->gp + 0x1F8 + offset, handler);
     rp_w32(c, c->gp + 0x1F4 + offset, 0x8B1C);
     halfword(c, c->gp + 0x202 + offset, (uint16_t)channel);
-    map_io(c, 0x1F801080 + channel * 16, 8, 0x9158, 0);
-    map_io(c, 0x1F801088 + channel * 16, 8, 0x9158, 0x92A4);
+    rp_pops_map_io(c, 0x1F801080 + channel * 16, 8, 0x9158, 0);
+    rp_pops_map_io(c, 0x1F801088 + channel * 16, 8, 0x9158, 0x92A4);
 }
 static void mdec_reset(rp_context *c)
 {
     rp_function(c, 0x1B678, "pops.mdec_reset_entries");
-    dma_channel(c, 0, 0xF54C);
-    dma_channel(c, 1, 0xF654);
-    map_io(c, 0x1F801820, 8, 0xF6DC, 0xF70C);
+    rp_pops_install_dma(c, 0, 0xF54C);
+    rp_pops_install_dma(c, 1, 0xF654);
+    rp_pops_map_io(c, 0x1F801820, 8, 0xF6DC, 0xF70C);
     memcpy(rp_memory(c, c->gp + 0x400, 0x1C), rp_module_memory(c, 0xD499C, 0x1C), 0x1C);
     rp_w32(c, c->gp + 0x648, 0xE8F8);
 }
 static void irq_reset(rp_context *c)
 {
     rp_function(c, 0x1A2E0, "pops.interrupt_handler_entries");
-    map_io(c, 0x1F801070, 8, 0x9850, 0x98C4);
+    rp_pops_map_io(c, 0x1F801070, 8, 0x9850, 0x98C4);
 }
 static void disc_state_reset(rp_context *c)
 {
@@ -247,10 +248,10 @@ static void serial_reset(rp_context *c)
     rp_w8(c, c->gp + 0x2F3, 2);
     halfword(c, c->gp + 0x2C0, 5);
     rp_w32(c, c->gp + 0x2CC, 0x9E64);
-    map_io(c, 0x1F801040, 8, 0x9F30, 0xA06C);
-    map_io(c, 0x1F801050, 8, 0x9F30, 0xA06C);
-    map_io(c, 0x1F801048, 8, 0, 0xA0E8);
-    map_io(c, 0x1F801058, 8, 0, 0xA0E8);
+    rp_pops_map_io(c, 0x1F801040, 8, 0x9F30, 0xA06C);
+    rp_pops_map_io(c, 0x1F801050, 8, 0x9F30, 0xA06C);
+    rp_pops_map_io(c, 0x1F801048, 8, 0, 0xA0E8);
+    rp_pops_map_io(c, 0x1F801058, 8, 0, 0xA0E8);
 }
 static void code_cache_reset(rp_context *c)
 {
@@ -312,8 +313,8 @@ static void cd_controller_reset(rp_context *c)
     rp_w8(c, c->gp + 0x387E, 0xFF);
     cd_audio_sync(c);
     rp_w32(c, 0x49F4028C, rp_u32(c, c->gp + 0x38B8));
-    dma_channel(c, 3, 0xCE18);
-    map_io(c, 0x1F801800, 0x10, 0xD088, 0xD1B0);
+    rp_pops_install_dma(c, 3, 0xCE18);
+    rp_pops_map_io(c, 0x1F801800, 0x10, 0xD088, 0xD1B0);
 }
 static void gpu_status_reset(rp_context *c)
 {
@@ -332,8 +333,8 @@ static void timers_reset(rp_context *c)
         rp_w8(c, timer + 0x1D, 0);
         rp_w32(c, timer + 0x10, 0x10000);
         rp_w32(c, timer + 0xC, 0x9AD0);
-        map_io(c, 0x1F801100 + i * 16, 8, 0x9BE0, 0x9C60);
-        map_io(c, 0x1F801108 + i * 16, 8, 0, 0x9C60);
+        rp_pops_map_io(c, 0x1F801100 + i * 16, 8, 0x9BE0, 0x9C60);
+        rp_pops_map_io(c, 0x1F801108 + i * 16, 8, 0, 0x9C60);
     }
 }
 static void spu_state_reset(rp_context *c)
@@ -370,20 +371,37 @@ static void sound_reset(rp_context *c)
     memset(rp_memory(c, c->gp + 0x308, 0x78), 0, 0x78);
     rp_w32(c, c->gp + 0x35C, 0x8580);
     rp_w32(c, c->gp + 0x36C, 0x8898);
-    dma_channel(c, 4, 0x8698);
-    map_io(c, 0x1F801C00, 0x260, 0x85F4, 0);
-    map_io(c, 0x1F801C00, 0x200, 0x85F4, 0x7F00);
+    rp_pops_install_dma(c, 4, 0x8698);
+    rp_pops_map_io(c, 0x1F801C00, 0x260, 0x85F4, 0);
+    rp_pops_map_io(c, 0x1F801C00, 0x200, 0x85F4, 0x7F00);
     rp_function(c, 0x25184, "pops.get_volume_setting");
     c->me_value = (rp_u32(c, 0x163238) * UINT32_C(0x4000) + 0x8000) >> 5;
     rp_event(c, "milestone", "spu_state_prepared_before_me_callback", 0x09F40000, 0x802C0);
     rp_pops_start_me(c);
 }
 
+/* +0x94C4: select an exception vector and compile its block on a cache miss.
+ * The returned entry is still an Allegrex address, not callable native code.
+ */
+void rp_pops_prepare_exception(rp_context *c, uint32_t cause)
+{
+    rp_function(c, 0x94C4, "pops.prepare_exception_vector");
+    rp_w32(c, c->gp + 0x134, (rp_u32(c, c->gp + 0x134) & 0xFFFFFFC3) | ((cause & 15) << 2));
+    const uint32_t status = rp_u32(c, c->gp + 0x130);
+    const uint32_t pc = (status & 0x400000) ? 0xBFC00000 : 0x80000080;
+    uint32_t entry = (status & 0x400000) ? rp_u32(c, 0x09E00000) : rp_u32(c, c->gp + 0x1D4);
+    rp_w32(c, c->gp + 0x1A0, pc);
+    rp_w32(c, c->gp + 0x130, (status & 0xFFFFFFC0) | ((status & 15) << 2));
+    if (!entry) entry = rp_pops_compile_bios_block(c, pc);
+    rp_w32(c, c->gp + 0x1B4, entry);
+    rp_event(c, "milestone", "exception_vector_block_ready_not_executed", pc, entry);
+}
+
 void rp_pops_initialize_core(rp_context *c)
 {
-    rp_function(c, 0x24C78, "pops.initialize_core_prefix");
+    rp_function(c, 0x24C78, "pops.initialize_core");
     reciprocal_table(c);
-    rp_function(c, 0x24B58, "pops.reset_devices_prefix");
+    rp_function(c, 0x24B58, "pops.reset_devices");
     memset(rp_memory(c, c->gp, 0x6AC), 0, 0x6AC);
     memset(rp_memory(c, 0x09FFA000, 0x1000), 0, 0x1000);
     (void)set_run_mode(c, 3);
@@ -405,5 +423,11 @@ void rp_pops_initialize_core(rp_context *c)
     update_me_control(c);
     rp_event(c, "milestone", "native_ME_start_and_resume_complete", 0xBFC007F0, c->me_ack);
     rp_pops_graphics_initialize(c);
-    rp_block(c, "remaining_post_graphics_reset_not_reconstructed", 0x24B58);
+    if (!c->vfpu_zero_ready) rp_block(c, "RAM_reset_vector_not_initialized", 0x24B58);
+    /* Original VWB/SV.Q sequence writes R403 across 2 MiB. Reset established
+     * a zero row; cache flushes are not host device operations in this model.
+     */
+    memset(rp_memory(c, 0x09800000, 0x200000), 0, 0x200000);
+    rp_pops_prepare_exception(c, 0x20);
+    rp_event(c, "milestone", "initial_device_reset_and_BIOS_compile_complete", 0x24B58, 0);
 }

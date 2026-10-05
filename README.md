@@ -46,9 +46,13 @@ REPOPS_DIAGNOSTIC_SKIP_UI=1 ./run_ffvi.sh
 This is an explicit [diagnostic bypass](docs/native_core_diagnostic.md), not a
 reconstructed menu or proven startup state. It currently prepares device and
 SPU state, runs the disabled-SPU callback and the native ME request/acknowledgement
-loop, prepares graphics tables and schedules the first refresh event, then
-stops at display refresh `+0x115B4`. Active-voice mixing,
-graphics rendering and PS1 instruction execution are still unimplemented.
+loop, prepares graphics tables and constructs the first disabled-display list.
+It then installs GPU handlers, clears guest RAM and compiles/publishes the
+initial BIOS block: 352 Allegrex bytes at `0x09B80000`. The run stops at
+`+0x1A908`, waiting for the startup thread's completion signal; bypassing the
+UI does not supply that signal. The emitted code is not yet executed on the
+host. Active-voice mixing, rendering and PS1 instruction execution remain
+unimplemented. See [the BIOS controller notes](docs/cpu_block_controller.md).
 
 Requirements: a C11 compiler, Python dependencies from `requirements.txt`,
 `pkg-config`, `libpng`, and Ghidra with the Allegrex extension for initial data

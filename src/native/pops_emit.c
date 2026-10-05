@@ -660,12 +660,48 @@ uint32_t rp_emit_record(rp_context *c, rp_pops_category category, uint32_t recor
         if ((half(c, record) & 0x8000) && half(c, record + 20) == RP_CAT_SHIFT_IMMEDIATE &&
                 r[29] == r[18] && dest == r[29]) {
             const uint32_t next_amount = (rp_u32(c, record + 24) >> 6) & 31;
-            if ((dest == source && amount == next_amount &&
-                 (op == RP_OP_SRL || op == RP_OP_SRA) && r[19] == RP_OP_SLL) ||
-                (op == RP_OP_SLL && r[19] == RP_OP_SRL && next_amount >= amount) ||
-                (op == RP_OP_SLL && r[19] == RP_OP_SRA && next_amount == amount &&
-                 (amount == 16 || amount == 24)))
+            if (op == RP_OP_SLL && r[19] == RP_OP_SRA &&
+                next_amount == amount && (amount == 16 || amount == 24)) {
+                out = rp_emit_immediate(c,
+                        amount == 24 ? RP_EMIT_SIGN_BYTE : RP_EMIT_SIGN_HALF,
+                        dest, source, 0, out);
+                put_half(c, record + 20, RP_CAT_EMPTY);
+                if (was_known) {
+                    value = amount == 24 ?
+                        (uint32_t)(int32_t)(int8_t)value :
+                        (uint32_t)(int32_t)(int16_t)value;
+                    rp_w32(c, c->gp + 0xB5C + dest * 4, value);
+                    rp_w32(c, c->gp + 0xB58,
+                           rp_u32(c, c->gp + 0xB58) |
+                           (0x80000000u >> (dest & 31)));
+                }
+                return out;
+            }
+            if (dest == source && amount == next_amount &&
+                (op == RP_OP_SRL || op == RP_OP_SRA) && r[19] == RP_OP_SLL) {
+                const uint32_t allocation = rp_emit_allocate(c, out, dest, 0, 3);
+                out = (allocation >> 5) << 2;
+                const uint32_t host = allocation & 31;
+                out = emit(c, out, 0x7C000004 | (host << 16) |
+                           (((amount - 1) & 31) << 11));
+                put_half(c, record + 20, RP_CAT_EMPTY);
+                if (was_known) {
+                    value &= UINT32_MAX << amount;
+                    rp_w32(c, c->gp + 0xB5C + dest * 4, value);
+                    rp_w32(c, c->gp + 0xB58,
+                           rp_u32(c, c->gp + 0xB58) |
+                           (0x80000000u >> (dest & 31)));
+                }
+                return out;
+            }
+            if (op == RP_OP_SLL && r[19] == RP_OP_SRL && next_amount >= amount) {
+                rp_event(c, "compiler_boundary", "shift_pair_words",
+                         rp_u32(c, record + 8), rp_u32(c, record + 24));
+                rp_event(c, "compiler_boundary", "shift_pair_regs",
+                         (source << 24) | (dest << 16) | (r[29] << 8) | r[18],
+                         (op << 8) | r[19]);
                 rp_block(c, "shift_pair_peephole_not_reconstructed", 0x6914);
+            }
         }
         uint32_t host_dest, host_source;
         out = rp_emit_pair(c, out, dest, source, &host_dest, &host_source);
@@ -678,6 +714,69 @@ uint32_t rp_emit_record(rp_context *c, rp_pops_category category, uint32_t recor
             rp_w32(c, c->gp + 0xB5C + dest * 4, value);
             rp_w32(c, c->gp + 0xB58, rp_u32(c, c->gp + 0xB58) | (0x80000000u >> (dest & 31)));
         }
+        return out;
+    }
+    if (category == RP_CAT_MULT_DIV) {
+        rp_w8(c, c->gp + 0x751, 3);
+        rp_w8(c, c->gp + 0x752, 3);
+        return emit_known_alu(c, record, out);
+    }
+    if (category == RP_CAT_READ_HILO || category == RP_CAT_WRITE_HILO) {
+        const uint8_t *r = rp_memory(c, record, 16);
+        const uint32_t op = r[3];
+        const uint32_t lo = (op & 2) != 0;
+        const uint32_t bit = lo ? 2 : 1;
+        const uint32_t offset = lo ? 0x1A8 : 0x1A4;
+        const uint32_t guest = category == RP_CAT_READ_HILO ? r[2] : r[12];
+        if (category == RP_CAT_WRITE_HILO) {
+            rp_w8(c, c->gp + 0x751, byte(c, 0x751) & (uint8_t)~bit);
+            rp_w8(c, c->gp + 0x752, byte(c, 0x752) & (uint8_t)~bit);
+            return rp_emit_store_state(c, 0, guest, offset, out);
+        }
+        if (!(byte(c, 0x751) & bit))
+            return rp_emit_load_state(c, out, guest, offset);
+        uint32_t allocation = rp_emit_allocate(c, out, guest, 0, 1);
+        out = (allocation >> 5) << 2;
+        const uint32_t host = allocation & 31;
+        out = emit(c, out, (host << 11) | (lo ? 0x12 : 0x10));
+        if (byte(c, 0x752) & bit) {
+            rp_w8(c, c->gp + 0x752, byte(c, 0x752) & (uint8_t)~bit);
+            out = emit(c, out, 0xAF800000 | (host << 16) | offset);
+        }
+        return out;
+    }
+    if (category == RP_CAT_EXCEPTION) {
+        const uint8_t *r = rp_memory(c, record, 16);
+        uint32_t cause;
+        switch (r[3]) {
+        case 0x11: case 0x31: case 0x39: cause = 0x0400000B; break;
+        case 0x13: case 0x33: case 0x3B: cause = 0x0C00000B; break;
+        case RP_OP_SYSCALL: cause = 8; break;
+        case RP_OP_BREAK: cause = 9; break;
+        default: cause = 10; break;
+        }
+        uint32_t pc = rp_u32(c, c->gp + 0xB50) +
+                      ((record - UINT32_C(0x041B0000)) >> 2);
+        if (half(c, record) & 1) {
+            cause |= 0x20000000;
+            pc -= 4;
+        }
+        const uint32_t temp = rp_emit_temp(c, 4, 0);
+        out = rp_emit_debit(c, (int32_t)cost, out);
+        out = rp_emit_constant(c, out, temp, pc);
+        out = emit(c, out, 0xAF800138 | ((temp & 31) << 16));
+        rp_emit_release_temp(c, temp);
+        out = rp_emit_flush_registers(c, out, 11);
+        out = emit(c, out, 0x24040000 | (cause & 0xFFFF));
+        if (cause & 0xFFFF0000) {
+            out = rp_emit_constant(c, out, 5, (uint32_t)((int32_t)cause >> 22));
+            out = emit(c, out, 0xA3850137);
+        }
+        out = emit(c, out, 0x0C002531);
+        out = emit(c, out, 0xAF9901B0);
+        out = emit(c, out, 0x00400008);
+        out = emit(c, out, 0x8F9901B0);
+        rp_w32(c, c->gp + 0xB44, 0);
         return out;
     }
     if (category == RP_CAT_READ_COP) {

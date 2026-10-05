@@ -24,9 +24,9 @@ popsman_ark_660,0x3ACC,E7F06E2B,complete,src/popsman_mailbox.c,bounded_binary_co
 popsman_ark_660,0x3490,DE630CD2_registration,complete,src/me_registration.c,binary_comparison_helper_boundary,isolated
 popsman_ark_660,0x35D8,ME_startup,complete,src/me_startup.c,binary_comparison_scripted_devices,isolated
 popsman_ark_660,0x3514,ME_control,complete,src/me_startup.c,binary_comparison_scripted_devices,isolated
-pops_660,0x24770,per_game_configuration,pending,,none,not_integrated
-pops_660,0x1B6EC,configuration_postprocess,pending,,none,not_integrated
-pops_660,0xADE8,bcd_to_sector,pending,,none,not_integrated
+pops_660,0x24770,per_game_configuration,partial,src/native/pops_config.c,normalized_ID_domain_synthetic_and_host_run,integrated
+pops_660,0x1B6EC,configuration_postprocess,complete,src/native/pops_config.c,synthetic_contract_and_instruction_review,integrated
+pops_660,0xADE8,bcd_to_sector,complete,src/native/pops_config.c,synthetic_contract_and_instruction_review,integrated
 pops_660,0x3764C,savedata_metadata,pending,,none,not_integrated
 pops_660,0x24CC8,optional_header_metadata,pending,,none,not_integrated
 pops_660,0x1C590,optional_auxiliary_data,pending,,none,not_integrated

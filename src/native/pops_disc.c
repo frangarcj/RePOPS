@@ -102,3 +102,47 @@ uint32_t rp_pops_check_disc_id(rp_context *c, uint32_t address)
     }
     return 0;
 }
+
+/* Remaining +0x1B004 path after configuration. Optional auxiliary/extra
+ * entries remain explicit blockers. The index offsets become absolute file
+ * offsets; no game sector is executed or decompressed by this function.
+ */
+uint32_t rp_pops_finalize_disc_selection(rp_context *c, uint32_t selected, uint32_t disc_offset)
+{
+    const uint32_t header = UINT32_C(0x09E80000);
+    rp_w8(c, c->gp + 0x3E45, (uint8_t)selected);
+    const uint32_t sectors = (uint32_t)rp_pops_msf_to_sector(c, header + 0x81B);
+    rp_w32(c, c->gp + 0x730, sectors - 1);
+    if (rp_u32(c, 0x49CBD0) != 0)
+        rp_block(c, "previous_disc_auxiliary_release_not_reconstructed", 0x1B004);
+    if (rp_u32(c, header + 0x12D4) != 0)
+        rp_block(c, "optional_disc_auxiliary_table_not_reconstructed", 0x1B004);
+    const uint64_t base64 = (uint64_t)disc_offset + rp_u32(c, header + 0xBFC);
+    if (base64 > UINT32_MAX) rp_block(c, "disc_data_offset_overflow", 0x1B004);
+    const uint32_t base = (uint32_t)base64;
+    uint32_t last = rp_u32(c, c->gp + 0x730) - 1;
+    const uint8_t *h = rp_memory(c, header, DISC_HEADER_BYTES);
+    const int first_track = h[0x807] - 6 * (h[0x807] >> 4);
+    const int last_track = h[0x811] - 6 * (h[0x811] >> 4);
+    if (!(rp_u32(c, c->gp + 0x6AC) & 0x2000) && last_track - first_track + 1 > 1)
+        last = (uint32_t)rp_pops_msf_to_sector(c, header + 0x82F);
+    const uint32_t count = (last >> 4) + 1;
+    if (count > (DISC_HEADER_BYTES - 0x4000) / 32)
+        rp_block(c, "disc_block_index_out_of_header", 0x1B004);
+    for (uint32_t remaining = count; remaining > 0; --remaining) {
+        const uint32_t row = header + 0x4000 + (remaining - 1) * 32;
+        const uint8_t *p = rp_memory(c, row + 4, 2);
+        const uint32_t length = p[0] | (uint32_t)p[1] << 8;
+        const uint64_t offset64 = (uint64_t)rp_u32(c, row) + base;
+        if (offset64 > UINT32_MAX) rp_block(c, "disc_block_offset_overflow", row);
+        const uint32_t offset = (uint32_t)offset64;
+        const uint32_t read_size = length == 0x9300 ? UINT32_MAX :
+                                   length == 0 ? 0 : (length + (offset & 0x1FF) + 0x1FF) & ~UINT32_C(0x1FF);
+        rp_w32(c, row, offset);
+        rp_w32(c, row + 0x18, read_size);
+    }
+    if (rp_u32(c, header + 0xC04) != 0)
+        rp_block(c, "additional_disc_entries_not_reconstructed", 0x1B004);
+    rp_event(c, "milestone", "disc_block_table_prepared", header + 0x4000, count);
+    return 0;
+}

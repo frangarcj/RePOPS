@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <setjmp.h>
 
+#define RP_REGION_COUNT 4
 typedef struct rp_region { uint32_t base, size; uint8_t *bytes; } rp_region;
 /* Recovered fields of the single-disc provider path, not a POPSMAN RAM image.
  * No PSP hardware mode is guessed when reading a header on the host.
@@ -14,7 +15,7 @@ typedef struct rp_disc_header_state {
     uint32_t auxiliary_offset, auxiliary_size, valid;
 } rp_disc_header_state;
 typedef struct rp_context {
-    rp_region regions[3];
+    rp_region regions[RP_REGION_COUNT];
     uint8_t scratchpad[0x4000];
     FILE *trace, *disc;
     const char *disc_path;
@@ -45,6 +46,10 @@ uint32_t rp_provider_plain_disc_header(rp_context *, uint32_t, uint32_t);
 uint32_t rp_pops_remember_provider_result(rp_context *, uint32_t);
 uint32_t rp_pops_normalize_disc_id(rp_context *, uint32_t, int32_t);
 uint32_t rp_pops_check_disc_id(rp_context *, uint32_t);
+uint32_t rp_pops_apply_game_config(rp_context *, uint32_t, uint32_t, uint32_t, uint32_t);
+void rp_pops_config_postprocess(rp_context *);
+int32_t rp_pops_msf_to_sector(rp_context *, uint32_t);
+uint32_t rp_pops_finalize_disc_selection(rp_context *, uint32_t, uint32_t);
 int32_t rp_pops_module_start(rp_context *);
 void rp_pops_main_thread(rp_context *);
 uint32_t rp_pops_patch_syscalls(rp_context *);

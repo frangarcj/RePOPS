@@ -27,7 +27,7 @@ void *rp_memory(rp_context *c, uint32_t address, size_t length)
         if (length > 0x14000 - address) rp_block(c,"scratchpad_access_overrun",address);
         return c->scratchpad + (address - 0x10000);
     }
-    for (unsigned i = 0; i < 3; ++i) {
+    for (unsigned i = 0; i < RP_REGION_COUNT; ++i) {
         rp_region *r = &c->regions[i];
         uint64_t offset = (uint64_t)address - r->base;
         if (address >= r->base && offset <= r->size && length <= r->size - offset)

@@ -92,10 +92,10 @@ static uint32_t select_disc(rp_context *c)
     const uint32_t id = rp_pops_normalize_disc_id(c, 0x09E80400, 0x20);
     if (rp_pops_check_disc_id(c, id) != 0) return UINT32_MAX;
     rp_event(c, "milestone", "disc_identifier_validated", id, rp_u32(c, id));
-    /* The next call consumes ID, header versions and config data. Do not mark
-     * the disc active before this unreconstructed call has actually succeeded.
-     */
-    rp_block(c, "function_not_reconstructed", 0x24770);
+    result = rp_pops_apply_game_config(c, id, rp_u32(c, 0x09E80420),
+                                      rp_u32(c, 0x09E80424), 0x09E80428);
+    if (result & UINT32_C(0x80000000)) return UINT32_MAX;
+    return rp_pops_finalize_disc_selection(c, selected, offset);
 }
 
 /* Reviewed prefix of +0x1B2F0 and +0x1B56C. The linked-list initialization is

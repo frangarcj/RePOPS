@@ -47,7 +47,9 @@ int main(int argc, char **argv)
     c->regions[0]=(rp_region){0,0x800000,NULL};
     c->regions[1]=(rp_region){0x1000000,0x800000,NULL};
     c->regions[2]=(rp_region){0x08000000,0x2000000,NULL};
-    for (unsigned i=0;i<3;++i) {
+    /* Shadow EDRAM for reconstructed state writes; this is not a renderer. */
+    c->regions[3]=(rp_region){0x04000000,0x400000,NULL};
+    for (unsigned i=0;i<RP_REGION_COUNT;++i) {
         c->regions[i].bytes=calloc(1,c->regions[i].size);
         if (!c->regions[i].bytes) { fputs("Guest memory allocation failed\n",stderr); return 70; }
     }
@@ -68,7 +70,7 @@ int main(int argc, char **argv)
             c->stop_kind,c->stop_address,c->functions,c->services);
     if (c->disc) fclose(c->disc);
     fclose(c->trace);
-    for (unsigned i=0;i<3;++i) free(c->regions[i].bytes);
+    for (unsigned i=0;i<RP_REGION_COUNT;++i) free(c->regions[i].bytes);
     free(c);
     return 78; /* Explicitly incomplete execution; never report game success. */
 }

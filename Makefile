@@ -8,7 +8,7 @@ UNICORN_PYTHON ?= $(if $(wildcard .tools/verify-env/bin/python),.tools/verify-en
 UNICORN_ROOT ?= $(shell $(UNICORN_PYTHON) -c 'import pathlib,unicorn;print(pathlib.Path(unicorn.__file__).parent)' 2>/dev/null)
 UNICORN_CFLAGS = -I"$(UNICORN_ROOT)/include"
 UNICORN_LIBS = "$(UNICORN_ROOT)/lib/libunicorn.a" -lpthread -lm
-NATIVE_SRC += src/native/generated_unicorn.c src/native/pops_dispatch.c
+NATIVE_SRC += src/native/generated_unicorn.c src/native/pops_dispatch.c src/native/pops_events.c
 
 .PHONY: all native analyze test test-native-disc test-native-config test-native-me test-native-spu test-native-emit test-native-memory-card test-generated-code test-unicorn-cache clean-help
 all: native
@@ -26,6 +26,14 @@ build/repops-native: $(NATIVE_SRC) src/native/runtime.h src/bootstrap.h src/me_s
 
 test:
 	python3 -m unittest discover -s tests -v
+
+build/test_native_events: src/native/runtime.c src/native/pops_events.c src/native/runtime.h tests/test_native_events.c
+	mkdir -p build
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_events.c tests/test_native_events.c -o $@
+
+.PHONY: test-native-events
+test-native-events: build/test_native_events
+	./build/test_native_events
 
 build/test_native_disc: src/native/runtime.c src/native/pops_disc.c src/native/pops_config.c src/native/runtime.h tests/test_native_disc.c
 	mkdir -p build

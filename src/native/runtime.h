@@ -90,6 +90,8 @@ uint32_t rp_pops_mc_free_blocks(rp_context *, uint32_t, uint32_t *);
 uint32_t rp_pops_controller_init(rp_context *);
 void rp_pops_initialize_core(rp_context *);
 void rp_pops_graphics_initialize(rp_context *);
+void rp_pops_graphics_event(rp_context *, uint32_t);
+uint32_t rp_pops_dispatch_events(rp_context *);
 void rp_pops_start_me(rp_context *);
 void rp_pops_me_poll(rp_context *);
 bool rp_pops_spu_inactive_sample(rp_context *, uint32_t *);

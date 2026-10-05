@@ -127,9 +127,20 @@ static void native_helper(rp_context *c)
         transfer(c, target);
         return;
     }
+    case 0x1A68:
+        rp_w32(c, c->gp + 0x1A0, r[2]);
+        rp_w32(c, c->gp + 0x1B4, r[31]);
+        rp_w32(c, c->gp + 0x1B0, r[25]);
+        r[2] = rp_pops_dispatch_events(c);
+        r[25] = rp_u32(c, c->gp + 0x1B0);
+        transfer(c, r[2]);
+        return;
     case 0x1A80:
         rp_w32(c, c->gp + 0x1B0, r[25]);
-        rp_block(c, "guest_event_dispatch_not_reconstructed", 0x953C);
+        r[2] = rp_pops_dispatch_events(c);
+        r[25] = rp_u32(c, c->gp + 0x1B0);
+        transfer(c, lookup_block(c, rp_u32(c, c->gp + 0x1A0)));
+        return;
     default:
         rp_event(c, "native_helper_boundary", "generated_call_into_POPS", c->run_pc, r[4]);
         rp_block(c, "native_core_helper_not_reconstructed", c->run_pc);

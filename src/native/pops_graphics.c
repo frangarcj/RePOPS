@@ -404,6 +404,65 @@ static void begin_frame(rp_context *c)
     }
 }
 
+/* +0x15F54 switches the shared frame event back to +0x11410. */
+static void finish_frame_phase(rp_context *c, uint32_t delay)
+{
+    rp_function(c, 0x15F54, "pops.finish_frame_phase");
+    const uint32_t gp = c->gp;
+    rp_w32(c, gp + 0x35F0, 0x11410);
+    schedule_event(c, gp + 0x35E4, delay);
+    const uint32_t debit = rp_u32(c, gp + 0x1E4);
+    rp_w32(c, gp + 0x1E4, 0);
+    rp_w32(c, gp + 0x1B0, rp_u32(c, gp + 0x1B0) - debit);
+    if (!*(uint8_t *)rp_memory(c, gp + 0x3667, 1) &&
+            (!(rp_u32(c, gp + 0x3668) & 0x800) || !(rp_u32(c, gp + 0x6AC) & 8)))
+        refresh_disabled_display(c);
+    rp_w8(c, gp + 0x3667, 0);
+    rp_w32(c, gp + 0x35C8, half(c, gp + 0x3610) + ((uint32_t)half(c, gp + 0x3612) << 10));
+}
+
+/* +0x1265C. Like +0x11410, the multiply is single precision and ROUND.W.S
+ * rounds ties to even. The optional early phase is measured in guest cycles.
+ */
+static void advance_frame_phase(rp_context *c)
+{
+    rp_function(c, 0x1265C, "pops.advance_frame_phase");
+    const uint32_t gp = c->gp, early = rp_u32(c, gp + 0x708);
+    rp_function(c, 0x9940, "pops.timer_gate_disabled_path");
+    if (rp_u32(c, gp + 0x684) & 1) rp_block(c, "active_timer_gate_not_reconstructed", 0x9940);
+    const int lines = (int)half(c, gp + 0x361A) - (int)half(c, gp + 0x3618);
+    const uint32_t bits = rp_u32(c, gp + 0x3668) & 0x800 ? 0x450779A7 : 0x450688CE;
+    float factor;
+    memcpy(&factor, &bits, sizeof(factor));
+    const float product = (float)lines * factor;
+    double rounded = floor((double)product);
+    const double fraction = (double)product - rounded;
+    if (fraction > 0.5 || (fraction == 0.5 && fmod(rounded, 2.0) != 0)) rounded += 1.0;
+    if (rounded < 0 || rounded > INT32_MAX) rp_block(c, "frame_phase_delay_domain", 0x1265C);
+    rp_w8(c, gp + 0x3662, (uint8_t)(*(uint8_t *)rp_memory(c, gp + 0x3662, 1) + 1));
+    rp_w32(c, gp + 0x35C4, rp_u32(c, gp + 0x35EC));
+    if ((int32_t)early > 0) {
+        rp_w32(c, gp + 0x35F0, 0x15FE4);
+        rp_w32(c, gp + 0x35F4, (uint32_t)rounded - early);
+        schedule_event(c, gp + 0x35E4, early);
+    } else {
+        finish_frame_phase(c, (uint32_t)rounded);
+    }
+}
+
+void rp_pops_graphics_event(rp_context *c, uint32_t callback)
+{
+    switch (callback) {
+    case 0x1265C: advance_frame_phase(c); return;
+    case 0x11410: begin_frame(c); return;
+    case 0x15FE4:
+        rp_function(c, 0x15FE4, "pops.finish_delayed_frame_phase");
+        finish_frame_phase(c, rp_u32(c, c->gp + 0x35F4));
+        return;
+    default: rp_block(c, "guest_event_callback_not_reconstructed", callback);
+    }
+}
+
 void rp_pops_graphics_initialize(rp_context *c)
 {
     rp_function(c, 0x1B9C4, "pops.graphics_initialization_prefix");

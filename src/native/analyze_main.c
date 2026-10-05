@@ -2,16 +2,18 @@
  * Uses the same locally prepared data image as repops-native.
  */
 #include "runtime.h"
+#include "pops_emit.h"
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
 int main(int argc, char **argv)
 {
-    const int prepare = argc == 4 && strcmp(argv[3], "--prepare") == 0;
+    const int emission = argc == 4 && strcmp(argv[3], "--emit-immediates") == 0;
+    const int prepare = emission || (argc == 4 && strcmp(argv[3], "--prepare") == 0);
     if (prepare) --argc;
     if (argc != 3) {
-        fprintf(stderr, "usage: %s <checked-native-image.bin> <new-output-directory> [--prepare]\n", argv[0]);
+        fprintf(stderr, "usage: %s <checked-native-image.bin> <new-output-directory> [--prepare|--emit-immediates]\n", argv[0]);
         return 64;
     }
     rp_context *c = calloc(1, sizeof(*c));
@@ -43,9 +45,28 @@ int main(int argc, char **argv)
     rp_w32(c, c->gp + 0xB54, pc + 0xC00);
     int status = 0;
     uint32_t emission_cursor = 0;
+    uint32_t emission_start = 0, emitted_records = 0;
     if (setjmp(c->stop) == 0) {
         if (prepare) emission_cursor = rp_pops_prepare_compile(c, pc);
         else rp_pops_analyze_records(c, buffer);
+        if (emission) {
+            emission_start = emission_cursor;
+            rp_emit_init_registers(c, emission_cursor);
+            /* Focused emitter probe, not the complete +0x058C0 record walk.
+             * Stop before the first category that is not reconstructed yet.
+             */
+            for (uint32_t record = buffer; record <= rp_u32(c, c->gp + 0xB4C); record += 16) {
+                const uint8_t *r = rp_memory(c, record, 16);
+                const uint32_t category = r[4] | (uint32_t)r[5] << 8;
+                if (category == 0) continue;
+                if (category != 9 && category != 0x13) {
+                    rp_event(c, "probe_boundary", "next_emitter_category", record, category);
+                    break;
+                }
+                emission_cursor = rp_emit_record(c, category, record, emission_cursor, 0);
+                ++emitted_records;
+            }
+        }
     }
     else {
         fprintf(stderr, "Analysis blocked: %s @ 0x%08X\n", c->stop_kind, c->stop_address);
@@ -62,13 +83,21 @@ int main(int argc, char **argv)
         FILE *scratch = fopen(path, "wx");
         if (!scratch || fwrite(c->scratchpad, 1, sizeof(c->scratchpad), scratch) != sizeof(c->scratchpad)) return 74;
         fclose(scratch);
+        if (emission) {
+            snprintf(path, sizeof(path), "%s/allegrex.bin", argv[2]);
+            FILE *code = fopen(path, "wx");
+            const size_t size = emission_cursor - emission_start;
+            if (!code || fwrite(rp_memory(c, emission_start, size), 1, size, code) != size) return 74;
+            fclose(code);
+        }
         snprintf(path, sizeof(path), "%s/analysis.json", argv[2]);
         FILE *report = fopen(path, "wx");
         if (!report) return 74;
         fprintf(report, "{\"guest_start\":%u,\"record_buffer\":%u,\"high_water\":%u,"
                 "\"record_slots\":%u,\"native_function_entries\":%u,\"guest_executed\":false,"
-                "\"emission_cursor_not_executable\":%u,\"stage\":\"%s\"}\n",
-                pc, buffer, end, bytes / 16, c->functions, emission_cursor,
+                "\"emission_cursor_not_executable\":%u,\"emitted_records\":%u,\"stage\":\"%s\"}\n",
+                pc, buffer, end, bytes / 16, c->functions, emission_cursor, emitted_records,
+                emission ? "native_C_POPS_immediate_emitter_probe" :
                 prepare ? "native_C_POPS_058C0_through_05D5B" : "native_C_reconstruction_of_POPS_05154");
         fclose(report);
         printf("POPS analysis: %u record slots, %u native function entries, high-water 0x%08X; no guest execution\n",

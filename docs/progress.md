@@ -6,8 +6,11 @@ The +0x05154 analysis body is now C with its original 16-byte records and
 recursive branch discovery. A focused first-BIOS comparison matches the
 record buffer and scratchpad against the original routine. This is analysis,
 not PS1 execution. The +0x058C0 setup and cost-accounting prefix now also matches
-the same sample up to +0x5D5C, before instruction emission. Allocation, emission
-and linking inside that compiler remain pending.
+the same sample up to +0x5D5C, before instruction emission. The next focused
+probe reconstructs register helpers and the immediate category of +0x6914,
+producing the same first three Allegrex words with matching compiler state.
+Other emitter categories, the full controller walk and linking remain pending.
+See `cpu_register_emission.md` for the narrow validation scope.
 See `cpu_analysis_records.md`. The integrated diagnostic still stops at
 +0x115B4, independently of this analysis probe.
 

@@ -17,7 +17,7 @@ IMAGE = '7e3fe7f349a9f45464708b564c67f1dd1c387fbe05ec898c8d82b60a074cac65'
 BASE = 0x041B0000
 
 
-def compare_original(image, directory, prepare=False):
+def compare_original(image, directory, prepare=False, emission=False):
     import unicorn as U
     import unicorn.mips_const as M
     machine = U.Uc(U.UC_ARCH_MIPS, U.UC_MODE_MIPS32 | U.UC_MODE_LITTLE_ENDIAN)
@@ -43,6 +43,41 @@ def compare_original(image, directory, prepare=False):
     machine.emu_start(0x58C0 if prepare else 0x5154, stop, count=200000)
     if machine.reg_read(M.UC_MIPS_REG_PC) != stop:
         raise RuntimeError('Original routine did not reach the selected boundary within the budget')
+    emitted_code = None
+    if emission:
+        machine.mem_map(0x09B80000, 0x20000)
+        # Skip the single CACHE at +0x5D5C; run the actual BIOS allocation-table
+        # setup and the first category read through +0x5E77. Observe the next
+        # instruction boundary explicitly; Unicorn's second `until` run can
+        # leave a stale reported PC. The hook changes no guest register/memory.
+        reached_setup = []
+        def setup_boundary(uc, address, size, user):
+            if address == 0x5E78:
+                reached_setup.append(address)
+                uc.emu_stop()
+        hook = machine.hook_add(U.UC_HOOK_CODE, setup_boundary)
+        machine.emu_start(0x5D60, 0x0700FFF0, count=200000)
+        machine.hook_del(hook)
+        if not reached_setup:
+            raise RuntimeError(f'Original allocator setup did not reach boundary: PC={machine.reg_read(M.UC_MIPS_REG_PC):08X}')
+        cursor = machine.reg_read(M.UC_MIPS_REG_S1)
+        start = cursor
+        high_water = struct.unpack('<I', machine.mem_read(0x10B4C, 4))[0]
+        for record in range(BASE, high_water + 1, 16):
+            category = struct.unpack('<H', machine.mem_read(record + 4, 2))[0]
+            if category == 0:
+                continue
+            if category not in (9, 0x13):
+                break
+            for reg, value in ((M.UC_MIPS_REG_A0, category), (M.UC_MIPS_REG_A1, record),
+                               (M.UC_MIPS_REG_A2, cursor), (M.UC_MIPS_REG_A3, 0),
+                               (M.UC_MIPS_REG_SP, 0x0700F000), (M.UC_MIPS_REG_RA, 0x0700FFF0)):
+                machine.reg_write(reg, value)
+            machine.emu_start(0x6914, 0x0700FFF0, count=200000)
+            if machine.reg_read(M.UC_MIPS_REG_PC) != 0x0700FFF0:
+                raise RuntimeError('Original immediate emitter did not return')
+            cursor = machine.reg_read(M.UC_MIPS_REG_V0)
+        emitted_code = bytes(machine.mem_read(start, cursor - start))
     expected = bytes(machine.mem_read(BASE, 0xC010))
     native = (directory / 'records.bin').read_bytes().ljust(len(expected), b'\0')
     expected_scratch = bytes(machine.mem_read(0x10000, 0x4000))
@@ -61,7 +96,15 @@ def compare_original(image, directory, prepare=False):
     if prepare:
         report['compiler_prefix_sha256'] = hashlib.sha256((ROOT / 'src/native/pops_compile.c').read_bytes()).hexdigest()
         report['original_emission_cursor_not_executable'] = machine.reg_read(M.UC_MIPS_REG_S1)
+    if emission:
+        report['stage'] = '06914_immediate_probe_after_original_register_setup'
+        report['emitter_sha256'] = hashlib.sha256((ROOT / 'src/native/pops_emit.c').read_bytes()).hexdigest()
+        report['allegrex_emitted_bytes'] = len(emitted_code)
+        report['allegrex_bytes_equal'] = emitted_code == (directory / 'allegrex.bin').read_bytes()
+        report['excluded'] = 'one setup CACHE skipped; full record walk/linking and execution not performed'
     report['passed'] = not differences and report['scratch_equal'] and report['record_length_equal']
+    if emission:
+        report['passed'] &= report['allegrex_bytes_equal']
     (directory / 'comparison.json').write_text(json.dumps(report, indent=2) + '\n')
     if not report['passed']:
         raise RuntimeError('Native/original analyzer mismatch; see comparison.json')
@@ -74,7 +117,10 @@ def main():
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--compare', action='store_true')
     parser.add_argument('--prepare', action='store_true', help='Include original compiler setup and cost pass before emission')
+    parser.add_argument('--emit-immediates', action='store_true', help='Probe immediate emission after prepare; not full block compilation')
     args = parser.parse_args()
+    if args.emit_immediates:
+        args.prepare = True
     if args.out.exists():
         parser.error('Use a new output directory; earlier outputs are preserved')
     manifest = json.loads((args.image / 'manifest.json').read_text())
@@ -86,7 +132,9 @@ def main():
     args.out.mkdir(parents=True)
     command = [str(ROOT / 'build/repops-analyze'),
                str((args.image / 'pops_image.bin').resolve()), str(args.out.resolve())]
-    if args.prepare:
+    if args.emit_immediates:
+        command.append('--emit-immediates')
+    elif args.prepare:
         command.append('--prepare')
     subprocess.run(command, check=True)
     blob = (args.out / 'records.bin').read_bytes()
@@ -102,7 +150,7 @@ def main():
     (args.out / 'records.json').write_text(json.dumps(rows, indent=2) + '\n')
     print(f'{len(rows)} nonempty record categories; includes boundary records, not executed instructions.')
     if args.compare:
-        compare_original(image, args.out, args.prepare)
+        compare_original(image, args.out, args.prepare, args.emit_immediates)
     print('Output:', args.out)
 
 

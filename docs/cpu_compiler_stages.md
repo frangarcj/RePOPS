@@ -44,7 +44,8 @@ IR with one unchanging schema. A backend decision must not obscure that fact.
 A small helper at +0x44DC emits `ADDIU T9,T9,-cost` for positive costs. This
 connects the accounting pass to generated code: POPS charges a batch of guest
 work through the host register T9. Its full timing/dispatch contract is still
-being traced. This helper is not yet reconstructed in the current prefix.
+being traced. This helper is now reconstructed in `pops_emit.c`; it remains
+separate from the not-yet-reconstructed complete record walk.
 
 ## Reproduce the focused comparison
 
@@ -60,3 +61,9 @@ The native implementation reaches the same boundary logically. This is one
 sample with generic MIPS-compatible instructions, not exhaustive instruction
 coverage, complete compilation, or PS1 execution. The initial native +0x05154
 probe remains available without `--prepare`.
+
+The following pass adds `--emit-immediates`, original register tables and
+native reconstruction of allocation/load/spill helpers. The first immediate
+sequence produces the same Allegrex bytes as the original emitter. The probe
+calls +0x6914 directly and does not pretend to implement all of +0x058C0's
+controller loop. See `cpu_register_emission.md`.

@@ -83,6 +83,13 @@ mapping, code-cache selection and [boundary-cost accounting](docs/cpu_compiler_s
 For the initial BIOS sample that prefix also matches the original records and
 scratchpad, stopping before instruction emission at `+0x5D5C`.
 
+`--emit-immediates` adds the first reconstructed category of the Allegrex
+emitter and its register helpers. The beginning of the BIOS produces the same
+three words as POPS, with matching records and scratchpad. This is a focused
+probe: it stops before the first memory-write category, not a complete block.
+The generated Allegrex is not executed by the Mac. See
+[register allocation and initial emission](docs/cpu_register_emission.md).
+
 ```sh
 python3 scripts/function_progress.py
 # Compare the register with a particular native run:

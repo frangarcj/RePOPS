@@ -35,7 +35,12 @@ fi
 RUN=$(mktemp -d "$ROOT/out/ffvi_run.XXXXXX")
 echo "Building and running native C (the game is not fully implemented yet)."
 echo "PBP: $PBP"
-"$PYTHON" "$ROOT/scripts/run_native.py" --image "$IMAGE" --pbp "$PBP" --out "$RUN/result"
+set --
+if [ "${REPOPS_DIAGNOSTIC_SKIP_UI:-0}" = 1 ]; then
+    echo 'DIAGNOSTIC: PSP startup UI is bypassed, not reconstructed.'
+    set -- --diagnostic-skip-ui
+fi
+"$PYTHON" "$ROOT/scripts/run_native.py" --image "$IMAGE" --pbp "$PBP" --out "$RUN/result" "$@"
 echo
 echo "Execution milestones:"
 "$PYTHON" - "$RUN/result/trace.jsonl" <<'PY'
@@ -43,7 +48,7 @@ import json,sys
 from pathlib import Path
 for line in Path(sys.argv[1]).read_text().splitlines():
     event=json.loads(line)
-    if event['kind'] in ('milestone','blocker'):
+    if event['kind'] in ('milestone','blocker','diagnostic_bypass'):
         print(f"  {event['kind']}: {event['name']} @ 0x{event['address']:08X} value={event['value']}")
     elif event['kind']=='result':
         print('  game_executed:',event['game_executed'])

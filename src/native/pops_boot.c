@@ -164,5 +164,17 @@ void rp_pops_main_thread(rp_context *c)
     rp_pops_patch_syscalls(c);
     uint32_t result=rp_pops_disc_init(c);
     if (result&0x80000000) exit_vsh(c,(int32_t)result);
-    rp_block(c,"function_not_reconstructed",0x28DF8);
+    if (!c->diagnostic_skip_ui) rp_block(c,"function_not_reconstructed",0x28DF8);
+    /* Explicit investigative entry, not a claimed implementation of the UI.
+     * No savedata/config produced by that UI is fabricated here.
+     */
+    rp_event(c,"diagnostic_bypass","startup_UI_not_reconstructed",0x28DF8,1);
+    result=select_disc(c);
+    if (result != 0) exit_vsh(c,(int32_t)UINT32_C(0x80000004));
+    result=rp_pops_mc_init(c);
+    if (result&0x80000000) exit_vsh(c,(int32_t)UINT32_C(0x80000004));
+    result=rp_pops_controller_init(c);
+    if (result&0x80000000) exit_vsh(c,(int32_t)UINT32_C(0x80000004));
+    rp_pops_initialize_core(c);
+    rp_block(c,"function_not_reconstructed",0x1C964);
 }

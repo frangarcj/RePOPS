@@ -37,6 +37,16 @@ provenance and `game_executed: false`. The wrapper exits zero when it captures
 a valid diagnostic run; the underlying native executable exits 78 at a blocker.
 Neither status claims that a game booted.
 
+To investigate core initialization beyond the unported PSP menu:
+
+```sh
+REPOPS_DIAGNOSTIC_SKIP_UI=1 ./run_ffvi.sh
+```
+
+This is an explicit [diagnostic bypass](docs/native_core_diagnostic.md), not a
+reconstructed menu or proven startup state. It currently prepares reset state
+and device-handler tables, then stops at `+0x1A494`.
+
 Requirements: a C11 compiler, Python dependencies from `requirements.txt`,
 `pkg-config`, `libpng`, and Ghidra with the Allegrex extension for initial data
 export. The native executable does not require Unicorn, PSP GCC or Java at

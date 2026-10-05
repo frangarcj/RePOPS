@@ -36,8 +36,13 @@ static void load_data(rp_context *c, const char *image, const char *imports)
 
 int main(int argc, char **argv)
 {
+    int skip_ui = 0;
+    if (argc > 1 && strcmp(argv[argc - 1], "--diagnostic-skip-ui") == 0) {
+        skip_ui = 1;
+        --argc;
+    }
     if (argc<4 || argc>5) {
-        fprintf(stderr,"usage: %s <checked-image.bin> <imports.tsv> <new-trace.jsonl> [game.pbp]\n",argv[0]);
+        fprintf(stderr,"usage: %s <checked-image.bin> <imports.tsv> <new-trace.jsonl> [game.pbp] [--diagnostic-skip-ui]\n",argv[0]);
         return 64;
     }
     rp_context *c=calloc(1,sizeof(*c));
@@ -54,6 +59,7 @@ int main(int argc, char **argv)
         if (!c->regions[i].bytes) { fputs("Guest memory allocation failed\n",stderr); return 70; }
     }
     c->gp=0x10000; c->heap_next=0x1000000; c->next_id=1;
+    c->diagnostic_skip_ui=skip_ui;
     c->disc_path=argc==5?argv[4]:NULL;
     if (setjmp(c->stop)==0) {
         load_data(c,argv[1],argv[2]);
@@ -64,8 +70,10 @@ int main(int argc, char **argv)
     }
     fprintf(c->trace,"{\"kind\":\"result\",\"status\":\"%s\",\"address\":%u,"
             "\"native_function_entries\":%u,\"host_service_calls\":%u,"
-            "\"execution\":\"native_C_not_MIPS_interpretation\",\"game_executed\":false}\n",
-            c->stop_kind,c->stop_address,c->functions,c->services);
+            "\"execution\":\"native_C_not_MIPS_interpretation\",\"game_executed\":false,"
+            "\"diagnostic_ui_bypassed\":%s}\n",
+            c->stop_kind,c->stop_address,c->functions,c->services,
+            c->diagnostic_skip_ui ? "true" : "false");
     printf("Native C stopped: %s at 0x%08X; %u function entries, %u host calls\n",
             c->stop_kind,c->stop_address,c->functions,c->services);
     if (c->disc) fclose(c->disc);

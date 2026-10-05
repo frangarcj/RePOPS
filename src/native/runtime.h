@@ -22,6 +22,11 @@ typedef struct rp_context {
     uint32_t gp, heap_next, next_id, thread_entry, psar_offset;
     uint32_t data_psp_word;
     uint32_t cd_thread_entry, cd_event_bits;
+    uint32_t mc_thread_entry, mc_semaphore_count;
+    uint32_t me_callback, me_request, me_ack, me_value;
+    uint32_t vfpu_s330_bits;
+    float vfpu_reset_rows[4][4];
+    int diagnostic_skip_ui, vfpu_zero_ready;
     uint64_t disc_bytes;
     rp_disc_header_state disc_header;
     uint32_t functions, services, imports, last_function;
@@ -62,4 +67,7 @@ uint32_t rp_pops_halfword_length(rp_context *, uint32_t, int32_t);
 void rp_pops_optional_metadata(rp_context *, uint32_t, uint32_t, uint32_t);
 uint32_t rp_pops_optional_auxiliary(rp_context *, uint32_t);
 void rp_pops_finish_disc_boot(rp_context *);
+uint32_t rp_pops_mc_init(rp_context *);
+uint32_t rp_pops_controller_init(rp_context *);
+void rp_pops_initialize_core(rp_context *);
 #endif

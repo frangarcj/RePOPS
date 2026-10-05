@@ -2,7 +2,7 @@ CC ?= cc
 CFLAGS ?= -O2 -g
 PNG_CFLAGS = $(shell pkg-config --cflags libpng)
 PNG_LIBS = $(shell pkg-config --libs libpng)
-NATIVE_SRC = src/bootstrap.c src/native/runtime.c src/native/pops_boot.c src/native/pops_image.c src/native/pops_disc.c src/native/pops_config.c src/native/pops_metadata.c src/native/main.c
+NATIVE_SRC = src/bootstrap.c src/me_startup.c src/native/runtime.c src/native/pops_boot.c src/native/pops_image.c src/native/pops_disc.c src/native/pops_config.c src/native/pops_metadata.c src/native/pops_reset.c src/native/main.c
 
 .PHONY: all native test test-native-disc test-native-config test-native-me clean-help
 all: native

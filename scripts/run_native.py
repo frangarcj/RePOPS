@@ -17,6 +17,8 @@ def main():
     ap.add_argument('--image',type=Path,required=True)
     ap.add_argument('--out',type=Path,required=True)
     ap.add_argument('--pbp',type=Path)
+    ap.add_argument('--diagnostic-skip-ui',action='store_true',
+                    help='Explicitly bypass PSP startup UI to investigate core initialization')
     ap.add_argument('--elf',type=Path,default=ROOT/'build/pops_660.prx.dec')
     args=ap.parse_args()
     if args.out.exists(): ap.error('Refusing existing output directory')
@@ -39,11 +41,13 @@ def main():
     trace=args.out/'trace.jsonl'
     command=[str(ROOT/'build/repops-native'),str(binary.resolve()),str(imports_file.resolve()),str(trace.resolve())]
     if args.pbp is not None:command.append(str(args.pbp.resolve()))
+    if args.diagnostic_skip_ui:command.append('--diagnostic-skip-ui')
     run=subprocess.run(command,cwd=ROOT,capture_output=True,text=True,timeout=30)
     (args.out/'stdout.log').write_text(run.stdout+run.stderr)
     events=[json.loads(line) for line in trace.read_text().splitlines()] if trace.exists() else []
     last=events[-1] if events else {'status':'no_result'}
     report={'exit_code':run.returncode,'result':last,'original_sha256':SOURCE_SHA256,
+            'diagnostic_ui_bypassed':args.diagnostic_skip_ui,
             'image_sha256':manifest['image_sha256'],'native_binary_sha256':hashlib.sha256((ROOT/'build/repops-native').read_bytes()).hexdigest(),
             'scope':'Reconstructed C startup and prefixes, explicit headless/filesystem adapters; no MIPS interpreter',
             'limitations':'Not a complete emulator; POPSMAN startup, callbacks, hardware, remaining functions and game execution are incomplete'}

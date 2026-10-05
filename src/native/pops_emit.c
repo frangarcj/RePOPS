@@ -558,7 +558,17 @@ uint32_t rp_emit_record(rp_context *c, rp_pops_category category, uint32_t recor
     if (category == RP_CAT_ALU) return emit_known_alu(c, record, out);
     if (category == RP_CAT_WRITE_COP) {
         const uint8_t *r = rp_memory(c, record, 16);
-        if (r[14] == 0x43) rp_block(c, "special_state_write_not_reconstructed", 0x6914);
+        if (r[14] == 0x43 && !known(c, r[13]) && record != 0x041B0000) {
+            const uint8_t previous = *(uint8_t *)rp_memory(c, record - 13, 1);
+            const uint32_t configured = rp_u32(c, 0x09E812B0);
+            if ((uint8_t)(previous + 0x9C) < 2 && configured && configured != 0x72D0EE59) {
+                const uint32_t temporary = rp_emit_temp(c, 4, 0);
+                out = rp_emit_constant(c, out, temporary, configured ^ UINT32_C(0x72D0EE59));
+                out = emit(c, out, 0xAF80010C | ((temporary & 31) << 16));
+                rp_emit_release_temp(c, temporary);
+                return out;
+            }
+        }
         const uint8_t policy = *(uint8_t *)rp_module_memory(c, 0xD42FC + r[14], 1);
         return rp_emit_store_state(c, policy, r[13], (uint32_t)r[14] * 4, out);
     }

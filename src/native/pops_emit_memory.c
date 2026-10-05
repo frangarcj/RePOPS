@@ -276,15 +276,62 @@ uint32_t rp_emit_memory_record(rp_context *c, uint32_t record, uint32_t out)
     return out;
 }
 
-/* +0x46A0's CPU-status destination. The generated call remains Allegrex data,
- * not a host interrupt service. Other state destinations are still pending.
- */
+/* +0x46A0's ordinary GP-relative state writes. Special GTE destinations and
+ * the cause-byte merge remain separate from this store policy path. */
+static uint32_t emit_plain_state(rp_context *c, uint32_t policy, uint32_t guest,
+                                 uint32_t offset, uint32_t out)
+{
+    if (offset == 0x134 || offset == 0x3C || offset == 0x70 || offset == 0x78)
+        rp_block(c, "special_state_write_destination_not_reconstructed", offset);
+    if (guest & 0x80)
+        return emit(c, out, 0xAF800000 | ((guest & 31) << 16) | (offset & 0xFFFF));
+    if (policy > 2) return out;
+    if (policy == 1) {
+        const uint32_t value = rp_u32(c, c->gp + 0xB5C + guest * 4);
+        if (!known(c, guest) || value != sign16(value))
+            rp_block(c, "signed_half_state_policy_not_reconstructed", 0x4930);
+    }
+    if (policy != 2) {
+        const int32_t mapped = rp_emit_lookup_register(c, guest);
+        if (mapped < -1) {
+            const uint32_t previous = rp_u32(c, out - 4), fpr = (0u - (uint32_t)mapped) & 31;
+            if (rp_emit_previous_movable(c, out) &&
+                    (previous & UINT32_C(0xFFE0FFFF)) == (0x44800000 | (fpr << 11)))
+                return emit(c, out, 0xAF800000 | (previous & 0x1F0000) | (offset & 0xFFFF));
+            return emit(c, out, 0xE7800000 | (fpr << 16) | (offset & 0xFFFF));
+        }
+    }
+    const uint32_t allocation = rp_emit_allocate(c, out, guest, 0, 2);
+    return emit(c, (allocation >> 5) << 2,
+                (policy == 2 ? 0xA7800000 : 0xAF800000) |
+                ((allocation & 31) << 16) | (offset & 0xFFFF));
+}
+
+/* CPU status has an explicit mask and an interrupt-deadline helper call. */
 uint32_t rp_emit_store_state(rp_context *c, uint32_t policy, uint32_t guest,
                              uint32_t offset, uint32_t out)
 {
     rp_function(c, 0x46A0, "pops.emit_CPU_status_write_partial");
+    policy &= 0xFF;
     if ((policy & 0xFF) == 3) return out;
-    if (offset != 0x130) rp_block(c, "state_write_destination_not_reconstructed", offset);
+    if (offset == 0x134) {
+        uint32_t host = guest & 0x7F;
+        if (host == guest) {
+            const uint32_t allocation = rp_emit_allocate(c, out, guest, 0, 2);
+            host = allocation & 31;
+            out = (allocation >> 5) << 2;
+        }
+        out = emit(c, out, 0x83850135); /* LB A1, software-pending byte */
+        if (host) out = emit(c, out, 0x7C060A00 | ((host & 31) << 21));
+        out = emit(c, out, 0x7C050804 | (host ? 6u << 21 : 0));
+        out = emit(c, out, 0xA3850135);
+        if (!host) return out;
+        out = rp_emit_flush_registers(c, out, 11);
+        out = emit(c, out, 0x0C0025AB);
+        out = emit(c, out, 0xAF9901B0);
+        return emit(c, out, 0x8F9901B0);
+    }
+    if (offset != 0x130) return emit_plain_state(c, policy, guest, offset, out);
     uint32_t host = guest & 0x7F;
     if (host == guest) {
         const uint32_t allocation = rp_emit_allocate(c, out, guest, 0, 2);

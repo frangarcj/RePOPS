@@ -29,6 +29,14 @@ int main(void)
     assert(rp_u32(c, c->gp + 0x20) == UINT32_MAX);
     assert(rp_u32(c, c->gp + 0x24) == UINT32_MAX);
     assert(c->generated_instructions == 7 && c->run_gpr[0] == 0);
+    /* Software IRQ byte: EXT source bits 8..9, INS only destination bits 0..1. */
+    rp_w32(c, 0x09B80020, 0x7C860A00);
+    rp_w32(c, 0x09B80024, 0x7CC50804);
+    rp_w32(c, c->gp + 0x1D0, 0x09B80028);
+    c->run_gpr[4] = 0x300; c->run_gpr[5] = 0xA4;
+    c->run_pc = 0x09B80020; c->run_next_pc = 0x09B80024;
+    rp_generated_step(c); rp_generated_step(c);
+    assert(c->run_gpr[6] == 3 && c->run_gpr[5] == 0xA7);
     fclose(c->trace); free(c->regions[2].bytes); free(c);
     puts("Generated-code adapter: branch/call delay slots, signed value and FPR bits passed.");
     return 0;

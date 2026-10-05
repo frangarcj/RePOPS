@@ -97,6 +97,19 @@ void rp_generated_step(rp_context *c)
         else if (rs == 4) c->run_fpr[rd] = r[rt];
         else goto unsupported;
         break;
+    case 0x1F:
+        if ((word & 63) == 0) {
+            const unsigned bits = rd + 1;
+            if (sa + bits > 32) goto unsupported;
+            const uint32_t mask = bits == 32 ? UINT32_MAX : (1u << bits) - 1;
+            r[rt] = (r[rs] >> sa) & mask;
+        } else if ((word & 63) == 4) {
+            if (rd < sa) goto unsupported;
+            const unsigned bits = rd - sa + 1;
+            const uint32_t mask = bits == 32 ? UINT32_MAX : ((1u << bits) - 1) << sa;
+            r[rt] = (r[rt] & ~mask) | ((r[rs] << sa) & mask);
+        } else goto unsupported;
+        break;
     case 0x20: r[rt] = (read_value(c, r[rs] + immediate, 1) ^ 0x80) - 0x80; break;
     case 0x21: r[rt] = sx16(read_value(c, r[rs] + immediate, 2)); break;
     case 0x23: r[rt] = read_value(c, r[rs] + immediate, 4); break;
@@ -105,6 +118,8 @@ void rp_generated_step(rp_context *c)
     case 0x28: write_value(c, r[rs] + immediate, r[rt], 1); break;
     case 0x29: write_value(c, r[rs] + immediate, r[rt], 2); break;
     case 0x2B: write_value(c, r[rs] + immediate, r[rt], 4); break;
+    case 0x31: c->run_fpr[rt] = read_value(c, r[rs] + immediate, 4); break;
+    case 0x39: write_value(c, r[rs] + immediate, c->run_fpr[rt], 4); break;
     default: goto unsupported;
     }
     r[0] = 0;

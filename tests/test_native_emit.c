@@ -68,6 +68,14 @@ int main(void)
     const uint32_t branch = rp_u32(c, record + 12);
     assert(rp_u32(c, branch) == (0x14000000 | (8u << 21)));
     assert(rp_u32(c, branch + 4) == 0x2739FFF9 && cursor == branch + 8);
+    rp_emit_init_registers(c, cursor);
+    cursor = rp_emit_store_state(c, 0, 0, 0x11C, cursor);
+    assert(rp_u32(c, cursor - 4) == 0xAF80011C);
+    const uint32_t cause = cursor;
+    cursor = rp_emit_store_state(c, 0, 0, 0x134, cursor);
+    assert(cursor == cause + 12);
+    assert(rp_u32(c, cause) == 0x83850135 && rp_u32(c, cause + 4) == 0x7C050804);
+    assert(rp_u32(c, cause + 8) == 0xA3850135);
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[2].bytes); free(c);
     puts("Emitter smoke: FPR/memory locations, temporary state, constants and debit passed; not exhaustive equivalence.");
     return 0;

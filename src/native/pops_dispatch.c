@@ -88,6 +88,47 @@ static void native_helper(rp_context *c)
 {
     uint32_t *r = c->run_gpr;
     switch (c->run_pc) {
+    case 0x1AA8: case 0x1AC8: case 0x1AE4:
+    case 0x1A90: {
+        rp_function(c, 0x1A90, "pops.dynamic_signed_byte_read");
+        const uint32_t address = r[4], region = (address >> 23) & 63;
+        r[6] = 0x4C;
+        if (!region) {
+            r[4] = (address & 0x1FFFFF) | 0x09800000;
+            const uint8_t byte = *(uint8_t *)rp_memory(c, r[4], 1);
+            r[2] = byte < 128 ? byte : (uint32_t)((int32_t)byte - 256);
+        } else if (region == 63) {
+            uint32_t specialized = 0;
+            if (((address >> 10) & 0x1FFF) == 0) {
+                specialized = 0x1AA8;
+                r[4] = (address & 0x3FF) | 0x13000;
+                const uint8_t byte = *(uint8_t *)rp_memory(c, r[4], 1);
+                r[2] = byte < 128 ? byte : (uint32_t)((int32_t)byte - 256);
+                r[25] += 4;
+            } else if ((address >> 19) == 0x17F8) {
+                specialized = 0x1AC8;
+                const uint8_t byte = *(uint8_t *)rp_module_memory(c, 0x53C20 + (address & 0x7FFFF), 1);
+                r[2] = byte < 128 ? byte : (uint32_t)((int32_t)byte - 256);
+            } else {
+                rp_block(c, "byte_read_IO_specialization_not_reconstructed", address);
+            }
+            if (c->run_pc == 0x1A90) {
+                const uint32_t patch = r[31] - 8;
+                if (patch < 0x09B80000 || patch >= rp_u32(c, c->gp + 0x1D0))
+                    rp_block(c, "memory_specialization_patch_outside_cache", patch);
+                rp_w32(c, patch, (UINT32_C(0x30000000) + specialized) >> 2);
+                rp_event(c, "milestone", "byte_read_callsite_specialized", patch, specialized);
+            }
+        } else {
+            /* +0x1C68 -> +0x8ADC: no call-site specialization in this path. */
+            r[5] = 0;
+            rp_w32(c, c->gp + 0x1B0, r[25]);
+            r[2] = rp_pops_constant_read(c, r[4], 0);
+            r[25] = rp_u32(c, c->gp + 0x1B0);
+        }
+        transfer(c, r[31]);
+        return;
+    }
     case 0x2648:
         rp_w32(c, c->gp + 0x1B0, r[25]);
         if ((int32_t)r[25] <= 0) {
@@ -134,7 +175,11 @@ static void native_helper(rp_context *c)
         const uint32_t patch = r[31] - 8;
         if (patch < 0x09B80000 || patch >= rp_u32(c, c->gp + 0x1D0))
             rp_block(c, "link_patch_outside_generated_cache", patch);
-        rp_w32(c, patch, (rp_u32(c, patch) & 0xFF000000) | ((target >> 2) & 0xFFFFFF));
+        /* Original SWL changes only 24 target bits: PRX and cache share the
+         * remaining bits on PSP. Our base-zero helper addresses do not, so
+         * the rehost must replace the full JAL target, retaining its opcode.
+         */
+        rp_w32(c, patch, (rp_u32(c, patch) & 0xFC000000) | ((target >> 2) & 0x3FFFFFF));
         r[4] = target << 6;
         rp_event(c, "milestone", "BIOS_block_executed_next_PC_reached", target_pc, target);
         transfer(c, target);

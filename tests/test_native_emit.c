@@ -108,6 +108,10 @@ int main(void)
     const uint32_t indirect = rp_u32(c, record + 12);
     assert(rp_u32(c, indirect) == (0x30002648u >> 2));
     assert(rp_u32(c, indirect + 4) == 0x2739FFFD && cursor == indirect + 8);
+    assert(rp_pops_constant_read(c, 0x1F000084, 0) == 0);
+    assert(rp_pops_constant_read(c, 0x1F802030, 0) == 0xFFFF);
+    assert(rp_pops_constant_read(c, 0x1F802030, 4) == 0xFF);
+    assert(rp_pops_constant_read(c, 0x1F802030, 5) == UINT32_MAX);
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[2].bytes); free(c);
     puts("Emitter smoke: FPR/memory locations, temporary state, constants and debit passed; not exhaustive equivalence.");
     return 0;

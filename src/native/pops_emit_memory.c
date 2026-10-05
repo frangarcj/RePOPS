@@ -107,8 +107,8 @@ uint32_t rp_pops_constant_read(rp_context *c, uint32_t address, uint32_t width)
             }
         }
     }
-    if ((int32_t)(width - 4) > 0) return 0xFFFF;
-    return width == 4 ? 0xFF : UINT32_MAX;
+    if ((int32_t)(width - 4) > 0) return UINT32_MAX;
+    return width == 4 ? 0xFF : 0xFFFF;
 }
 
 /* +0x362C specializes an address whose class is already known. Class 0

@@ -1,6 +1,26 @@
 # RePops progress
 
-## Current: RAM-derived blocks execute and program interrupts
+## Current: RAM initialization reaches the active ME callback
+
+88ed77a recovers shift pairs, HI/LO records and exception emission. 81790b0
+connects guarded memory fast paths and IRQ/DMA control, fixing a pending SH/LBU
+adapter mix-up and the IRQ polling debit. faf316e adds timer mode/target
+rescheduling, the RAM exception-vector compiler path and actual SPU status reads.
+
+The next enabled-ME prefix consumes pending key/dirty masks, updates its IRQ
+cursor and noise state, and initializes the first voice's control/release state.
+It stops inside the callback at +0x11CC instead of fabricating an output sample.
+`out/ffvi_run.vVQcDk/result/` records 9,580,458 generated-cache observations,
+1,688 entry transfers and `ME_voice_sample_path_not_reconstructed`.
+
+The run uses the explicit PSP UI bypass. Normal startup still stops at +0x28DF8.
+There is no FFVI boot, rendered framebuffer or active audio. The generated-cache
+counters exclude fast-helper instructions and are not a firmware coverage metric.
+Focused emitter/event/SPU/Unicorn tests pass; these do not prove whole-emulator
+equivalence. See `cpu_exception_and_hilo.md`, `cpu_memory_and_control.md`,
+`timers_and_spu_reads.md` and `me_active_prefix.md` for scope and evidence.
+
+## Earlier: RAM-derived blocks execute and program interrupts
 
 cb2fa59 adds the RAM branch of +0x58C0, code-guard emission, publication and
 execution of the second generated cache through the existing Unicorn engine.

@@ -75,7 +75,7 @@ static bool sample(void *ctx, uint32_t entry, uint32_t *packed)
     rp_context *c = ctx;
     if (entry != CALLBACK_ID) rp_block(c, "unknown_native_me_callback", entry);
     rp_event(c, "milestone", "me_worker_reached_pops_sample_callback", 0, c->me_output_words);
-    return rp_pops_spu_inactive_sample(c, packed);
+    return rp_pops_spu_sample(c, packed);
 }
 void rp_pops_me_poll(rp_context *c)
 {

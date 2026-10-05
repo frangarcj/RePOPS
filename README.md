@@ -63,10 +63,14 @@ The diagnostic now dispatches the first video event, resumes the BIOS RAM
 clear, writes SPU registers through C and executes calls/returns in the
 `BFC06EC4` region. It also executes the copied RAM program through POPS's
 second generated-code cache, returning to BIOS helpers and programming the
-interrupt registers. The latest run stops at the unsigned-byte reader
-`+0x2468`, after 169,448 instruction-hook observations and 94 block-entry
-transfers. Both RAM-derived and BIOS-derived blocks now execute in Unicorn.
-These counts do not measure original-function coverage. FFVI has not booted.
+interrupt registers. It now passes RAM decompression, timer setup, RAM exception
+vectors and SPU register reads/writes. SPUCNT=C010 reaches the enabled ME callback
+in C, consumes its pending masks and initializes the first voice's release state.
+The current stop is `ME_voice_sample_path_not_reconstructed` at `+0x11CC`,
+before the active callback returns a sample. The run records 9,580,458 generated-
+cache instruction observations and 1,688 entry transfers; fast-helper thunks
+are excluded from that observation count. These are not original-function
+coverage measurements. FFVI has not booted and no active audio is claimed.
 
 See [the current Unicorn integration](docs/unicorn_execution.md),
 [the earlier generated-execution experiment](docs/generated_code_execution.md),
@@ -76,7 +80,9 @@ See [the current Unicorn integration](docs/unicorn_execution.md),
 [SPU register writes](docs/spu_register_writer.md),
 [stack accesses/returns](docs/cpu_stack_and_returns.md),
 [RAM compilation](docs/ram_compiler.md), and
-[RAM boot follow-up](docs/ram_boot_followup.md). Active-voice mixing, the renderer,
+[RAM boot follow-up](docs/ram_boot_followup.md),
+[timers and SPU reads](docs/timers_and_spu_reads.md), and
+[the active ME prefix](docs/me_active_prefix.md). Active-voice mixing, the renderer,
 complete CPU behavior and PSP UI remain incomplete.
 
 Requirements: a C11 compiler, Python dependencies from `requirements.txt`,
@@ -146,7 +152,10 @@ a recovered mixer. See [the ME reverse plan](docs/media_engine_reverse.md).
 
 The cooperative [native ME worker](docs/native_me_worker.md) is reached by the
 opt-in diagnostic. The [disabled-SPU branch](docs/native_spu_disabled.md) of the
-POPS callback updates shared state in native C; active mixing is still pending.
+POPS callback updates shared state in native C. The new enabled prefix consumes
+the real key/dirty masks and updates first-voice control state, then explicitly
+stops before the unreconstructed sample path. Active mixing is still pending;
+see [the measured ME checkpoint](docs/me_active_prefix.md).
 
 ```sh
 python3 scripts/audit_me_targets.py --out out/me_target_audit_new

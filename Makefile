@@ -4,7 +4,7 @@ PNG_CFLAGS = $(shell pkg-config --cflags libpng)
 PNG_LIBS = $(shell pkg-config --libs libpng)
 NATIVE_SRC = src/bootstrap.c src/native/runtime.c src/native/pops_boot.c src/native/pops_image.c src/native/pops_disc.c src/native/pops_config.c src/native/main.c
 
-.PHONY: all native test test-native-disc test-native-config clean-help
+.PHONY: all native test test-native-disc test-native-config test-native-me clean-help
 all: native
 native: build/repops-native
 
@@ -28,6 +28,13 @@ build/test_native_config: src/native/runtime.c src/native/pops_disc.c src/native
 
 test-native-config: build/test_native_config
 	./build/test_native_config
+
+build/test_me_worker: src/native/me_worker.c src/native/me_worker.h tests/test_me_worker.c
+	mkdir -p build
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/me_worker.c tests/test_me_worker.c -o $@
+
+test-native-me: build/test_me_worker
+	./build/test_me_worker
 
 clean-help:
 	@echo 'Analysis artifacts are retained. Remove only explicitly selected local outputs.'

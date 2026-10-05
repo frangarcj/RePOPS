@@ -39,4 +39,4 @@ pops_660,0x1BF30,conditional_state_load,pending,,none,not_integrated
 pops_660,0x1A908,pre_core_step,pending,,none,not_integrated
 pops_660,0x1A00,core_dispatch_entry,pending,,none,not_integrated
 pops_660,0x0,ME_sample_callback,pending,,none,not_integrated
-popsman_corpus_660,0x2F88,ME_sample_and_ack_loop,pending,,none,not_integrated
+popsman_corpus_660,0x2F88,ME_sample_and_ack_loop,partial,src/native/me_worker.c,scripted_bus_and_bounded_drain_comparison,isolated

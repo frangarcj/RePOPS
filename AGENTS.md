@@ -31,6 +31,8 @@
   no full-emulator or on-device validation has been performed yet.
 - Save completed, tested work in small semantic commits as it progresses.
   Stage explicit source paths only; never include firmware or bulk outputs.
+- Prioritize moving the integrated native execution path forward. Use focused
+  build/smoke checks; defer exhaustive hardening and extra test infrastructure.
 - Maintain data/function_progress.csv when reconstructing a function. Count
   original functions once per module/profile and entry, not calls, helpers or
   decompiler outputs. Separate complete bodies, partial paths, adapters and

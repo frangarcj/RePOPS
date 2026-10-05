@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "goal": "reconstruct_and_execute_C_natively",
+  "pops_sha256": "6a4aea3f731336916db97194c1a27983c18297c2dfcb1a1a328fd4ff8b09c8e0",
+  "provider_sha256": "ff4222e8085190e1f357aece096282963e0e8e317b76547fafb1600a746a237e",
+  "ark_provider_sha256": "83ed5373388ba2af57f26eba421eacdee66f56bd3e72432af38365ae8bf4d855",
+  "windows": [
+    {"module": "pops", "name": "me_callback_candidate_window", "start": "0x0", "end_exclusive": "0x1A00", "status": "raw_pseudocode_not_reconstructed"},
+    {"module": "pops", "name": "me_callback_setup", "start": "0x19F8C", "end_exclusive": "0x1A050", "status": "caller_traced_not_integrated"},
+    {"module": "provider", "name": "me_bootstrap_template", "start": "0x2F28", "end_exclusive": "0x2F88", "status": "copy_and_patch_traced"},
+    {"module": "provider", "name": "me_sample_and_ack_loop", "start": "0x2F88", "end_exclusive": "0x31EC", "status": "raw_pseudocode_not_reconstructed"},
+    {"module": "provider", "name": "me_register_DE630CD2", "start": "0x3490", "end_exclusive": "0x3514", "status": "isolated_C_model"},
+    {"module": "provider", "name": "me_control_68C55F4C", "start": "0x3514", "end_exclusive": "0x3590", "status": "isolated_C_model"},
+    {"module": "provider", "name": "me_value_C93C56F8", "start": "0x3590", "end_exclusive": "0x35AC", "status": "isolated_C_model"},
+    {"module": "provider", "name": "me_control_0BABD960", "start": "0x35AC", "end_exclusive": "0x35D8", "status": "isolated_C_model"},
+    {"module": "provider", "name": "me_startup_helper", "start": "0x35D8", "end_exclusive": "0x36D8", "status": "isolated_C_model_with_scripted_devices"}
+  ],
+  "candidate_dependencies": [
+    {"path": "kd/me_wrapper.prx", "status": "present_in_corpus_reachability_not_established"}
+  ],
+  "limitations": "Window inventory, not complete code discovery, runtime coverage or verified audio output. Raw byte equality does not establish equal relocated state."
+}

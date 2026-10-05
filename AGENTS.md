@@ -7,6 +7,11 @@
   files are analysis inputs. Measure progress by the native C execution path.
 - Preserve earlier hybrid-PRX/isolated-test experiments, but prioritize an
   integrated executable over perfect byte matching or exhaustive leaf tests.
+- Media Engine code is explicitly in scope: recover the POPS callback, the
+  POPSMAN ME loop and shared-memory protocol, then integrate reconstructed C.
+  Startup/mailbox mocks do not count as a reconstructed mixer or ME runtime.
+  Check whether me_wrapper or auxiliary firmware is actually reached before
+  treating it as a dependency. See docs/media_engine_reverse.md.
 - Target the hash recorded in README.md; do not silently mix firmware versions.
 - Keep firmware binaries, reference disassembly, Ghidra databases and bulk
   decompiler output out of Git. Do not publish them implicitly.

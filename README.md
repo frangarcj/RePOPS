@@ -44,6 +44,22 @@ runtime once its data image has been prepared. Configuration variables:
 See [the native harness notes](docs/native_harness.md) for adaptations,
 remaining limitations, firmware provenance, and reproduction commands.
 
+## Media Engine reverse
+
+The Media Engine is an explicit reconstruction workstream, not just a set of
+startup stubs. The target includes the POPS callback at module offset zero,
+the provider's ME loop, sample production and shared-memory communication.
+The existing registration/startup models remain useful but do not constitute
+a recovered mixer. See [the ME reverse plan](docs/media_engine_reverse.md).
+
+```sh
+python3 scripts/audit_me_targets.py --out out/me_target_audit_new
+```
+
+This audits hash-pinned code windows and compares the current corpus provider
+with the earlier ARK provider. It does not execute firmware or claim complete
+function boundaries; all generated reports stay outside Git.
+
 ## Current target
 
 - PSP firmware: 6.60

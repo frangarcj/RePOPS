@@ -46,6 +46,22 @@ runtime once its data image has been prepared. Configuration variables:
 See [the native harness notes](docs/native_harness.md) for adaptations,
 remaining limitations, firmware provenance, and reproduction commands.
 
+## Function progress
+
+```sh
+python3 scripts/function_progress.py
+# Compare the register with a particular native run:
+python3 scripts/function_progress.py --trace out/ffvi_run.c93OG9/result/trace.jsonl
+```
+
+`data/function_progress.csv` counts original functions once per input profile
+and entry. A complete body can still call unimplemented host services; its
+validation scope and integration status remain separate. Partial paths and
+format adapters are not promoted to complete by being called successfully.
+The register covers audited work and named next targets, not every undiscovered
+function in the firmware. Decompiler output and call counts are not progress
+percentages.
+
 ## Media Engine reverse
 
 The Media Engine is an explicit reconstruction workstream, not just a set of

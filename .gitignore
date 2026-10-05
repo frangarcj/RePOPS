@@ -1,0 +1,20 @@
+# Sony binaries / analysis inputs
+input/*
+build/*
+out/*
+!input/.gitkeep
+!build/.gitkeep
+!out/.gitkeep
+
+# Local reverse-engineering tools
+.tools/
+
+# Ghidra projects
+*.gpr
+*.rep/
+ghidra-projects/
+
+# Python
+__pycache__/
+*.pyc
+.venv/

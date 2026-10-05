@@ -9,6 +9,7 @@ UNICORN_ROOT ?= $(shell $(UNICORN_PYTHON) -c 'import pathlib,unicorn;print(pathl
 UNICORN_CFLAGS = -I"$(UNICORN_ROOT)/include"
 UNICORN_LIBS = "$(UNICORN_ROOT)/lib/libunicorn.a" -lpthread -lm
 NATIVE_SRC += src/native/generated_unicorn.c src/native/pops_dispatch.c src/native/pops_events.c
+NATIVE_SRC += src/native/pops_spu_registers.c
 
 .PHONY: all native analyze test test-native-disc test-native-config test-native-me test-native-spu test-native-emit test-native-memory-card test-generated-code test-unicorn-cache clean-help
 all: native
@@ -34,6 +35,14 @@ build/test_native_events: src/native/runtime.c src/native/pops_events.c src/nati
 .PHONY: test-native-events
 test-native-events: build/test_native_events
 	./build/test_native_events
+
+build/test_spu_registers: src/native/runtime.c src/native/pops_spu_registers.c src/native/runtime.h tests/test_spu_registers.c
+	mkdir -p build
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_spu_registers.c tests/test_spu_registers.c -o $@
+
+.PHONY: test-spu-registers
+test-spu-registers: build/test_spu_registers
+	./build/test_spu_registers
 
 build/test_native_disc: src/native/runtime.c src/native/pops_disc.c src/native/pops_config.c src/native/runtime.h tests/test_native_disc.c
 	mkdir -p build

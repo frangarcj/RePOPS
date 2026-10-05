@@ -88,6 +88,10 @@ static void native_helper(rp_context *c)
 {
     uint32_t *r = c->run_gpr;
     switch (c->run_pc) {
+    case 0x7F00:
+        rp_pops_spu_write_register(c, r[4], r[5], r[6]);
+        transfer(c, r[31]);
+        return;
     case 0x2450:
         rp_function(c, 0x2450, "pops.dynamic_word_store_RAM_path");
         r[2] = (r[4] >> 23) & 63;

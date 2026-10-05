@@ -1,5 +1,22 @@
 #include "runtime.h"
 
+/* +0x9668: unlink and adjust the remaining time when removing the first node. */
+void rp_pops_remove_event(rp_context *c, uint32_t event)
+{
+    rp_function(c, 0x9668, "pops.remove_guest_event");
+    const uint32_t next = rp_u32(c, event), previous = rp_u32(c, event + 4);
+    rp_w32(c, next + 4, previous);
+    rp_w32(c, previous, next);
+    const uint32_t downcount = rp_u32(c, c->gp + 0x1B0);
+    if (previous == c->gp + 0x1B8 && (int32_t)downcount > 0) {
+        const uint32_t deadline = rp_u32(c, next + 8);
+        const uint32_t old_deadline = rp_u32(c, c->gp + 0x1AC);
+        rp_w32(c, c->gp + 0x1AC, deadline);
+        rp_w32(c, c->gp + 0x1B0, downcount + deadline - old_deadline);
+    }
+    rp_w32(c, event + 4, 0);
+}
+
 /* +0x953C: consume the original intrusive event list. Time is guest cycles,
  * including a callback's debit; no wall-clock sleep or synthetic frame tick.
  */

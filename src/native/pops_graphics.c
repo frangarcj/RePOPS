@@ -197,6 +197,11 @@ static void schedule_event(rp_context *c, uint32_t event, uint32_t delay)
     }
     rp_w32(c, event + 8, deadline);
 }
+void rp_pops_schedule_event(rp_context *c, uint32_t event, uint32_t delay)
+{
+    schedule_event(c, event, delay);
+}
+
 static void raise_irq(rp_context *c, uint32_t bits)
 {
     rp_function(c, 0x96E4, "pops.raise_interrupt_bits");

@@ -14,6 +14,9 @@ produce a 24-byte Allegrex prefix with identical records and scratchpad.
 Dynamic addresses, other emitter categories, the full controller walk and
 linking remain pending. See `cpu_memory_emission.md` and
 `cpu_register_emission.md` for the narrow validation scope.
+The follow-up flow probe reaches the end of the initial record region and
+matches 348 emitted bytes, including the CPU-status write and exit sequence.
+See `cpu_flow_emission.md`; the full block controller is still pending.
 See `cpu_analysis_records.md`. The integrated diagnostic still stops at
 +0x115B4, independently of this analysis probe.
 

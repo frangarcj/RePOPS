@@ -363,15 +363,123 @@ uint32_t rp_emit_known_value(rp_context *c, uint32_t dest, uint32_t value, uint3
     return out;
 }
 
-/* +0x6914, immediate/elided and known-base memory categories. Other
- * categories remain the next reconstruction task, not successful no-ops.
+/* +0x6914 category 0x0E: a forward jump over empty records can become
+ * fallthrough. Keep the cycle debit even when no branch word is needed.
+ */
+static uint32_t emit_forward_jump(rp_context *c, uint32_t record, uint32_t out, uint32_t cost)
+{
+    if (!(half(c, record) & 4))
+        rp_block(c, "external_jump_emitter_not_reconstructed", 0x6914);
+    const uint32_t target = 0x041B0000 +
+        (rp_u32(c, record + 8) - rp_u32(c, c->gp + 0xB50)) * 4;
+    if (target <= record)
+        rp_block(c, "backward_jump_emitter_not_reconstructed", 0x6914);
+    uint32_t next = record + 32;
+    while (next < target && half(c, next + 4) == 0) next += 16;
+    if (next != target)
+        rp_block(c, "forward_jump_link_not_reconstructed", 0x42A4);
+    cost += rp_u32(c, c->gp + 0x6C4);
+    out = rp_emit_debit(c, (int32_t)cost, out);
+    rp_w32(c, c->gp + 0xB44, 0);
+    return out;
+}
+
+/* The original folds these four ALU operations when both sources are known
+ * and at least one is zero. Other ALU paths still need the original allocator.
+ */
+static uint32_t emit_known_alu(rp_context *c, uint32_t record, uint32_t out)
+{
+    const uint8_t *r = rp_memory(c, record, 16);
+    const uint32_t dest = r[2], op = r[3], left = r[12], right = r[13];
+    if (known(c, left) && known(c, right)) {
+        const uint32_t a = rp_u32(c, c->gp + 0xB5C + left * 4);
+        const uint32_t b = rp_u32(c, c->gp + 0xB5C + right * 4);
+        if (a == 0 || b == 0) {
+            uint32_t value;
+            switch (op) {
+            case 0x61: value = a + b; break;
+            case 0x63: value = a - b; break;
+            case 0x64: value = a & b; break;
+            case 0x65: value = a | b; break;
+            default: rp_block(c, "ALU_opcode_not_reconstructed", op);
+            }
+            return rp_emit_known_value(c, dest, value, out, record);
+        }
+    }
+    rp_block(c, "general_ALU_emitter_not_reconstructed", 0x6914);
+}
+
+/* +0x6768. Keep the original target-table lookup and slow-entry links;
+ * these are numeric Allegrex addresses, never native C function pointers.
+ */
+uint32_t rp_emit_exit_target(rp_context *c, uint32_t target, uint32_t out)
+{
+    rp_function(c, 0x6768, "pops.emit_exit_target");
+    const uint32_t physical = target & 0x1FFFFFFF;
+    uint32_t table = 0x09C00000, offset = target, linked = 0;
+    bool fallback = false;
+    if (physical >> 23) {
+        table = 0x09E00000; offset = physical;
+        fallback = physical + UINT32_C(0xE0400000) > 0x7FFFF;
+    }
+    if (!fallback) {
+        linked = rp_u32(c, table + (offset & 0x1FFFFC));
+        fallback = (int32_t)linked < 0;
+    }
+    if (fallback) {
+        target = 0x600;
+        linked = rp_u32(c, 0x09C00600);
+    }
+    out = rp_emit_spill_all(c, out);
+    out = rp_emit_constant(c, out, 4, target);
+    const uint32_t last = out - 4, delay = rp_u32(c, last);
+    const uint32_t primary = rp_u32(c, c->gp + 0x3CF4);
+    const uint32_t secondary = rp_u32(c, c->gp + 0x3CF8);
+    bool far = false;
+    uint32_t branch;
+    if (last - primary < 0x20000)
+        branch = 0x1B200000 | (((primary - last) / 4 - 1) & 0xFFFF);
+    else if (last - secondary < 0x20000)
+        branch = 0x1B200000 | (((secondary - last) / 4 - 1) & 0xFFFF);
+    else { branch = 0x1B200003; far = true; }
+    rp_w32(c, last, branch);
+    if (!linked) linked = 0x2888;
+    out = emit(c, out, delay);
+    out = emit(c, out, (linked + UINT32_C(0x30000000)) >> 2);
+    out = emit(c, out, 0xAF8401A0);
+    if (far) {
+        if (out > 0x09B7FFFF) rp_w32(c, c->gp + 0x3CF8, out);
+        else rp_w32(c, c->gp + 0x3CF4, out);
+        out = emit(c, out, 0x0C0006A0);
+        out = emit(c, out, 0xAF8401A0);
+    }
+    return out;
+}
+
+/* +0x6914, selected original categories. Unsupported paths remain explicit
+ * boundaries rather than silently emitting a different execution strategy.
  */
 uint32_t rp_emit_record(rp_context *c, uint32_t category, uint32_t record, uint32_t out, uint32_t cost)
 {
     rp_function(c, 0x6914, "pops.emit_instruction_record_partial");
-    (void)cost;
+    cost += rp_u32(c, c->gp + 0xB44);
+    if ((int32_t)cost < 2) cost = 2;
     if (category == 0x13) return out;
     if (category == 0x10) return rp_emit_memory_record(c, record, out);
+    if (category == 0xE) return emit_forward_jump(c, record, out, cost);
+    if (category == 0xD) return emit_known_alu(c, record, out);
+    if (category == 0xA) {
+        const uint8_t *r = rp_memory(c, record, 16);
+        if (r[14] == 0x43) rp_block(c, "special_state_write_not_reconstructed", 0x6914);
+        const uint8_t policy = *(uint8_t *)rp_module_memory(c, 0xD42FC + r[14], 1);
+        return rp_emit_store_state(c, policy, r[13], (uint32_t)r[14] * 4, out);
+    }
+    if (category == 5) {
+        out = rp_emit_debit(c, (int32_t)cost, out);
+        out = rp_emit_exit_target(c, rp_u32(c, c->gp + 0xB50) + ((record - 0x041B0000) >> 2), out);
+        rp_w32(c, c->gp + 0xB44, 0);
+        return out;
+    }
     if (category != 9) rp_block(c, "emitter_category_not_reconstructed", category);
     const uint32_t src = *(uint8_t *)rp_memory(c, record + 12, 1);
     const uint32_t dest = *(uint8_t *)rp_memory(c, record + 2, 1);

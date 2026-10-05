@@ -9,12 +9,13 @@
 
 int main(int argc, char **argv)
 {
-    const int memory_emission = argc == 4 && strcmp(argv[3], "--emit-memory") == 0;
+    const int flow_emission = argc == 4 && strcmp(argv[3], "--emit-flow") == 0;
+    const int memory_emission = flow_emission || (argc == 4 && strcmp(argv[3], "--emit-memory") == 0);
     const int emission = memory_emission || (argc == 4 && strcmp(argv[3], "--emit-immediates") == 0);
     const int prepare = emission || (argc == 4 && strcmp(argv[3], "--prepare") == 0);
     if (prepare) --argc;
     if (argc != 3) {
-        fprintf(stderr, "usage: %s <checked-native-image.bin> <new-output-directory> [--prepare|--emit-immediates|--emit-memory]\n", argv[0]);
+        fprintf(stderr, "usage: %s <checked-native-image.bin> <new-output-directory> [--prepare|--emit-immediates|--emit-memory|--emit-flow]\n", argv[0]);
         return 64;
     }
     rp_context *c = calloc(1, sizeof(*c));
@@ -71,7 +72,8 @@ int main(int argc, char **argv)
                 const uint8_t *r = rp_memory(c, record, 16);
                 const uint32_t category = r[4] | (uint32_t)r[5] << 8;
                 if (category == 0) continue;
-                if (category != 9 && category != 0x13 && !(memory_emission && category == 0x10)) {
+                if (category != 9 && category != 0x13 && !(memory_emission && category == 0x10) &&
+                        !(flow_emission && (category == 0xE || category == 0xD || category == 0xA || category == 5))) {
                     rp_event(c, "probe_boundary", "next_emitter_category", record, category);
                     break;
                 }
@@ -109,6 +111,7 @@ int main(int argc, char **argv)
                 "\"record_slots\":%u,\"native_function_entries\":%u,\"guest_executed\":false,"
                 "\"emission_cursor_not_executable\":%u,\"emitted_records\":%u,\"stage\":\"%s\"}\n",
                 pc, buffer, end, bytes / 16, c->functions, emission_cursor, emitted_records,
+                flow_emission ? "native_C_POPS_forward_flow_and_known_ALU_probe" :
                 memory_emission ? "native_C_POPS_known_memory_emitter_probe" :
                 emission ? "native_C_POPS_immediate_emitter_probe" :
                 prepare ? "native_C_POPS_058C0_through_05D5B" : "native_C_reconstruction_of_POPS_05154");

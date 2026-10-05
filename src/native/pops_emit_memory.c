@@ -275,3 +275,39 @@ uint32_t rp_emit_memory_record(rp_context *c, uint32_t record, uint32_t out)
         rp_w32(c, c->gp + 0xB44, rp_u32(c, c->gp + 0xB44) + 2);
     return out;
 }
+
+/* +0x46A0's CPU-status destination. The generated call remains Allegrex data,
+ * not a host interrupt service. Other state destinations are still pending.
+ */
+uint32_t rp_emit_store_state(rp_context *c, uint32_t policy, uint32_t guest,
+                             uint32_t offset, uint32_t out)
+{
+    rp_function(c, 0x46A0, "pops.emit_CPU_status_write_partial");
+    if ((policy & 0xFF) == 3) return out;
+    if (offset != 0x130) rp_block(c, "state_write_destination_not_reconstructed", offset);
+    uint32_t host = guest & 0x7F;
+    if (host == guest) {
+        const uint32_t allocation = rp_emit_allocate(c, out, guest, 0, 2);
+        out = (allocation >> 5) << 2;
+        host = allocation & 31;
+    }
+    if (guest == 0x80) guest = 0;
+    const uint32_t mask = UINT32_C(0xF27DFF3F);
+    if (!(guest & 0x80) && known(c, guest)) {
+        const uint32_t value = rp_u32(c, c->gp + 0xB5C + guest * 4);
+        if (!(value & 1)) {
+            if ((value & mask) != value) {
+                out = rp_emit_constant(c, out, 5, value & mask);
+                host = 5;
+            }
+            return emit(c, out, 0xAF800130 | ((host & 31) << 16));
+        }
+    }
+    out = rp_emit_constant(c, out, 5, mask);
+    out = emit(c, out, 0x00052824 | ((host & 31) << 21));
+    out = emit(c, out, 0xAF850130);
+    out = rp_emit_flush_registers(c, out, 11);
+    out = emit(c, out, 0x0C0025AB);
+    out = emit(c, out, 0xAF9901B0);
+    return emit(c, out, 0x8F9901B0);
+}

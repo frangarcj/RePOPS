@@ -135,3 +135,28 @@ void rp_pops_spu_write_register(rp_context *c, uint32_t address, uint32_t value,
     }
     write_register_half(c, reg, (uint16_t)value);
 }
+
+/* +0x85F4. SPUSTAT merges the shared status and IRQ latch; reading it does
+ * not acknowledge the IRQ or wait for the Media Engine. */
+uint32_t rp_pops_spu_read_register(rp_context *c, uint32_t address, uint32_t width)
+{
+    rp_function(c, 0x85F4, "pops.spu_read_register");
+    const uint32_t reg = address & 0x3FF;
+    const uint32_t shared = SPU_SHARED + reg;
+    rp_w32(c, c->gp + 0x1B0, rp_u32(c, c->gp + 0x1B0) - 10);
+    if (reg == 0x1AE && (width & 3) == 1) {
+        const uint32_t status = half(c, shared) & 0x0F7F;
+        const uint32_t irq = *(uint8_t *)rp_memory(c, c->gp + 0x34A, 1);
+        return status | irq | (((status >> 5) & 1) << 7);
+    }
+    if (width == 2) {
+        rp_w32(c, c->gp + 0x1B0, rp_u32(c, c->gp + 0x1B0) - 7);
+        return rp_u32(c, shared);
+    }
+    if (width == 1 || width == 5) {
+        const uint32_t value = half(c, shared);
+        return width == 1 && (value & 0x8000) ? value | UINT32_C(0xFFFF0000) : value;
+    }
+    const uint32_t value = *(uint8_t *)rp_memory(c, shared, 1);
+    return width == 0 && (value & 0x80) ? value | UINT32_C(0xFFFFFF00) : value;
+}

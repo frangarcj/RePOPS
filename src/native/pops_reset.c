@@ -392,7 +392,8 @@ void rp_pops_prepare_exception(rp_context *c, uint32_t cause)
     uint32_t entry = (status & 0x400000) ? rp_u32(c, 0x09E00000) : rp_u32(c, c->gp + 0x1D4);
     rp_w32(c, c->gp + 0x1A0, pc);
     rp_w32(c, c->gp + 0x130, (status & 0xFFFFFFC0) | ((status & 15) << 2));
-    if (!entry) entry = rp_pops_compile_bios_block(c, pc);
+    if (!entry) entry = (status & 0x400000) ? rp_pops_compile_bios_block(c, pc) :
+                                           rp_pops_compile_ram_block(c, pc);
     rp_w32(c, c->gp + 0x1B4, entry);
     rp_event(c, "milestone", "exception_vector_block_ready_not_executed", pc, entry);
 }

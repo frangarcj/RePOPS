@@ -70,6 +70,18 @@ int main(void)
     assert(rp_u32(c, c->gp + 0x20F4) == 0x81800000);
     rp_pops_dma_control_write(c, 0x1F8010F4, 0x01800000, 2);
     assert(rp_u32(c, c->gp + 0x20F4) == 0x00800000);
+    const uint32_t timer = c->gp + 0x64C + 0x20;
+    rp_w32(c, timer + 0x10, 0x10000);
+    rp_pops_timer_write(c, 0x1F801114, 0x100);
+    assert((rp_u32(c, timer + 0x18) & 0x3FF) == 0x100);
+    assert(*(uint8_t *)rp_memory(c, timer + 0x1D, 1) == 11);
+    assert(rp_u32(c, timer + 0x14) == 124 && !rp_u32(c, timer + 4));
+    rp_pops_timer_write(c, 0x1F801114, 0x18);
+    assert(rp_u32(c, timer + 4));
+    rp_pops_timer_write(c, 0x1F801118, 10);
+    assert(rp_u32(c, timer + 0x10) == 10);
+    assert(rp_u32(c, timer + 8) == 134 && rp_u32(c, head) == timer);
+    assert(rp_u32(c, c->gp + 0x1B0) == 10);
     fclose(c->trace); free(c);
     puts("Guest scheduler: unlink, callback debit, overshoot and future-event wait passed.");
     return 0;

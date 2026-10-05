@@ -1,5 +1,26 @@
 #include "runtime.h"
 
+/* +0x945C, shared by video, timer and DMA event producers. */
+void rp_pops_schedule_event(rp_context *c, uint32_t event, uint32_t delay)
+{
+    rp_function(c, 0x945C, "pops.schedule_guest_event");
+    const uint32_t downcount = rp_u32(c, c->gp + 0x1B0);
+    const uint32_t deadline = rp_u32(c, c->gp + 0x1AC) - downcount + delay;
+    const uint32_t head = c->gp + 0x1B8;
+    uint32_t previous = head, next = rp_u32(c, head);
+    unsigned visited = 0;
+    while (next != head && (int32_t)(rp_u32(c, next + 8) - deadline) <= 0) {
+        if (++visited > 1024) rp_block(c, "guest_event_list_cycle", next);
+        previous = next; next = rp_u32(c, next);
+    }
+    rp_w32(c, event, next); rp_w32(c, event + 4, previous);
+    rp_w32(c, previous, event); rp_w32(c, next + 4, event);
+    if ((int32_t)downcount > 0 && previous == head) {
+        rp_w32(c, c->gp + 0x1B0, delay); rp_w32(c, c->gp + 0x1AC, deadline);
+    }
+    rp_w32(c, event + 8, deadline);
+}
+
 static uint32_t rotate_right(uint32_t value, unsigned shift)
 {
     shift &= 31;
@@ -62,40 +83,95 @@ uint32_t rp_pops_irq_read(rp_context *c, uint32_t address)
     return rp_u32(c, c->gp + (address & 0xFFC) + 0x2000);
 }
 
+/* +0x9B6C: convert elapsed guest cycles to the timer's current count. */
+static uint32_t timer_sync(rp_context *c, uint32_t timer)
+{
+    rp_function(c, 0x9B6C, "pops.synchronize_timer_counter");
+    const uint32_t now = rp_u32(c, c->gp + 0x1AC) - rp_u32(c, c->gp + 0x1B0);
+    const unsigned shift = *(uint8_t *)rp_memory(c, timer + 0x1D, 1) & 31;
+    uint32_t count = (now - rp_u32(c, timer + 0x14)) >> shift;
+    const uint32_t target = rp_u32(c, timer + 0x10);
+    if (count < target) return count;
+    const uint32_t mode = rp_u32(c, timer + 0x18);
+    uint32_t flags = mode | 0x800;
+    if (mode & 8) {
+        if (!target) rp_block(c, "timer_zero_period_not_supported", 0x9B6C);
+        count %= target;
+    } else if (count >> 16) {
+        flags = mode | 0x1800;
+        count &= 0xFFFF;
+    }
+    rp_w32(c, timer + 0x18, flags);
+    rp_w32(c, timer + 0x14, now - (count << shift));
+    return count;
+}
+
+/* +0x9A54: schedule the timer using POPS's period and interrupt policy. */
+static void timer_schedule(rp_context *c, uint32_t timer)
+{
+    rp_function(c, 0x9A54, "pops.schedule_timer_counter");
+    const uint32_t count = timer_sync(c, timer);
+    const uint32_t mode = rp_u32(c, timer + 0x18);
+    uint32_t period = (mode & 0x18) ? rp_u32(c, timer + 0x10) : 0x10000;
+    const unsigned shift = *(uint8_t *)rp_memory(c, timer + 0x1D, 1) & 31;
+    if (!(mode & 0x30)) {
+        if (!(period & (period - 1))) return;
+        const uint32_t horizon = UINT32_C(0x80000000) >> shift;
+        period = horizon - horizon % period;
+    }
+    rp_pops_schedule_event(c, timer, (period - count) << shift);
+}
+
 void rp_pops_timer_write(rp_context *c, uint32_t address, uint32_t value)
 {
-    rp_function(c, 0x9C60, "pops.write_timer_register_partial");
+    rp_function(c, 0x9C60, "pops.write_timer_register");
     rp_event(c, "timer_write", "register_value", address, value);
     const uint32_t channel = (address >> 4) & 3;
     const uint32_t reg = address & 0xF;
     if (channel >= 3)
         rp_block(c, "timer_write_path_not_reconstructed", address);
     const uint32_t timer = c->gp + 0x64C + channel * 0x20;
-    if (reg == 4 && (value & 0xFFFF) == 0) {
-        const uint32_t mode = rp_u32(c, timer + 0x18) & ~UINT32_C(0x3FF);
+    if ((int32_t)rp_u32(c, timer + 0x10) >= 0) (void)timer_sync(c, timer);
+    const uint32_t now = rp_u32(c, c->gp + 0x1AC) - rp_u32(c, c->gp + 0x1B0);
+    value &= 0xFFFF;
+    if (reg == 4) {
+        const uint32_t old = rp_u32(c, timer + 0x18);
+        value &= 0x3FF;
+        const uint32_t mode = (old & ~UINT32_C(0x3FF)) | value;
         rp_w32(c, timer + 0x18, mode);
-        rp_w32(c, timer + 0x10, rp_u32(c, timer + 0x10) & 0x1FFFF);
-        rp_w32(c, timer + 0x14, rp_u32(c, c->gp + 0x1AC) - rp_u32(c, c->gp + 0x1B0));
-        rp_w8(c, timer + 0x1D, 0);
-        return;
-    }
-    if (reg == 8) {
+        if (!(mode & 1) || (mode & 6) < 4) {
+            rp_w32(c, timer + 0x10, rp_u32(c, timer + 0x10) & 0x1FFFF);
+            value |= 0x8000;
+        }
+        if ((int32_t)rp_u32(c, timer + 0x10) >= 0) rp_w32(c, timer + 0x14, now);
+        if ((old & 0x3FF) == value) return;
+        const unsigned shift = channel == 1 ? ((value & 0x100) ? 11 : 0) :
+                               ((value & (channel == 2 ? 0x200 : 0x100)) ? 3 : 0);
+        rp_w8(c, timer + 0x1D, (uint8_t)shift);
+    } else if (reg == 8) {
         const uint32_t target = (value & 0xFFFF) ? (value & 0xFFFF) : 0x10000;
         const uint32_t old = rp_u32(c, timer + 0x10);
-        if ((old & 0x3FFFFFFF) != target)
-            rp_block(c, "timer_target_reschedule_not_reconstructed", address);
-        return;
+        if (old == target) return;
+        rp_w32(c, timer + 0x10, (old & UINT32_C(0xC0000000)) | target);
+        const uint32_t shadow = c->gp + (address & 0xFFF) + 0x2000;
+        rp_w8(c, shadow, (uint8_t)target); rp_w8(c, shadow + 1, (uint8_t)(target >> 8));
+    } else if (reg == 0) {
+        /* This POPS path resets the counter origin; the supplied value is not used. */
+        rp_w32(c, timer + 0x14, (int32_t)rp_u32(c, timer + 0x10) < 0 ? 0 : now);
+    } else return;
+    if (reg != 8) {
+        const uint32_t mode = rp_u32(c, timer + 0x18);
+        if (channel & mode & 1) {
+            const uint32_t phase = *(uint8_t *)rp_memory(c, c->gp + 0x3662, 1) & 1;
+            uint32_t target = rp_u32(c, timer + 0x10);
+            const bool stopped = ((mode & 6) ^ (phase << 1)) == 6;
+            target = stopped ? target | UINT32_C(0x80000000) : target & 0x1FFFF;
+            rp_w32(c, timer + 0x10, target);
+            rp_w32(c, timer + 0x14, stopped ? 0 : now);
+        }
     }
-    if (reg == 0 && (value & 0xFFFF) == 0) {
-        if (rp_u32(c, timer + 4))
-            rp_block(c, "timer_counter_event_reschedule_not_reconstructed", address);
-        if (rp_u32(c, timer + 0x18) & 0x30)
-            rp_block(c, "timer_counter_mode_not_reconstructed", address);
-        rp_w32(c, timer + 0x14,
-               rp_u32(c, c->gp + 0x1AC) - rp_u32(c, c->gp + 0x1B0));
-        return;
-    }
-    rp_block(c, "timer_write_path_not_reconstructed", address);
+    if (rp_u32(c, timer + 4)) rp_pops_remove_event(c, timer);
+    if ((int32_t)rp_u32(c, timer + 0x10) >= 0) timer_schedule(c, timer);
 }
 
 /* +0x98C4: I_STAT acknowledges with AND; I_MASK replaces the mask. Only a

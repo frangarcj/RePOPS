@@ -50,7 +50,20 @@ int main(void)
     rp_pops_spu_write_register(c, 0x1DAA, 0x40, 1);
     rp_pops_spu_write_register(c, 0x1DAA, 0, 1);
     assert(schedules == 1 && removals == 1);
+    rp_w32(c, c->gp + 0x1B0, 1000);
+    rp_w32(c, 0x49F40180, 0xABCDFF80);
+    assert(rp_pops_spu_read_register(c, 0x1F801D80, 0) == 0xFFFFFF80);
+    assert(rp_pops_spu_read_register(c, 0x1F801D80, 4) == 0x80);
+    assert(rp_pops_spu_read_register(c, 0x1F801D80, 1) == 0xFFFFFF80);
+    assert(rp_pops_spu_read_register(c, 0x1F801D80, 5) == 0xFF80);
+    assert(rp_pops_spu_read_register(c, 0x1F801D80, 2) == 0xABCDFF80);
+    assert(rp_u32(c, c->gp + 0x1B0) == 943);
+    rp_w8(c, 0x49F401AE, 0x20); rp_w8(c, c->gp + 0x34A, 0x40);
+    assert(rp_pops_spu_read_register(c, 0x1F801DAE, 5) == 0xE0);
+    assert(rp_pops_spu_read_register(c, 0x1F801DAE, 1) == 0xE0);
+    assert(half(c, 0x49F401AE) == 0x20);
+    assert(*(uint8_t *)rp_memory(c, c->gp + 0x34A, 1) == 0x40);
     fclose(c->trace); free(c->regions[2].bytes); free(c);
-    puts("SPU writer: widths, voice/key masks, FIFO transfer and IRQ event requests passed.");
+    puts("SPU registers: widths, cycle debits, status latch, voice/key masks and FIFO passed.");
     return 0;
 }

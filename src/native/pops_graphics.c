@@ -177,29 +177,9 @@ static void gpu_control_reset(rp_context *c)
     rp_w8(c, c->gp + 0x3657, 0); rp_w8(c, c->gp + 0x366B, 0); rp_w8(c, c->gp + 0x366C, 0);
 }
 
-/* +0x945C, insert a guest event into the existing sorted intrusive list. */
 static void schedule_event(rp_context *c, uint32_t event, uint32_t delay)
 {
-    rp_function(c, 0x945C, "pops.schedule_guest_event");
-    const uint32_t downcount = rp_u32(c, c->gp + 0x1B0);
-    const uint32_t deadline = rp_u32(c, c->gp + 0x1AC) - downcount + delay;
-    const uint32_t head = c->gp + 0x1B8;
-    uint32_t previous = head, next = rp_u32(c, head);
-    unsigned visited = 0;
-    while (next != head && (int32_t)(rp_u32(c, next + 8) - deadline) <= 0) {
-        if (++visited > 1024) rp_block(c, "guest_event_list_cycle", next);
-        previous = next; next = rp_u32(c, next);
-    }
-    rp_w32(c, event, next); rp_w32(c, event + 4, previous);
-    rp_w32(c, previous, event); rp_w32(c, next + 4, event);
-    if ((int32_t)downcount > 0 && previous == head) {
-        rp_w32(c, c->gp + 0x1B0, delay); rp_w32(c, c->gp + 0x1AC, deadline);
-    }
-    rp_w32(c, event + 8, deadline);
-}
-void rp_pops_schedule_event(rp_context *c, uint32_t event, uint32_t delay)
-{
-    schedule_event(c, event, delay);
+    rp_pops_schedule_event(c, event, delay);
 }
 
 static void raise_irq(rp_context *c, uint32_t bits)

@@ -107,6 +107,14 @@ static void native_helper(rp_context *c)
 {
     uint32_t *r = c->run_gpr;
     switch (c->run_pc) {
+    case 0x85F4:
+        r[2] = rp_pops_spu_read_register(c, r[4], r[5]);
+        transfer(c, r[31]);
+        return;
+    case 0x9C60:
+        rp_pops_timer_write(c, r[4], r[5]);
+        transfer(c, r[31]);
+        return;
     case 0x91BC:
         rp_pops_dma_control_write(c, r[4], r[5], r[6]);
         transfer(c, r[31]);
@@ -162,11 +170,12 @@ static void native_helper(rp_context *c)
             uint32_t index = (address + UINT32_C(0xE07FF000)) >> 3;
             if (index > 0x1FF) index = 0x1FF;
             const uint32_t handler = rp_u32(c, c->gp + 0x1004 + index * 8);
-            if (handler != 0x9C60 && handler != 0x98C4 && handler != 0x91BC)
+            if (handler != 0x9C60 && handler != 0x98C4 && handler != 0x91BC && handler != 0x7F00)
                 rp_block(c, "dynamic_halfword_store_not_reconstructed", address);
             rp_w32(c, c->gp + 0x1B0, r[25]);
             if (handler == 0x98C4) rp_pops_irq_write(c, address, r[5]);
             else if (handler == 0x91BC) rp_pops_dma_control_write(c, address, r[5], 1);
+            else if (handler == 0x7F00) rp_pops_spu_write_register(c, address, r[5], 1);
             else rp_pops_timer_write(c, address, r[5]);
             r[25] = rp_u32(c, c->gp + 0x1B0);
         }
@@ -236,6 +245,21 @@ static void native_helper(rp_context *c)
                     rp_w32(c, c->gp + 0x1B0, r[25]);
                     r[2] = rp_pops_irq_read(c, address);
                     r[25] = rp_u32(c, c->gp + 0x1B0);
+                } else if (handler == 0x85F4) {
+                    rp_w32(c, c->gp + 0x1B0, r[25]);
+                    r[2] = rp_pops_spu_read_register(c, address, word_read ? 2 : half_read ? 5 : 0);
+                    r[25] = rp_u32(c, c->gp + 0x1B0);
+                } else if (handler == 0x8A54) {
+                    rp_function(c, 0x8A54, "pops.read_shadow_register");
+                    const uint32_t shadow = c->gp + (address & 0xFFF) + 0x2000;
+                    if (word_read) r[2] = rp_u32(c, shadow);
+                    else if (half_read) {
+                        const uint8_t *p = rp_memory(c, shadow, 2);
+                        r[2] = p[0] | (uint32_t)p[1] << 8;
+                    } else {
+                        const uint8_t byte = *(uint8_t *)rp_memory(c, shadow, 1);
+                        r[2] = byte < 128 ? byte : (uint32_t)((int32_t)byte - 256);
+                    }
                 } else {
                     rp_block(c, "read_IO_specialization_not_reconstructed", address);
                 }
@@ -284,11 +308,12 @@ static void native_helper(rp_context *c)
             uint32_t index = (r[4] + UINT32_C(0xE07FF000)) >> 3;
             if (index > 0x1FF) index = 0x1FF;
             const uint32_t handler = rp_u32(c, c->gp + 0x1004 + index * 8);
-            if (handler != 0x98C4 && handler != 0x91BC && handler != 0x9C60)
+            if (handler != 0x98C4 && handler != 0x91BC && handler != 0x9C60 && handler != 0x7F00)
                 rp_block(c, "dynamic_word_store_non_RAM_path", r[4]);
             rp_w32(c, c->gp + 0x1B0, r[25]);
             if (handler == 0x91BC) rp_pops_dma_control_write(c, r[4], r[5], 2);
             else if (handler == 0x9C60) rp_pops_timer_write(c, r[4], r[5]);
+            else if (handler == 0x7F00) rp_pops_spu_write_register(c, r[4], r[5], 2);
             else rp_pops_irq_write(c, r[4], r[5]);
             r[25] = rp_u32(c, c->gp + 0x1B0);
         }

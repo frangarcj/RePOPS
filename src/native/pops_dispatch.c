@@ -134,11 +134,11 @@ void rp_pops_run_core(rp_context *c)
     c->run_gpr[28] = c->gp;
     c->run_gpr[29] = 0x09800000;
     c->run_gpr[25] = rp_u32(c, c->gp + 0x1B0);
-    rp_event(c, "execution_adapter", "generated_code_only_not_original_PRX", 0x1A00, 0);
+    rp_unicorn_open(c);
     transfer(c, lookup_block(c, rp_u32(c, c->gp + 0x1A0)));
     for (unsigned steps = 0; steps < 100000; ++steps) {
         if (c->run_pc >= 0x09B80000 && c->run_pc < rp_u32(c, c->gp + 0x1D0))
-            rp_generated_step(c);
+            rp_unicorn_run(c);
         else
             native_helper(c);
     }

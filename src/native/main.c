@@ -70,17 +70,19 @@ int main(int argc, char **argv)
     }
     fprintf(c->trace,"{\"kind\":\"result\",\"status\":\"%s\",\"address\":%u,"
             "\"native_function_entries\":%u,\"host_service_calls\":%u,"
-            "\"execution\":\"native_C_POPS_with_generated_code_adapter\",\"game_executed\":false,"
-            "\"generated_instructions\":%llu,\"compiled_block_transfers\":%u,"
+            "\"execution\":\"native_C_POPS_with_Unicorn_generated_cache\",\"game_executed\":false,"
+            "\"generated_executor\":\"%s\",\"generated_instruction_hook_events\":%llu,\"compiled_block_transfers\":%u,"
             "\"psx_pc\":%u,\"generated_pc\":%u,"
             "\"diagnostic_ui_bypassed\":%s}\n",
             c->stop_kind,c->stop_address,c->functions,c->services,
+            c->generated_executor ? c->generated_executor : "not_started",
             (unsigned long long)c->generated_instructions,c->compiled_transfers,
             rp_u32(c,c->gp+0x1A0),c->run_pc,
             c->diagnostic_skip_ui ? "true" : "false");
     printf("Native C stopped: %s at 0x%08X; %u function entries, %u host calls\n",
             c->stop_kind,c->stop_address,c->functions,c->services);
     if (c->disc) fclose(c->disc);
+    rp_unicorn_close(c);
     fclose(c->trace);
     for (unsigned i=0;i<RP_REGION_COUNT;++i) free(c->regions[i].bytes);
     free(c);

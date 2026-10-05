@@ -1,6 +1,22 @@
 # RePops progress
 
-## Current: executing the C compiler's BIOS output
+## Current executor: Unicorn instead of a handwritten interpreter
+
+The native build now links Unicorn 2.1.4 through its C API. The reconstructed
+POPS compiler still emits its own cache, while the existing MIPS engine runs
+it. Original PRX pages remain nonexecutable. Known helper PCs use explicit
+engine exits and continue in reconstructed C; no native helper runs inside a
+Unicorn hook. The old handwritten adapter is retained but not linked.
+
+`out/ffvi_run.mbYN9U/result/` reproduces the existing BIOS path to BFC0039C
+and the +0x3A90 compiler boundary. It records 731 instruction-hook events and
+five compiled-entry transfers, not a new retirement or equivalence proof.
+The focused `make test-unicorn-cache` check covers helper returns, the delay
+slot, shared memory, FPR bits and native changes to translated code. This
+removes an infrastructure burden, not a new set of reconstructed POPS functions.
+See `unicorn_execution.md` for the MIPS32-versus-Allegrex limitations.
+
+## Earlier in this pass: executing the C compiler's BIOS output
 
 The volatile memory-card worker now produces the startup signal at +0x14CC64.
 The reconstructed dispatch entry resolves its compiled target and a small

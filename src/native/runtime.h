@@ -34,6 +34,8 @@ typedef struct rp_context {
     uint32_t run_gpr[32], run_fpr[32], run_pc, run_next_pc, run_hi, run_lo;
     uint64_t generated_instructions;
     uint32_t compiled_transfers;
+    void *generated_engine;
+    const char *generated_executor;
     rp_me_worker me_worker;
     uint32_t vfpu_s330_bits;
     float vfpu_reset_rows[4][4];
@@ -94,6 +96,9 @@ bool rp_pops_spu_inactive_sample(rp_context *, uint32_t *);
 void rp_pops_analyze_records(rp_context *, uint32_t);
 uint32_t rp_pops_prepare_compile(rp_context *, uint32_t);
 void rp_generated_step(rp_context *);
+void rp_unicorn_open(rp_context *);
+void rp_unicorn_run(rp_context *);
+void rp_unicorn_close(rp_context *);
 void rp_pops_run_core(rp_context *);
 void rp_pops_default_write(rp_context *, uint32_t, uint32_t, uint32_t);
 void rp_pops_invalidate_ram_code(rp_context *);

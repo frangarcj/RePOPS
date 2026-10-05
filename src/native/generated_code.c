@@ -1,4 +1,5 @@
-/* Provisional backend, NOT reconstructed Sony code or an optimized recompiler.
+/* Historical experiment: not linked into the native executable (Unicorn is).
+ * Provisional backend, NOT reconstructed Sony code or an optimized recompiler.
  * It only executes the cache produced by our C emitter. PRX helper addresses
  * must return to explicit native reconstructions in pops_dispatch.c.
  */

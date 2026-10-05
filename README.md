@@ -53,24 +53,29 @@ the next unreconstructed path, rather than treating initialization as a game
 boot. The volatile-card worker now produces the real startup signal and the
 diagnostic proceeds into compiled-code dispatch.
 
-**The blocks are currently interpreted, not compiled to ARM64.**
-`generated_code.c` is a small provisional Allegrex executor for the output of
-the reconstructed POPS compiler. It never fetches original POPS function
-bodies; their call targets return to reconstructed C or stop explicitly.
-The latest run reaches guest BIOS PC `0xBFC0039C` after 731 generated
-instructions and five compiled-entry transfers. Compiling the next region
+**The blocks now run through Unicorn, not our handwritten interpreter.**
+`generated_unicorn.c` connects Unicorn's MIPS32 engine to the output of the
+reconstructed POPS compiler. Original PRX pages remain nonexecutable; known
+helper PCs stop the engine and return to reconstructed C. We are not building
+a separate optimized ARM64 backend. The former `generated_code.c` experiment
+is retained but no longer linked into the native executable.
+The latest run reaches guest BIOS PC `0xBFC0039C` after 731 instruction-hook
+observations and five compiled-entry transfers. Compiling the next region
 stops at the dynamic-memory-base emitter `+0x3A90`. These instruction/transfer
 counts do not measure original-function coverage. FFVI has not booted.
 
-See [generated execution](docs/generated_code_execution.md),
+See [the current Unicorn integration](docs/unicorn_execution.md),
+[the earlier generated-execution experiment](docs/generated_code_execution.md),
 [conditional flow](docs/cpu_conditional_flow.md), and
 [state writes](docs/cpu_state_writes.md). Active-voice mixing, the renderer,
 complete CPU behavior and PSP UI remain incomplete.
 
 Requirements: a C11 compiler, Python dependencies from `requirements.txt`,
 `pkg-config`, `libpng`, and Ghidra with the Allegrex extension for initial data
-export. The native executable does not require Unicorn, PSP GCC or Java at
-runtime once its data image has been prepared. Configuration variables:
+export. Unicorn 2.1.4 is linked from the installed Python package's C archive;
+the resulting executable does not require a Python interpreter, Unicorn
+shared library, PSP GCC or Java at runtime once its image is prepared.
+`UNICORN_PYTHON` or `UNICORN_ROOT` can select the build dependency. Other configuration variables:
 `REPOPS_PYTHON`, `REPOPS_GAME_PBP`, `REPOPS_NATIVE_IMAGE`, `REPOPS_POPS_ELF`, and
 `GHIDRA_HOME`.
 

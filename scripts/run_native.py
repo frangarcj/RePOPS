@@ -49,7 +49,7 @@ def main():
     report={'exit_code':run.returncode,'result':last,'original_sha256':SOURCE_SHA256,
             'diagnostic_ui_bypassed':args.diagnostic_skip_ui,
             'image_sha256':manifest['image_sha256'],'native_binary_sha256':hashlib.sha256((ROOT/'build/repops-native').read_bytes()).hexdigest(),
-            'scope':'Reconstructed POPS C plus provisional execution of its generated Allegrex cache; original PRX code is not interpreted',
+            'scope':'Reconstructed POPS C plus Unicorn MIPS32 execution of the generated cache; original PRX pages are nonexecutable',
             'limitations':'Not a complete emulator; POPSMAN startup, callbacks, hardware, remaining functions and game execution are incomplete'}
     (args.out/'run.json').write_text(json.dumps(report,indent=2)+'\n')
     print(run.stdout,end='')

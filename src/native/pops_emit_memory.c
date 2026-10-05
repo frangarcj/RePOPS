@@ -198,13 +198,72 @@ uint32_t rp_emit_fixed_memory(rp_context *c, uint32_t out, uint32_t op, uint32_t
     return out;
 }
 
-/* +0x3A90 constant-base path. Dynamic base/address translation remains an
- * explicit boundary until reconstructed; no fabricated fallback instruction.
+/* +0x3FE8..+0x4264: non-specialized dynamic base. Preserve the original
+ * argument setup, flush policy, offset folding and selected helper address.
  */
+static uint32_t emit_dynamic_memory(rp_context *c, uint32_t op, uint32_t guest,
+                                    uint32_t base, uint32_t displacement,
+                                    uint32_t out, uint32_t direct)
+{
+    const bool store = (op & 8) != 0;
+    uint32_t offset = sign16(displacement);
+    if (!store && guest && !(guest & 0x80))
+        rp_w32(c, c->gp + 0xB58, rp_u32(c, c->gp + 0xB58) & ~(0x80000000u >> (guest & 31)));
+
+    if ((base == 29 && !(rp_u32(c, c->gp + 0x6AC) & 0x80000)) ||
+            base == byte(c, 0x750) || (op & 0xB) == 0xA ||
+            ((op & 0xB) == 2 && out < 0x09B80000))
+        rp_block(c, "specialized_dynamic_base_path_not_reconstructed", 0x3CA8);
+
+    bool retargeted = false;
+    if (!store && base == guest && (op & 0x13) != 2 && rp_emit_previous_movable(c, out)) {
+        const uint32_t last = rp_u32(c, out - 4);
+        const int32_t host = rp_emit_lookup_register(c, guest);
+        const uint32_t primary = last >> 26;
+        if (host >= 0 && ((last & 0xFC00FFC0) == ((uint32_t)host << 11) ||
+                (((last >> 16) & 31) == (uint32_t)host &&
+                 (primary - 8 < 8 || primary - 0x20 < 7)))) {
+            rp_w32(c, out - 4, (primary & 31) ?
+                (last & ~UINT32_C(0x1F0000)) | (4u << 16) :
+                (last & ~UINT32_C(0xF800)) | (4u << 11));
+            retargeted = true;
+        }
+    }
+    if (!retargeted) out = rp_emit_argument(c, out, 4, base);
+    if (offset) {
+        const uint32_t last = rp_u32(c, out - 4);
+        if ((last & 0xFC1FFFFF) == 0x2021) {
+            rp_w32(c, out - 4, (last & 0x3E00000) | 0x24040000 | (offset & 0xFFFF));
+            offset = 0;
+        } else if ((last & 0xFFE0FFFF) == 0x2021) {
+            rp_w32(c, out - 4, (((last >> 16) & 31) << 21) | 0x24040000 | (offset & 0xFFFF));
+            offset = 0;
+        }
+    }
+    if (store) out = rp_emit_argument(c, out, 5, guest);
+    if ((op & 3) != 2) out = rp_emit_flush_registers(c, out, 11);
+    if (offset) out = emit(c, out, 0x24840000 | (offset & 0xFFFF));
+    uint32_t helper;
+    switch (op) {
+    case RP_OP_LB: helper = 0x1A90; break;
+    case RP_OP_LH: helper = 0x1DE8; break;
+    case RP_OP_LW: helper = 0x2128; break;
+    case RP_OP_LBU: helper = 0x2468; break;
+    case RP_OP_LHU: helper = 0x267C; break;
+    case RP_OP_SB: helper = 0x1DD0; break;
+    case RP_OP_SH: helper = 0x2110; break;
+    case RP_OP_SW: helper = 0x2450; break;
+    default: rp_block(c, "dynamic_unaligned_memory_helper_not_reconstructed", op);
+    }
+    out = rp_emit_jump_delay(c, out, 0x30000000 + helper);
+    return store ? out : rp_emit_result(c, out, guest, direct);
+}
+
+/* +0x3A90: known-address specialization and generic dynamic helper calls. */
 uint32_t rp_emit_memory(rp_context *c, uint32_t op, uint32_t guest, uint32_t base,
                         uint32_t displacement, uint32_t out, uint32_t direct)
 {
-    rp_function(c, 0x3A90, "pops.emit_memory_constant_base_path");
+    rp_function(c, 0x3A90, "pops.emit_memory_access");
     const bool store = (op & 8) != 0;
     if (!store && !(guest & 0x80) && location(c, guest) < 0) {
         for (unsigned i = 0; i < 12; ++i) {
@@ -212,7 +271,7 @@ uint32_t rp_emit_memory(rp_context *c, uint32_t op, uint32_t guest, uint32_t bas
             rp_w8(c, c->gp + 0x754 + i, 0); break;
         }
     }
-    if (!known(c, base)) rp_block(c, "dynamic_memory_base_emitter_not_reconstructed", 0x3A90);
+    if (!known(c, base)) return emit_dynamic_memory(c, op, guest, base, displacement, out, direct);
     const uint32_t address = rp_u32(c, c->gp + 0xB5C + base * 4) + sign16(displacement);
     const uint32_t physical = address & 0x1FFFFFFF;
     const uint32_t kind = (physical >> 23) == 0 ? 1 : address - UINT32_C(0x1F800000) < 0x400 ? 2 :

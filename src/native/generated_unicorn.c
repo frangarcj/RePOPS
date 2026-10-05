@@ -53,7 +53,7 @@ void rp_unicorn_open(rp_context *c)
     engine->context = c;
     checked(c, uc_open(UC_ARCH_MIPS, UC_MODE_MIPS32 | UC_MODE_LITTLE_ENDIAN, &engine->uc), 0);
     checked(c, uc_ctl_set_cpu_model(engine->uc, UC_CPU_MIPS32_24KF), 0);
-    const uint64_t helpers[] = {0x89A0, 0x2888, 0x96AC, 0x1A80, 0x1A68};
+    const uint64_t helpers[] = {0x89A0, 0x2888, 0x96AC, 0x1A80, 0x1A68, 0x2450};
     checked(c, uc_ctl_exits_enable(engine->uc), 0);
     checked(c, uc_ctl_set_exits(engine->uc, helpers, sizeof(helpers) / sizeof(helpers[0])), 0);
     for (unsigned i = 0; i < RP_REGION_COUNT; ++i) {

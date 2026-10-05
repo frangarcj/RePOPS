@@ -368,8 +368,13 @@ uint32_t rp_emit_known_value(rp_context *c, uint32_t dest, uint32_t value, uint3
  */
 static uint32_t emit_forward_jump(rp_context *c, uint32_t record, uint32_t out, uint32_t cost)
 {
-    if (!(half(c, record) & 4))
-        rp_block(c, "external_jump_emitter_not_reconstructed", 0x6914);
+    cost += rp_u32(c, c->gp + 0x6C4);
+    if (!(half(c, record) & 4)) {
+        out = rp_emit_debit(c, (int32_t)cost, out);
+        out = rp_emit_exit_target(c, rp_u32(c, record + 8), out);
+        rp_w32(c, c->gp + 0xB44, 0);
+        return out;
+    }
     const uint32_t target = 0x041B0000 +
         (rp_u32(c, record + 8) - rp_u32(c, c->gp + 0xB50)) * 4;
     if (target <= record)
@@ -378,7 +383,6 @@ static uint32_t emit_forward_jump(rp_context *c, uint32_t record, uint32_t out, 
     while (next < target && half(c, next + 4) == 0) next += 16;
     if (next != target)
         rp_block(c, "forward_jump_link_not_reconstructed", 0x42A4);
-    cost += rp_u32(c, c->gp + 0x6C4);
     out = rp_emit_debit(c, (int32_t)cost, out);
     rp_w32(c, c->gp + 0xB44, 0);
     return out;
@@ -471,29 +475,89 @@ static uint32_t emit_branch_record(rp_context *c, uint32_t record, uint32_t out,
     return out;
 }
 
-/* The original folds these four ALU operations when both sources are known
- * and at least one is zero. Other ALU paths still need the original allocator.
- */
+/* +0x6914 category 0x0D: retain the original constant propagation and register
+ * allocation, including integer values cached as FPR bits. */
 static uint32_t emit_known_alu(rp_context *c, uint32_t record, uint32_t out)
 {
     const uint8_t *r = rp_memory(c, record, 16);
     const uint32_t dest = r[2], op = r[3], left = r[12], right = r[13];
+    uint32_t value = 0;
+    bool folded = false;
     if (known(c, left) && known(c, right)) {
         const uint32_t a = rp_u32(c, c->gp + 0xB5C + left * 4);
         const uint32_t b = rp_u32(c, c->gp + 0xB5C + right * 4);
-        if (a == 0 || b == 0) {
-            uint32_t value;
-            switch (op) {
-            case RP_OP_ADDU: value = a + b; break;
-            case RP_OP_SUBU: value = a - b; break;
-            case RP_OP_AND: value = a & b; break;
-            case RP_OP_OR: value = a | b; break;
-            default: rp_block(c, "ALU_opcode_not_reconstructed", op);
-            }
-            return rp_emit_known_value(c, dest, value, out, record);
+        folded = true;
+        switch (op) {
+        case RP_OP_ADDU: value = a + b; break;
+        case RP_OP_SUBU: value = a - b; break;
+        case RP_OP_AND: value = a & b; break;
+        case RP_OP_OR: value = a | b; break;
+        default: folded = false; break;
         }
+        if (folded && (a == 0 || b == 0))
+            return rp_emit_known_value(c, dest, value, out, record);
     }
-    rp_block(c, "general_ALU_emitter_not_reconstructed", 0x6914);
+    const uint32_t function = op & ~0x40u;
+    const int32_t destination = rp_emit_lookup_register(c, dest);
+    if (destination < -1 && (function == 0x21 || function == 0x25) && (!left || !right)) {
+        rp_w32(c, c->gp + 0xB58, rp_u32(c, c->gp + 0xB58) & ~(0x80000000u >> (dest & 31)));
+        if (byte(c, 0x750) == dest) rp_w8(c, c->gp + 0x750, 0);
+        const uint32_t source = left | right;
+        const int32_t source_location = rp_emit_lookup_register(c, source);
+        const uint32_t fd = (0u - (uint32_t)destination) & 31;
+        uint32_t word;
+        if (source_location < -1)
+            word = 0x46000006 | (fd << 6) | (((0u - (uint32_t)source_location) & 31) << 11);
+        else if (source_location == -1)
+            word = 0xC7800000 | (fd << 16) | ((source & 0xE0) + ((source & 7) << 2) + 0x180);
+        else word = 0x44800000 | (((uint32_t)source_location & 31) << 16) | (fd << 11);
+        out = emit(c, out, word);
+    } else {
+        uint32_t d, a, b;
+        const uint32_t original_out = out;
+        if (left == right) {
+            out = rp_emit_pair(c, out, dest, left, &d, &a);
+            b = a;
+        } else {
+            uint32_t allocation = rp_emit_allocate(c, out, dest,
+                (1u << (left & 31)) | (1u << (right & 31)),
+                (dest == left || dest == right) ? 3 : 1);
+            d = allocation & 31; out = (allocation >> 5) << 2;
+            if (dest == left) {
+                a = d;
+                const uint32_t previous = rp_u32(c, original_out - 4);
+                if (rp_emit_previous_movable(c, original_out) &&
+                        (previous & 0xFC1FFFFF) == ((d << 11) | 0x21)) {
+                    a = (previous >> 21) & 31;
+                    out -= 4;
+                }
+            } else {
+                allocation = rp_emit_allocate(c, out, left,
+                    (1u << (dest & 31)) | (1u << (right & 31)), 2);
+                a = allocation & 31; out = (allocation >> 5) << 2;
+            }
+            if (dest == right) {
+                b = d;
+                const uint32_t previous = rp_u32(c, original_out - 4);
+                if (rp_emit_previous_movable(c, original_out) &&
+                        (previous & 0xFC1FFFFF) == ((d << 11) | 0x21)) {
+                    b = (previous >> 21) & 31;
+                    if (original_out != out) rp_w32(c, original_out - 4, rp_u32(c, original_out));
+                    out -= 4;
+                }
+            } else {
+                allocation = rp_emit_allocate(c, out, right,
+                    (1u << (dest & 31)) | (1u << (left & 31)), 2);
+                b = allocation & 31; out = (allocation >> 5) << 2;
+            }
+        }
+        out = emit(c, out, function | (a << 21) | (b << 16) | (d << 11));
+    }
+    if (folded) {
+        rp_w32(c, c->gp + 0xB58, rp_u32(c, c->gp + 0xB58) | (0x80000000u >> (dest & 31)));
+        rp_w32(c, c->gp + 0xB5C + dest * 4, value);
+    }
+    return out;
 }
 
 /* +0x6768. Keep the original target-table lookup and slow-entry links;

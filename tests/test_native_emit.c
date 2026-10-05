@@ -76,6 +76,21 @@ int main(void)
     assert(cursor == cause + 12);
     assert(rp_u32(c, cause) == 0x83850135 && rp_u32(c, cause + 4) == 0x7C050804);
     assert(rp_u32(c, cause + 8) == 0xA3850135);
+    /* Dynamic SW selects the original helper and retains argument setup in
+     * its JAL delay slot. No emulated bus is substituted by the compiler. */
+    rp_emit_init_registers(c, cursor);
+    const uint32_t memory_start = cursor;
+    cursor = rp_emit_memory(c, RP_OP_SW, 0, 8, 4, cursor, 0);
+    assert(rp_u32(c, memory_start) == 0x26040004);
+    assert(rp_u32(c, cursor - 8) == 0x0C000914);
+    assert(rp_u32(c, cursor - 4) == 0x00002821);
+    mapping[1] = 18; mapping[9] = 17;
+    rp_emit_init_registers(c, cursor);
+    memset(rp_memory(c, record, 16), 0, 16);
+    rp_w8(c, record + 2, 1); rp_w8(c, record + 3, RP_OP_SLTU);
+    rp_w8(c, record + 12, 8); rp_w8(c, record + 13, 9);
+    cursor = rp_emit_record(c, RP_CAT_ALU, record, cursor, 2);
+    assert(rp_u32(c, cursor - 4) == ((16u << 21) | (17u << 16) | (18u << 11) | 0x2B));
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[2].bytes); free(c);
     puts("Emitter smoke: FPR/memory locations, temporary state, constants and debit passed; not exhaustive equivalence.");
     return 0;

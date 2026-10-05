@@ -88,6 +88,16 @@ static void native_helper(rp_context *c)
 {
     uint32_t *r = c->run_gpr;
     switch (c->run_pc) {
+    case 0x2450:
+        rp_function(c, 0x2450, "pops.dynamic_word_store_RAM_path");
+        r[2] = (r[4] >> 23) & 63;
+        r[6] = 0x4C;
+        if (r[2]) rp_block(c, "dynamic_word_store_non_RAM_path", 0x2314);
+        r[4] = (r[4] & 0x1FFFFF) | 0x09800000;
+        if (r[4] & 3) rp_block(c, "dynamic_word_store_unaligned", r[4]);
+        rp_w32(c, r[4], r[5]);
+        transfer(c, r[31]);
+        return;
     case 0x96AC:
         r[2] = update_interrupt_deadline(c);
         transfer(c, r[31]);

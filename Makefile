@@ -2,9 +2,9 @@ CC ?= cc
 CFLAGS ?= -O2 -g
 PNG_CFLAGS = $(shell pkg-config --cflags libpng)
 PNG_LIBS = $(shell pkg-config --libs libpng)
-NATIVE_SRC = src/bootstrap.c src/me_startup.c src/me_registration.c src/native/runtime.c src/native/pops_boot.c src/native/pops_image.c src/native/pops_disc.c src/native/pops_config.c src/native/pops_metadata.c src/native/pops_reset.c src/native/me_worker.c src/native/pops_me.c src/native/main.c
+NATIVE_SRC = src/bootstrap.c src/me_startup.c src/me_registration.c src/native/runtime.c src/native/pops_boot.c src/native/pops_image.c src/native/pops_disc.c src/native/pops_config.c src/native/pops_metadata.c src/native/pops_reset.c src/native/me_worker.c src/native/pops_me.c src/native/pops_spu.c src/native/main.c
 
-.PHONY: all native test test-native-disc test-native-config test-native-me clean-help
+.PHONY: all native test test-native-disc test-native-config test-native-me test-native-spu clean-help
 all: native
 native: build/repops-native
 
@@ -35,6 +35,13 @@ build/test_me_worker: src/native/me_worker.c src/native/me_worker.h tests/test_m
 
 test-native-me: build/test_me_worker
 	./build/test_me_worker
+
+build/test_native_spu: src/native/runtime.c src/native/runtime.h src/native/pops_spu.c tests/test_native_spu.c
+	mkdir -p build
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_spu.c tests/test_native_spu.c -o $@
+
+test-native-spu: build/test_native_spu
+	./build/test_native_spu
 
 clean-help:
 	@echo 'Analysis artifacts are retained. Remove only explicitly selected local outputs.'

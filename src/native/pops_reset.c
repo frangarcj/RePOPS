@@ -30,6 +30,10 @@ static void me_write(void *ctx, uint32_t address, uint32_t value)
 static uint32_t me_service(void *ctx, uint32_t service, uint32_t a0, uint32_t a1, uint32_t a2)
 {
     rp_context *c = ctx; (void)a1; (void)a2;
+    if (service == REPOPS_ME_DELAY) {
+        rp_event(c, "host_adapter", "cooperative_ME_poll_without_wall_clock_delay", service, a0);
+        return 0;
+    }
     if (service != REPOPS_ME_CODEC_376399B6)
         rp_block(c, "unimplemented_native_me_service", service);
     ++c->services;
@@ -41,8 +45,12 @@ static void me_control(rp_context *c, uint32_t request)
     const repops_me_startup_host host = {c, me_read, me_write, me_service};
     repops_me_wait wait;
     repops_me_control_begin(&host, request, &wait);
-    if (!repops_me_wait_step(&host, &wait))
-        rp_block(c, "native_me_awaiting_real_ack", 0x3514);
+    if (repops_me_wait_step(&host, &wait)) return;
+    for (unsigned step = 0; step < 128; ++step) {
+        rp_pops_me_poll(c);
+        if (repops_me_wait_step(&host, &wait)) return;
+    }
+    rp_block(c, "native_me_awaiting_real_ack", 0x3514);
 }
 
 /* +0x30B84. Provider value/control effects run; host clock scaling is logged. */
@@ -393,5 +401,8 @@ void rp_pops_initialize_core(rp_context *c)
     timers_reset(c);
     rp_event(c, "milestone", "initial_device_handler_tables_prepared", 0x11000, 0x1000);
     sound_reset(c);
-    rp_block(c, "remaining_post_ME_reset_not_reconstructed", 0x24B58);
+    (void)set_run_mode(c, 0);
+    update_me_control(c);
+    rp_event(c, "milestone", "native_ME_start_and_resume_complete", 0xBFC007F0, c->me_ack);
+    rp_block(c, "function_not_reconstructed", 0x1B9C4);
 }

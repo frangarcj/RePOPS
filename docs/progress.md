@@ -1,6 +1,23 @@
 # RePops progress
 
-## Current: reconstructed C running on Mac with the user's FFVI PBP
+## Current: native reset reaches graphics initialization
+
+The normal FFVI startup path now applies the game configuration, prepares the
+disc index and savedata metadata, and stops at PSP UI +0x28DF8. An explicit
+`REPOPS_DIAGNOSTIC_SKIP_UI=1 ./run_ffvi.sh` path bypasses that UI (not counted
+as reconstructed) to investigate core initialization.
+
+The diagnostic initializes CPU/device/SPU state, executes the disabled-SPU
+callback in C, and obtains the start/resume ACKs from the native ME worker.
+It stops at graphics initialization +0x1B9C4. Enabled mixing, the full UI,
+renderer and PS1 instruction execution remain incomplete. No sound or gameplay
+is claimed. See `native_spu_disabled.md` for the successful optimized and
+sanitized runs and `data/function_progress.csv` for per-function scope.
+
+Work is saved in semantic commits as each executable increment is checked.
+The measurements below are earlier checkpoints, not the current stop address.
+
+## Earlier: reconstructed C running on Mac with the user's FFVI PBP
 
 The active goal is native C execution on macOS, not a Vita port, a matching
 decompilation, or a replacement PSP PRX. See `native_harness.md` and run

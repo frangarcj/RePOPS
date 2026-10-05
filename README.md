@@ -45,8 +45,9 @@ REPOPS_DIAGNOSTIC_SKIP_UI=1 ./run_ffvi.sh
 
 This is an explicit [diagnostic bypass](docs/native_core_diagnostic.md), not a
 reconstructed menu or proven startup state. It currently prepares device and
-SPU state, starts the native ME worker, and stops at the unimplemented POPS
-sample callback (module offset zero).
+SPU state, runs the disabled-SPU callback and the native ME request/acknowledgement
+loop, then stops at graphics initialization `+0x1B9C4`. Active-voice mixing,
+graphics rendering and PS1 instruction execution are still unimplemented.
 
 Requirements: a C11 compiler, Python dependencies from `requirements.txt`,
 `pkg-config`, `libpng`, and Ghidra with the Allegrex extension for initial data
@@ -82,8 +83,9 @@ the provider's ME loop, sample production and shared-memory communication.
 The existing registration/startup models remain useful but do not constitute
 a recovered mixer. See [the ME reverse plan](docs/media_engine_reverse.md).
 
-The cooperative [native ME worker](docs/native_me_worker.md) is implemented
-as an isolated model; the POPS sample callback and live integration are pending.
+The cooperative [native ME worker](docs/native_me_worker.md) is reached by the
+opt-in diagnostic. The [disabled-SPU branch](docs/native_spu_disabled.md) of the
+POPS callback updates shared state in native C; active mixing is still pending.
 
 ```sh
 python3 scripts/audit_me_targets.py --out out/me_target_audit_new

@@ -74,4 +74,6 @@ uint32_t rp_pops_mc_init(rp_context *);
 uint32_t rp_pops_controller_init(rp_context *);
 void rp_pops_initialize_core(rp_context *);
 void rp_pops_start_me(rp_context *);
+void rp_pops_me_poll(rp_context *);
+bool rp_pops_spu_inactive_sample(rp_context *, uint32_t *);
 #endif

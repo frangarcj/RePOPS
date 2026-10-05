@@ -39,7 +39,7 @@ pops_660,0x1C964,state_query,pending,,none,not_integrated
 pops_660,0x1BF30,conditional_state_load,pending,,none,not_integrated
 pops_660,0x1A908,pre_core_step,pending,,none,not_integrated
 pops_660,0x1A00,core_dispatch_entry,pending,,none,not_integrated
-pops_660,0x0,ME_sample_callback,pending,,none,not_integrated
+pops_660,0x0,ME_sample_callback,partial,src/native/pops_spu.c,SPU_disabled_nonbusy_path_smoke_and_host_run,diagnostic_only
 popsman_corpus_660,0x2F88,ME_sample_and_ack_loop,partial,src/native/me_worker.c,headless_sink_and_bounded_drain_comparison,diagnostic_only
 pops_660,0x1A314,reciprocal_table_init,complete,src/native/pops_reset.c,instruction_review_host_run,diagnostic_only
 pops_660,0x24B58,reset_devices,partial,src/native/pops_reset.c,diagnostic_reset_prefix,diagnostic_only
@@ -62,6 +62,7 @@ pops_660,0x11520,audio_pacing,partial,src/native/pops_reset.c,no_delay_path_only
 pops_660,0x1A284,gpu_status_reset,complete,src/native/pops_reset.c,instruction_review_host_run,diagnostic_only
 pops_660,0x1A3A8,timer_handler_entries,complete,src/native/pops_reset.c,host_data_entries_not_timer_execution,diagnostic_only
 pops_660,0x19DD8,spu_state_and_tables_reset,adapter,src/native/pops_reset.c,instruction_review_shared_RAM_cache_elided,diagnostic_only
-pops_660,0x19F8C,sound_reset_and_me_start,partial,src/native/pops_reset.c,reaches_unimplemented_sample_callback,diagnostic_only
+pops_660,0x19F8C,sound_reset_and_me_start,partial,src/native/pops_reset.c,disabled_SPU_callback_host_start_path,diagnostic_only
 pops_660,0x25184,get_volume_setting,complete,src/native/pops_reset.c,host_run,diagnostic_only
 popsman_corpus_660,0x3490,DE630CD2_registration,adapter,src/native/pops_me.c,reused_register_C_with_logical_callback_and_host_start,diagnostic_only
+pops_660,0x1B9C4,graphics_initialization,pending,,none,not_integrated

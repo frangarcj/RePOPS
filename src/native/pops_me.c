@@ -72,11 +72,21 @@ static void bus_service(void *ctx, rp_me_service service, uint32_t argument)
 }
 static bool sample(void *ctx, uint32_t entry, uint32_t *packed)
 {
-    rp_context *c = ctx; (void)packed;
+    rp_context *c = ctx;
     if (entry != CALLBACK_ID) rp_block(c, "unknown_native_me_callback", entry);
     rp_event(c, "milestone", "me_worker_reached_pops_sample_callback", 0, c->me_output_words);
-    /* Never replace an unimplemented mixer with a fabricated successful sample. */
-    return false;
+    return rp_pops_spu_inactive_sample(c, packed);
+}
+void rp_pops_me_poll(rp_context *c)
+{
+    const rp_me_bus bus = {c, provider_read, bus_read, bus_read_half, bus_write, bus_service, sample};
+    switch (rp_me_worker_step(&c->me_worker, &bus)) {
+    case RP_ME_CALLBACK_UNAVAILABLE:
+        rp_block(c, "active_or_busy_SPU_callback_not_reconstructed", 0);
+    case RP_ME_INVALID_HOST: rp_block(c, "native_me_host_contract_invalid", 0x2F88);
+    case RP_ME_PARKED: rp_block(c, "native_me_worker_parked", 0x2F88);
+    default: break;
+    }
 }
 static void start_worker(void *ctx, uint32_t shifted_k1)
 {
@@ -88,17 +98,12 @@ static void start_worker(void *ctx, uint32_t shifted_k1)
     c->me_ack = 0;
     c->me_output_words = 0;
     rp_me_worker_init(&c->me_worker);
-    const rp_me_bus bus = {c, provider_read, bus_read, bus_read_half, bus_write, bus_service, sample};
     for (unsigned step = 0; step < 128; ++step) {
-        switch (rp_me_worker_step(&c->me_worker, &bus)) {
-        case RP_ME_CALLBACK_UNAVAILABLE:
-            rp_event(c, "state", "me_ack_before_unimplemented_sample", 0xBFC007F0, c->me_ack);
-            rp_block(c, "pops_me_sample_callback_not_reconstructed", 0);
-        case RP_ME_INVALID_HOST: rp_block(c, "native_me_host_contract_invalid", 0x2F88);
-        case RP_ME_PARKED: rp_block(c, "native_me_worker_parked", 0x2F88);
-        default: break;
+        rp_pops_me_poll(c);
+        if (c->me_ack == 1) {
+            rp_event(c, "milestone", "native_ME_start_acknowledged_by_worker", 0xBFC007F0, 1);
+            return;
         }
-        if (c->me_ack == 1) return;
     }
     rp_block(c, "native_me_start_still_pending", 0x35D8);
 }

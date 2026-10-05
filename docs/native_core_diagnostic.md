@@ -21,6 +21,11 @@ For that path the original returns without waiting, so the host need not invent
 an ACK. The native codec and clock service boundaries remain headless adapters;
 this does not constitute sound output or the ME worker's live integration.
 
+The observations above describe the first reset pass. The current diagnostic
+also completes a disabled-SPU callback and obtains ACK 1 then ACK 0 from the
+native worker. It stops at graphics initialization +0x1B9C4. It does not execute
+PS1 instructions. See `native_spu_disabled.md` for the current run and limits.
+
 Follow-up: the diagnostic now reaches the registered ME worker through an
 explicit native output adapter. `out/ffvi_run.M0dYHv/result/` stops at the
 unimplemented sample callback at POPS offset zero, with ACK still zero.

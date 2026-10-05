@@ -11,8 +11,9 @@ acknowledgement, and parked states. An unavailable sample callback is explicit:
 it is not replaced by generated silence or a success acknowledgement.
 
 The worker is now reached from the opt-in core diagnostic through
-`src/native/pops_me.c`. The POPS sample callback at offset zero is still
-unimplemented at this checkpoint. Device state is supplied by the host; HALT/wake behavior
+`src/native/pops_me.c`. `pops_spu.c` supplies the disabled-SPU branch of the
+offset-zero callback; enabled mixing remains unsupported. Device state is
+supplied by the host; HALT/wake behavior
 is approximated by cooperative polling, not PSP interrupt or timing emulation.
 
 `make test-native-me` passes the existing scripted bus tests with sanitizers.
@@ -40,3 +41,8 @@ Only the RAM aliases `0x48000000..0x49FFFFFF` are collapsed onto the existing
 native RAM region. This makes shared state visible to both C components, not
 a cache-coherency implementation. The existing memory smoke test checks this
 alias together with module/scratchpad separation.
+
+The following pass (`out/ffvi_run.v7wWNW/result/`) runs the disabled-SPU branch,
+so the worker can generate ACK 1 and, after the control request changes, ACK 0.
+The earlier first-callback blocker is retained as a historical trace. This is
+still a headless output adapter, not audible or timing-accurate PSP emulation.

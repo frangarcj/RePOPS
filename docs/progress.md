@@ -5,7 +5,9 @@
 The +0x05154 analysis body is now C with its original 16-byte records and
 recursive branch discovery. A focused first-BIOS comparison matches the
 record buffer and scratchpad against the original routine. This is analysis,
-not PS1 execution. The subsequent +0x058C0 compiler remains to be recovered.
+not PS1 execution. The +0x058C0 setup and cost-accounting prefix now also matches
+the same sample up to +0x5D5C, before instruction emission. Allocation, emission
+and linking inside that compiler remain pending.
 See `cpu_analysis_records.md`. The integrated diagnostic still stops at
 +0x115B4, independently of this analysis probe.
 

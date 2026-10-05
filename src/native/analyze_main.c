@@ -8,8 +8,10 @@
 
 int main(int argc, char **argv)
 {
+    const int prepare = argc == 4 && strcmp(argv[3], "--prepare") == 0;
+    if (prepare) --argc;
     if (argc != 3) {
-        fprintf(stderr, "usage: %s <checked-native-image.bin> <new-output-directory>\n", argv[0]);
+        fprintf(stderr, "usage: %s <checked-native-image.bin> <new-output-directory> [--prepare]\n", argv[0]);
         return 64;
     }
     rp_context *c = calloc(1, sizeof(*c));
@@ -32,6 +34,7 @@ int main(int argc, char **argv)
     const uint32_t pc = 0xBFC00000, buffer = 0x041B0000;
     rp_w32(c, c->gp + 0x130, 0x400000);
     rp_w32(c, c->gp + 0x6F4, UINT32_MAX);
+    if (prepare) rp_w32(c, c->gp + 0x1D0, 0x09B80000);
     /* BIOS setup observed in +0x058C0 before it calls +0x05154. */
     rp_w32(c, c->gp + 0xB40, 0x00028000);
     rp_w32(c, c->gp + 0xB48, UINT32_C(0x00053C20) - pc);
@@ -39,7 +42,11 @@ int main(int argc, char **argv)
     rp_w32(c, c->gp + 0xB50, pc);
     rp_w32(c, c->gp + 0xB54, pc + 0xC00);
     int status = 0;
-    if (setjmp(c->stop) == 0) rp_pops_analyze_records(c, buffer);
+    uint32_t emission_cursor = 0;
+    if (setjmp(c->stop) == 0) {
+        if (prepare) emission_cursor = rp_pops_prepare_compile(c, pc);
+        else rp_pops_analyze_records(c, buffer);
+    }
     else {
         fprintf(stderr, "Analysis blocked: %s @ 0x%08X\n", c->stop_kind, c->stop_address);
         status = 78;
@@ -59,11 +66,12 @@ int main(int argc, char **argv)
         FILE *report = fopen(path, "wx");
         if (!report) return 74;
         fprintf(report, "{\"guest_start\":%u,\"record_buffer\":%u,\"high_water\":%u,"
-                "\"record_slots\":%u,\"analysis_calls\":%u,\"guest_executed\":false,"
-                "\"stage\":\"native_C_reconstruction_of_POPS_05154\"}\n",
-                pc, buffer, end, bytes / 16, c->functions);
+                "\"record_slots\":%u,\"native_function_entries\":%u,\"guest_executed\":false,"
+                "\"emission_cursor_not_executable\":%u,\"stage\":\"%s\"}\n",
+                pc, buffer, end, bytes / 16, c->functions, emission_cursor,
+                prepare ? "native_C_POPS_058C0_through_05D5B" : "native_C_reconstruction_of_POPS_05154");
         fclose(report);
-        printf("POPS analyzer: %u record slots, %u recursive calls, high-water 0x%08X; no guest execution\n",
+        printf("POPS analysis: %u record slots, %u native function entries, high-water 0x%08X; no guest execution\n",
                bytes / 16, c->functions, end);
     }
     fclose(c->trace);

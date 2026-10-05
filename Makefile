@@ -9,9 +9,9 @@ all: native
 native: build/repops-native
 analyze: build/repops-analyze
 
-build/repops-analyze: src/native/runtime.c src/native/pops_analyze.c src/native/analyze_main.c src/native/runtime.h src/native/me_worker.h
+build/repops-analyze: src/native/runtime.c src/native/pops_analyze.c src/native/pops_compile.c src/native/analyze_main.c src/native/runtime.h src/native/me_worker.h
 	mkdir -p build
-	$(CC) -std=c11 -Wall -Wextra -Werror $(CFLAGS) src/native/runtime.c src/native/pops_analyze.c src/native/analyze_main.c -o $@
+	$(CC) -std=c11 -Wall -Wextra -Werror $(CFLAGS) src/native/runtime.c src/native/pops_analyze.c src/native/pops_compile.c src/native/analyze_main.c -o $@
 
 build/repops-native: $(NATIVE_SRC) src/native/runtime.h src/bootstrap.h src/me_startup.h src/me_registration.h src/native/me_worker.h
 	mkdir -p build

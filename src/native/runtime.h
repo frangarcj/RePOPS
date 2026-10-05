@@ -80,4 +80,5 @@ void rp_pops_start_me(rp_context *);
 void rp_pops_me_poll(rp_context *);
 bool rp_pops_spu_inactive_sample(rp_context *, uint32_t *);
 void rp_pops_analyze_records(rp_context *, uint32_t);
+uint32_t rp_pops_prepare_compile(rp_context *, uint32_t);
 #endif

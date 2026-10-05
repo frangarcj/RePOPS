@@ -78,6 +78,11 @@ See [the recovered record layout](docs/cpu_analysis_records.md). Reconstructing
 POPS remains the goal; a temporary executor/backend is support, not a separate
 optimization project.
 
+Add `--prepare` to include the reconstructed beginning of `+0x058C0`: source
+mapping, code-cache selection and [boundary-cost accounting](docs/cpu_compiler_stages.md).
+For the initial BIOS sample that prefix also matches the original records and
+scratchpad, stopping before instruction emission at `+0x5D5C`.
+
 ```sh
 python3 scripts/function_progress.py
 # Compare the register with a particular native run:

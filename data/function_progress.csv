@@ -75,4 +75,4 @@ pops_660,0x9940,timer_gate,partial,src/native/pops_graphics.c,disabled_timer_gat
 pops_660,0x11410,begin_frame,partial,src/native/pops_graphics.c,event_scheduled_before_display_refresh_blocker,diagnostic_only
 pops_660,0x115B4,display_refresh,pending,,none,not_integrated
 pops_660,0x5154,analyze_instruction_records,complete,src/native/pops_analyze.c,one_BIOS_analysis_records_and_scratch_match,isolated
-pops_660,0x58C0,compile_block,pending,,none,not_integrated
+pops_660,0x58C0,compile_block,partial,src/native/pops_compile.c,BIOS_setup_and_cost_pass_match_before_emission,isolated

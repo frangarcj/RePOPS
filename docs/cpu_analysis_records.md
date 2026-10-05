@@ -34,7 +34,7 @@ Each guest 4-byte instruction occupies one 16-byte analysis slot.
 | +2 | 8 bits | Destination/link register; some special cases use 0xFF. |
 | +3 | 8 bits | Normalized operation ID, not always the original major opcode. |
 | +4 | 16 bits | Consumer category; numeric names retained. |
-| +6 | 16 bits | Not written by this producer; later use not recovered. |
+| +6 | 16 bits | Not written by this producer; the next compiler pass stores accumulated boundary cost here. |
 | +8 | 32 bits | Original instruction word, replaced by target PC for direct branches. |
 | +12/+13 | 8+8 bits | Source-register fields, cleared or adjusted by category. |
 | +14 | 8 bits | Additional coprocessor/register field where required. |
@@ -74,3 +74,7 @@ Allegrex execution may use a temporary, explicitly identified bridge rather
 than blocking POPS reconstruction on a polished backend. The integrated FFVI
 trace still stops at display refresh +0x115B4; this separate analyzer probe
 does not pretend that blocker is resolved.
+
+Follow-up: `pops_compile.c` now reconstructs the surrounding setup and the
+cost pass through +0x5D5B. Use `--prepare` with the probe; see
+`cpu_compiler_stages.md`. Emission and linking are still pending.

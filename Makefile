@@ -2,9 +2,9 @@ CC ?= cc
 CFLAGS ?= -O2 -g
 PNG_CFLAGS = $(shell pkg-config --cflags libpng)
 PNG_LIBS = $(shell pkg-config --libs libpng)
-NATIVE_SRC = src/bootstrap.c src/me_startup.c src/me_registration.c src/native/runtime.c src/native/pops_boot.c src/native/pops_image.c src/native/pops_disc.c src/native/pops_config.c src/native/pops_metadata.c src/native/pops_reset.c src/native/pops_graphics.c src/native/me_worker.c src/native/pops_me.c src/native/pops_spu.c src/native/pops_analyze.c src/native/pops_compile.c src/native/pops_emit.c src/native/pops_emit_memory.c src/native/main.c
+NATIVE_SRC = src/bootstrap.c src/me_startup.c src/me_registration.c src/native/runtime.c src/native/pops_boot.c src/native/pops_image.c src/native/pops_disc.c src/native/pops_config.c src/native/pops_metadata.c src/native/pops_reset.c src/native/pops_graphics.c src/native/me_worker.c src/native/pops_me.c src/native/pops_spu.c src/native/pops_analyze.c src/native/pops_compile.c src/native/pops_emit.c src/native/pops_emit_memory.c src/native/pops_memory_card.c src/native/main.c
 
-.PHONY: all native analyze test test-native-disc test-native-config test-native-me test-native-spu test-native-emit clean-help
+.PHONY: all native analyze test test-native-disc test-native-config test-native-me test-native-spu test-native-emit test-native-memory-card clean-help
 all: native
 native: build/repops-native
 analyze: build/repops-analyze
@@ -54,6 +54,13 @@ build/test_native_emit: src/native/runtime.c src/native/pops_emit.c src/native/p
 
 test-native-emit: build/test_native_emit
 	./build/test_native_emit
+
+build/test_native_memory_card: src/native/runtime.c src/native/pops_memory_card.c src/native/runtime.h tests/test_native_memory_card.c
+	mkdir -p build
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_memory_card.c tests/test_native_memory_card.c -o $@
+
+test-native-memory-card: build/test_native_memory_card
+	./build/test_native_memory_card
 
 clean-help:
 	@echo 'Analysis artifacts are retained. Remove only explicitly selected local outputs.'

@@ -92,7 +92,7 @@ uint32_t rp_pops_mc_init(rp_context *c)
     const uint32_t thread = ++c->next_id;
     c->services += 3;
     rp_event(c, "host_adapter", "create_mc_writeback_semaphore", semaphore, 0);
-    rp_event(c, "deferred_worker", "memory_card_worker_body_not_reconstructed", c->mc_thread_entry, thread);
+    rp_event(c, "deferred_worker", "memory_card_worker_queued_for_cooperative_start", c->mc_thread_entry, thread);
     return thread;
 }
 

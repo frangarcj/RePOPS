@@ -23,7 +23,7 @@ typedef struct rp_context {
     uint32_t gp, heap_next, next_id, thread_entry, psar_offset;
     uint32_t data_psp_word;
     uint32_t cd_thread_entry, cd_event_bits;
-    uint32_t mc_thread_entry, mc_semaphore_count;
+    uint32_t mc_thread_entry, mc_semaphore_count, mc_worker_ready;
     uint32_t me_callback, me_request, me_ack, me_value;
     uint32_t me_stack_hi, me_stack_lo, me_output_words, me_last_output;
     uint32_t ge_commands[512], ge_command_count, ge_lists_captured;
@@ -76,6 +76,9 @@ void rp_pops_optional_metadata(rp_context *, uint32_t, uint32_t, uint32_t);
 uint32_t rp_pops_optional_auxiliary(rp_context *, uint32_t);
 void rp_pops_finish_disc_boot(rp_context *);
 uint32_t rp_pops_mc_init(rp_context *);
+void rp_pops_mc_worker_start(rp_context *);
+void rp_pops_mc_format(rp_context *, uint32_t);
+uint32_t rp_pops_mc_free_blocks(rp_context *, uint32_t, uint32_t *);
 uint32_t rp_pops_controller_init(rp_context *);
 void rp_pops_initialize_core(rp_context *);
 void rp_pops_graphics_initialize(rp_context *);

@@ -179,10 +179,9 @@ void rp_pops_main_thread(rp_context *c)
     rp_function(c, 0x1C964, "pops.query_pending_state_restore");
     if (rp_u32(c, 0x14D07C)) rp_block(c, "state_restore_not_reconstructed", 0x1BF30);
     rp_function(c, 0x1A908, "pops.wait_startup_thread_handoff");
+    if (!c->mc_worker_ready) rp_pops_mc_worker_start(c);
     if ((int32_t)rp_u32(c, 0x14CC64) >= 0) {
-        /* Original waits on the producer in another thread. A diagnostic that
-         * bypassed UI must not fabricate that producer's completion signal.
-         */
+        /* Original waits on the memory-card worker/alarm producer. */
         rp_block(c, "startup_thread_handoff_pending", 0x1A908);
     }
     ++c->services;

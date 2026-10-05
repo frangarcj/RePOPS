@@ -38,7 +38,10 @@ pops_660,0x24C78,initialization_step,complete,src/native/pops_reset.c,diagnostic
 pops_660,0x1C964,state_query,complete,src/native/pops_boot.c,diagnostic_state_word_read,diagnostic_only
 pops_660,0x1BF30,conditional_state_load,pending,,none,not_integrated
 pops_660,0x1A908,pre_core_step,partial,src/native/pops_boot.c,cooperative_volatile_card_worker_handoff,diagnostic_only
-pops_660,0x1A00,core_dispatch_entry,pending,,none,not_integrated
+pops_660,0x1A00,core_dispatch_entry,partial,src/native/pops_dispatch.c,first_BIOS_cache_dispatch_via_generated_code_adapter,diagnostic_only
+pops_660,0x89A0,default_memory_write,complete,src/native/pops_dispatch.c,initial_BIOS_cache_control_path_host_run,diagnostic_only
+pops_660,0x7E60,invalidate_RAM_code_pages,complete,src/native/pops_dispatch.c,reset_vector_row_initial_BIOS_path_host_run,diagnostic_only
+pops_660,0x2888,link_and_dispatch_block,partial,src/native/pops_dispatch.c,cache_miss_reaches_next_compiler_boundary,diagnostic_only
 pops_660,0x1AA90,memory_card_worker,partial,src/native/pops_memory_card.c,startup_to_semaphore_with_volatile_storage,diagnostic_only
 pops_660,0x37204,bind_card_slot,partial,src/native/pops_memory_card.c,bank_zero_only,diagnostic_only
 pops_660,0x37B8C,bind_raw_card,complete,src/native/pops_memory_card.c,focused_card_test,diagnostic_only

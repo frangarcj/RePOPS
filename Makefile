@@ -4,7 +4,9 @@ PNG_CFLAGS = $(shell pkg-config --cflags libpng)
 PNG_LIBS = $(shell pkg-config --libs libpng)
 NATIVE_SRC = src/bootstrap.c src/me_startup.c src/me_registration.c src/native/runtime.c src/native/pops_boot.c src/native/pops_image.c src/native/pops_disc.c src/native/pops_config.c src/native/pops_metadata.c src/native/pops_reset.c src/native/pops_graphics.c src/native/me_worker.c src/native/pops_me.c src/native/pops_spu.c src/native/pops_analyze.c src/native/pops_compile.c src/native/pops_emit.c src/native/pops_emit_memory.c src/native/pops_memory_card.c src/native/main.c
 
-.PHONY: all native analyze test test-native-disc test-native-config test-native-me test-native-spu test-native-emit test-native-memory-card clean-help
+NATIVE_SRC += src/native/generated_code.c src/native/pops_dispatch.c
+
+.PHONY: all native analyze test test-native-disc test-native-config test-native-me test-native-spu test-native-emit test-native-memory-card test-generated-code clean-help
 all: native
 native: build/repops-native
 analyze: build/repops-analyze
@@ -61,6 +63,13 @@ build/test_native_memory_card: src/native/runtime.c src/native/pops_memory_card.
 
 test-native-memory-card: build/test_native_memory_card
 	./build/test_native_memory_card
+
+build/test_generated_code: src/native/runtime.c src/native/generated_code.c src/native/runtime.h tests/test_generated_code.c
+	mkdir -p build
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/generated_code.c tests/test_generated_code.c -o $@
+
+test-generated-code: build/test_generated_code
+	./build/test_generated_code
 
 clean-help:
 	@echo 'Analysis artifacts are retained. Remove only explicitly selected local outputs.'

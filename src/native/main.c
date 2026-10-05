@@ -70,9 +70,13 @@ int main(int argc, char **argv)
     }
     fprintf(c->trace,"{\"kind\":\"result\",\"status\":\"%s\",\"address\":%u,"
             "\"native_function_entries\":%u,\"host_service_calls\":%u,"
-            "\"execution\":\"native_C_not_MIPS_interpretation\",\"game_executed\":false,"
+            "\"execution\":\"native_C_POPS_with_generated_code_adapter\",\"game_executed\":false,"
+            "\"generated_instructions\":%llu,\"compiled_block_transfers\":%u,"
+            "\"psx_pc\":%u,\"generated_pc\":%u,"
             "\"diagnostic_ui_bypassed\":%s}\n",
             c->stop_kind,c->stop_address,c->functions,c->services,
+            (unsigned long long)c->generated_instructions,c->compiled_transfers,
+            rp_u32(c,c->gp+0x1A0),c->run_pc,
             c->diagnostic_skip_ui ? "true" : "false");
     printf("Native C stopped: %s at 0x%08X; %u function entries, %u host calls\n",
             c->stop_kind,c->stop_address,c->functions,c->services);

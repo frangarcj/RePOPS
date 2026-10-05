@@ -186,5 +186,5 @@ void rp_pops_main_thread(rp_context *c)
     }
     ++c->services;
     rp_event(c, "headless_adapter", "core_thread_priority_request", 0, 0x11);
-    rp_block(c, "compiled_Allegrex_execution_bridge_not_implemented", 0x1A00);
+    rp_pops_run_core(c);
 }

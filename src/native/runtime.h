@@ -28,6 +28,12 @@ typedef struct rp_context {
     uint32_t me_stack_hi, me_stack_lo, me_output_words, me_last_output;
     uint32_t ge_commands[512], ge_command_count, ge_lists_captured;
     uint32_t ge_stalled_list, ge_edram_translation;
+    /* Temporary execution adapter for code emitted by the reconstructed C.
+     * Original firmware instructions are never fetched by this adapter.
+     */
+    uint32_t run_gpr[32], run_fpr[32], run_pc, run_next_pc, run_hi, run_lo;
+    uint64_t generated_instructions;
+    uint32_t compiled_transfers;
     rp_me_worker me_worker;
     uint32_t vfpu_s330_bits;
     float vfpu_reset_rows[4][4];
@@ -87,4 +93,8 @@ void rp_pops_me_poll(rp_context *);
 bool rp_pops_spu_inactive_sample(rp_context *, uint32_t *);
 void rp_pops_analyze_records(rp_context *, uint32_t);
 uint32_t rp_pops_prepare_compile(rp_context *, uint32_t);
+void rp_generated_step(rp_context *);
+void rp_pops_run_core(rp_context *);
+void rp_pops_default_write(rp_context *, uint32_t, uint32_t, uint32_t);
+void rp_pops_invalidate_ram_code(rp_context *);
 #endif

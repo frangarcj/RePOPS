@@ -49,10 +49,23 @@ SPU state, runs the disabled-SPU callback and the native ME request/acknowledgem
 loop, prepares graphics tables and constructs the first disabled-display list.
 It then installs GPU handlers, clears guest RAM and compiles/publishes the
 initial BIOS block: 352 Allegrex bytes at `0x09B80000`. The run stops at
-`+0x1A908`, waiting for the startup thread's completion signal; bypassing the
-UI does not supply that signal. The emitted code is not yet executed on the
-host. Active-voice mixing, rendering and PS1 instruction execution remain
-unimplemented. See [the BIOS controller notes](docs/cpu_block_controller.md).
+the next unreconstructed path, rather than treating initialization as a game
+boot. The volatile-card worker now produces the real startup signal and the
+diagnostic proceeds into compiled-code dispatch.
+
+**The blocks are currently interpreted, not compiled to ARM64.**
+`generated_code.c` is a small provisional Allegrex executor for the output of
+the reconstructed POPS compiler. It never fetches original POPS function
+bodies; their call targets return to reconstructed C or stop explicitly.
+The latest run reaches guest BIOS PC `0xBFC0039C` after 731 generated
+instructions and five compiled-entry transfers. Compiling the next region
+stops at the dynamic-memory-base emitter `+0x3A90`. These instruction/transfer
+counts do not measure original-function coverage. FFVI has not booted.
+
+See [generated execution](docs/generated_code_execution.md),
+[conditional flow](docs/cpu_conditional_flow.md), and
+[state writes](docs/cpu_state_writes.md). Active-voice mixing, the renderer,
+complete CPU behavior and PSP UI remain incomplete.
 
 Requirements: a C11 compiler, Python dependencies from `requirements.txt`,
 `pkg-config`, `libpng`, and Ghidra with the Allegrex extension for initial data
@@ -91,7 +104,8 @@ scratchpad, stopping before instruction emission at `+0x5D5C`.
 emitter and its register helpers. The beginning of the BIOS produces the same
 three words as POPS, with matching records and scratchpad. This is a focused
 probe: it stops before the first memory-write category, not a complete block.
-The generated Allegrex is not executed by the Mac. See
+That focused emission probe does not execute generated Allegrex. The separate
+integrated diagnostic uses the provisional adapter described above. See
 [register allocation and initial emission](docs/cpu_register_emission.md).
 
 ```sh

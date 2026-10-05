@@ -1,6 +1,31 @@
 # RePops progress
 
-## CPU reverse: first reconstructed analysis stage
+## Current: executing the C compiler's BIOS output
+
+The volatile memory-card worker now produces the startup signal at +0x14CC64.
+The reconstructed dispatch entry resolves its compiled target and a small
+provisional interpreter executes **only the C-generated Allegrex cache**.
+Calls into original POPS offsets use reconstructed C; unsupported targets
+stop rather than falling back to original-firmware emulation. This is not an
+ARM64 JIT or an optimized backend.
+
+`out/ffvi_run.Rus1UO/result/` reaches BIOS PC BFC0039C after 731 emitted
+instructions and five cache-entry transfers. The two initial conditional
+loops finish, with branch conditions captured before a modifying delay slot.
+The next compiler boundary is dynamic memory-base emission at +0x3A90.
+The normal, non-diagnostic path still stops at PSP UI +0x28DF8.
+
+Semantic commits in this pass: 49bea93 (card handoff), a05c789 (provisional
+execution bridge), 3ec1c60 (conditional branches and deadline helper), and
+5c295d3 (COP0 state writes). Focused card/emitter/bridge tests pass with
+sanitizers. No game boot, enabled audio, renderer, complete CPU semantics or
+new full binary-equivalence result is claimed. See `native_memory_card.md`,
+`generated_code_execution.md`, `cpu_conditional_flow.md` and `cpu_state_writes.md`.
+
+The sections below are preserved earlier checkpoints; their stop addresses
+and statements about execution apply to those earlier runs.
+
+## Earlier CPU reverse: first reconstructed analysis stage
 
 The +0x05154 analysis body is now C with its original 16-byte records and
 recursive branch discovery. A focused first-BIOS comparison matches the
@@ -25,7 +50,7 @@ These functions are now linked into the integrated native diagnostic too.
 The first reset's +0x94C4 exception-vector setup calls the reconstructed
 compiler and publishes its 352-byte block at 0x09B80000. It is not executed.
 
-## Current: native reset compiles the initial BIOS block
+## Earlier: native reset compiles the initial BIOS block
 
 The normal FFVI startup path now applies the game configuration, prepares the
 disc index and savedata metadata, and stops at PSP UI +0x28DF8. An explicit

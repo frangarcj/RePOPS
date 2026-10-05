@@ -9,13 +9,14 @@
 
 int main(int argc, char **argv)
 {
-    const int flow_emission = argc == 4 && strcmp(argv[3], "--emit-flow") == 0;
+    const int walk = argc == 4 && strcmp(argv[3], "--walk-block") == 0;
+    const int flow_emission = walk || (argc == 4 && strcmp(argv[3], "--emit-flow") == 0);
     const int memory_emission = flow_emission || (argc == 4 && strcmp(argv[3], "--emit-memory") == 0);
     const int emission = memory_emission || (argc == 4 && strcmp(argv[3], "--emit-immediates") == 0);
     const int prepare = emission || (argc == 4 && strcmp(argv[3], "--prepare") == 0);
     if (prepare) --argc;
     if (argc != 3) {
-        fprintf(stderr, "usage: %s <checked-native-image.bin> <new-output-directory> [--prepare|--emit-immediates|--emit-memory|--emit-flow]\n", argv[0]);
+        fprintf(stderr, "usage: %s <checked-native-image.bin> <new-output-directory> [--prepare|--emit-immediates|--emit-memory|--emit-flow|--walk-block]\n", argv[0]);
         return 64;
     }
     rp_context *c = calloc(1, sizeof(*c));
@@ -65,6 +66,9 @@ int main(int argc, char **argv)
         if (emission) {
             emission_start = emission_cursor;
             rp_emit_init_registers(c, emission_cursor);
+            if (walk) {
+                emission_cursor = rp_pops_emit_block_records(c, emission_cursor);
+            } else {
             /* Focused emitter probe, not the complete +0x058C0 record walk.
              * Stop before the first category that is not reconstructed yet.
              */
@@ -79,6 +83,7 @@ int main(int argc, char **argv)
                 }
                 emission_cursor = rp_emit_record(c, category, record, emission_cursor, 0);
                 ++emitted_records;
+            }
             }
         }
     }
@@ -111,6 +116,7 @@ int main(int argc, char **argv)
                 "\"record_slots\":%u,\"native_function_entries\":%u,\"guest_executed\":false,"
                 "\"emission_cursor_not_executable\":%u,\"emitted_records\":%u,\"stage\":\"%s\"}\n",
                 pc, buffer, end, bytes / 16, c->functions, emission_cursor, emitted_records,
+                walk ? "native_C_POPS_BIOS_record_controller_before_linking" :
                 flow_emission ? "native_C_POPS_forward_flow_and_known_ALU_probe" :
                 memory_emission ? "native_C_POPS_known_memory_emitter_probe" :
                 emission ? "native_C_POPS_immediate_emitter_probe" :

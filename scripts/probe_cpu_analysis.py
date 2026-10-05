@@ -26,7 +26,7 @@ Opcode = IntEnum('Opcode', {name: int(value, 0) for name, value in
     re.findall(r'RP_OP_(\w+)\s*=\s*(0x[0-9A-Fa-f]+)', _enum_header)})
 
 
-def compare_original(image, directory, prepare=False, emission=False, memory_emission=False, flow_emission=False):
+def compare_original(image, directory, prepare=False, emission=False, memory_emission=False, flow_emission=False, walk=False):
     import unicorn as U
     import unicorn.mips_const as M
     machine = U.Uc(U.UC_ARCH_MIPS, U.UC_MODE_MIPS32 | U.UC_MODE_LITTLE_ENDIAN)
@@ -59,6 +59,7 @@ def compare_original(image, directory, prepare=False, emission=False, memory_emi
     if machine.reg_read(M.UC_MIPS_REG_PC) != stop:
         raise RuntimeError('Original routine did not reach the selected boundary within the budget')
     emitted_code = None
+    skipped_walk_cache = []
     if emission:
         machine.mem_map(0x09B80000, 0x20000)
         # Skip the single CACHE at +0x5D5C; run the actual BIOS allocation-table
@@ -78,23 +79,43 @@ def compare_original(image, directory, prepare=False, emission=False, memory_emi
         cursor = machine.reg_read(M.UC_MIPS_REG_S1)
         start = cursor
         high_water = struct.unpack('<I', machine.mem_read(0x10B4C, 4))[0]
-        for record in range(BASE, high_water + 1, 16):
-            category = struct.unpack('<H', machine.mem_read(record + 4, 2))[0]
-            if category == Category.EMPTY:
-                continue
-            if (category not in (Category.IMMEDIATE, Category.ELIDED)
-                    and not (memory_emission and category == Category.MEMORY)
-                    and not (flow_emission and category in
-                             (Category.JUMP_DIRECT, Category.ALU, Category.WRITE_COP, Category.EXIT))):
-                break
-            for reg, value in ((M.UC_MIPS_REG_A0, category), (M.UC_MIPS_REG_A1, record),
-                               (M.UC_MIPS_REG_A2, cursor), (M.UC_MIPS_REG_A3, 0),
-                               (M.UC_MIPS_REG_SP, 0x0700F000), (M.UC_MIPS_REG_RA, 0x0700FFF0)):
-                machine.reg_write(reg, value)
-            machine.emu_start(0x6914, 0x0700FFF0, count=200000)
-            if machine.reg_read(M.UC_MIPS_REG_PC) != 0x0700FFF0:
-                raise RuntimeError('Original immediate emitter did not return')
+        if walk:
+            # Only cache maintenance in this audited controller range is elided.
+            # No data operation, branch, emitter, or delay slot is substituted.
+            for address in range(0x5E78, 0x64F8, 4):
+                word = struct.unpack('<I', machine.mem_read(address, 4))[0]
+                if word >> 26 == 0x2F:
+                    skipped_walk_cache.append(hex(address))
+                    machine.mem_write(address, bytes(4))
+            reached_walk = []
+            def walk_boundary(uc, address, size, user):
+                if address == 0x64F8:
+                    reached_walk.append(address)
+                    uc.emu_stop()
+            hook = machine.hook_add(U.UC_HOOK_CODE, walk_boundary)
+            machine.emu_start(0x5E78, 0x0700FFF0, count=500000)
+            machine.hook_del(hook)
+            if not reached_walk:
+                raise RuntimeError(f'Original record walk stopped at PC={machine.reg_read(M.UC_MIPS_REG_PC):08X}')
             cursor = machine.reg_read(M.UC_MIPS_REG_V0)
+        else:
+            for record in range(BASE, high_water + 1, 16):
+                category = struct.unpack('<H', machine.mem_read(record + 4, 2))[0]
+                if category == Category.EMPTY:
+                    continue
+                if (category not in (Category.IMMEDIATE, Category.ELIDED)
+                        and not (memory_emission and category == Category.MEMORY)
+                        and not (flow_emission and category in
+                                 (Category.JUMP_DIRECT, Category.ALU, Category.WRITE_COP, Category.EXIT))):
+                    break
+                for reg, value in ((M.UC_MIPS_REG_A0, category), (M.UC_MIPS_REG_A1, record),
+                                   (M.UC_MIPS_REG_A2, cursor), (M.UC_MIPS_REG_A3, 0),
+                                   (M.UC_MIPS_REG_SP, 0x0700F000), (M.UC_MIPS_REG_RA, 0x0700FFF0)):
+                    machine.reg_write(reg, value)
+                machine.emu_start(0x6914, 0x0700FFF0, count=200000)
+                if machine.reg_read(M.UC_MIPS_REG_PC) != 0x0700FFF0:
+                    raise RuntimeError('Original record emitter did not return')
+                cursor = machine.reg_read(M.UC_MIPS_REG_V0)
         emitted_code = bytes(machine.mem_read(start, cursor - start))
     expected = bytes(machine.mem_read(BASE, 0xC010))
     native = (directory / 'records.bin').read_bytes().ljust(len(expected), b'\0')
@@ -126,6 +147,10 @@ def compare_original(image, directory, prepare=False, emission=False, memory_emi
             report['fixture'] = 'native reset default I/O table; whole reset and devices not executed'
         if flow_emission:
             report['stage'] = '06914_forward_flow_and_known_ALU_probe'
+        if walk:
+            report['stage'] = '058C0_BIOS_controller_through_064F7'
+            report['skipped_walk_cache_offsets'] = skipped_walk_cache
+            report['excluded'] = 'setup/walk CACHE maintenance omitted; final link pass and generated code execution not performed'
     report['passed'] = not differences and report['scratch_equal'] and report['record_length_equal']
     if emission:
         report['passed'] &= report['allegrex_bytes_equal']
@@ -144,7 +169,10 @@ def main():
     parser.add_argument('--emit-immediates', action='store_true', help='Probe immediate emission after prepare; not full block compilation')
     parser.add_argument('--emit-memory', action='store_true', help='Include known-base memory categories with the initial reset I/O table fixture')
     parser.add_argument('--emit-flow', action='store_true', help='Include the initial forward jump and known ALU paths; not full block linking')
+    parser.add_argument('--walk-block', action='store_true', help='Run the reconstructed BIOS controller through record emission, before final linking')
     args = parser.parse_args()
+    if args.walk_block:
+        args.emit_flow = True
     if args.emit_flow:
         args.emit_memory = True
     if args.emit_memory:
@@ -162,7 +190,9 @@ def main():
     args.out.mkdir(parents=True)
     command = [str(ROOT / 'build/repops-analyze'),
                str((args.image / 'pops_image.bin').resolve()), str(args.out.resolve())]
-    if args.emit_flow:
+    if args.walk_block:
+        command.append('--walk-block')
+    elif args.emit_flow:
         command.append('--emit-flow')
     elif args.emit_memory:
         command.append('--emit-memory')
@@ -175,18 +205,20 @@ def main():
     rows = []
     for offset in range(0, len(blob), 16):
         flags, dest, opcode, kind, boundary_cost, payload, rs, rt, auxiliary, cost = struct.unpack_from('<HBBHHIBBBB', blob, offset)
-        if kind == Category.EMPTY:
+        output_entry = args.walk_block and (flags & 8) != 0
+        if kind == Category.EMPTY and not output_entry:
             continue
         rows.append({'guest_pc': f'0x{0xBFC00000 + offset // 4:08X}', 'flags': f'0x{flags:04X}',
-                     'destination': dest, 'opcode': f'0x{opcode:02X}', 'category': kind,
+                     'destination': dest, 'opcode': f'0x{opcode:02X}', 'category': None if output_entry else kind,
                      'opcode_name': Opcode(opcode).name if opcode in Opcode._value2member_map_ else 'UNKNOWN',
-                     'category_name': Category(kind).name if kind in Category._value2member_map_ else 'UNKNOWN',
+                     'category_name': 'OUTPUT_ENTRY' if output_entry else Category(kind).name if kind in Category._value2member_map_ else 'UNKNOWN',
+                     'output_address': f'0x{kind | boundary_cost << 16:08X}' if output_entry else None,
                      'payload': f'0x{payload:08X}', 'source1': rs, 'source2': rt,
                      'auxiliary': auxiliary, 'cost_field': cost, 'boundary_cost': boundary_cost})
     (args.out / 'records.json').write_text(json.dumps(rows, indent=2) + '\n')
     print(f'{len(rows)} nonempty record categories; includes boundary records, not executed instructions.')
     if args.compare:
-        compare_original(image, args.out, args.prepare, args.emit_immediates, args.emit_memory, args.emit_flow)
+        compare_original(image, args.out, args.prepare, args.emit_immediates, args.emit_memory, args.emit_flow, args.walk_block)
     print('Output:', args.out)
 
 

@@ -1,5 +1,6 @@
 #include "runtime.h"
 #include "pops_ir.h"
+#include "pops_emit.h"
 
 #define RECORD_BASE UINT32_C(0x041B0000)
 
@@ -143,4 +144,105 @@ uint32_t rp_pops_prepare_compile(rp_context *c, uint32_t pc)
     account_costs(c, high_water + 16);
     rp_event(c, "milestone", "POPS_record_cost_pass_complete", 0x5D5C, output);
     return output;
+}
+
+static uint32_t allocate_source(rp_context *c, uint32_t out, uint32_t reg, uint32_t protect)
+{
+    if (!reg) return out;
+    return (rp_emit_allocate(c, out, reg, protect, 2) >> 5) << 2;
+}
+
+/* +0x5E78..+0x64F7, BIOS record-walk path. Entry setup has already run.
+ * Output addresses replace category/cost at record+4 for join entries, so
+ * the current category must be saved before those in-place writes.
+ * The final linking/cache-table pass is deliberately a separate boundary.
+ */
+uint32_t rp_pops_emit_block_records(rp_context *c, uint32_t out)
+{
+    if (!(h(c, c->gp + 0xB40) & 0x8000))
+        rp_block(c, "RAM_record_controller_not_reconstructed", 0x58C0);
+    const uint32_t end = rp_u32(c, c->gp + 0xB4C) + 16;
+    for (uint32_t record = RECORD_BASE; record < end;) {
+        const rp_pops_category category = (rp_pops_category)h(c, record + 4);
+        if (category == RP_CAT_EMPTY) { record += 16; continue; }
+        uint16_t flags = h(c, record);
+        bool record_entry = false;
+        if (flags & 8) {
+            const uint32_t cost = h(c, record + 6) + rp_u32(c, c->gp + 0xB44);
+            out = rp_emit_debit(c, (int32_t)cost, out);
+            rp_w32(c, c->gp + 0xB58, 0x80000000);
+            rp_w32(c, c->gp + 0xB44, 0);
+            rp_w32(c, c->gp + 0xB5C, 0);
+            out = rp_emit_flush_registers(c, out, 11);
+            rp_w32(c, c->gp + 0x740, out);
+            record_entry = true;
+        } else if (rp_u32(c, c->gp + 0xB58) == 0x80000000) {
+            uint32_t busy = rp_u32(c, c->gp + 0x744) |
+                b(c, c->gp + 0x750) | b(c, c->gp + 0x752);
+            for (unsigned i = 0; i < 12; ++i) busy |= b(c, c->gp + 0x760 + i);
+            if (!busy) {
+                flags |= 8; wh(c, record, flags);
+                record_entry = true;
+            }
+        }
+        if (record_entry) rp_w32(c, record + 4, out);
+
+        if ((flags & 0x8000) && !(flags & 0x4000) &&
+                h(c, record + 4) != RP_CAT_MEMORY) {
+            uint32_t next_rt = b(c, record + 29), next_rs = b(c, record + 28);
+            if (!(h(c, record + 20) == RP_CAT_ALU && (!next_rt || !next_rs))) {
+                const uint32_t dest = b(c, record + 2);
+                if (next_rt == dest) next_rt = 0;
+                if (next_rs == dest) next_rs = 0;
+                if (next_rt || next_rs) {
+                    const uint32_t rt = b(c, record + 13), rs = b(c, record + 12);
+                    out = allocate_source(c, out, rt, (1u << (rs & 31)) | (1u << (next_rt & 31)));
+                    out = allocate_source(c, out, rs, (1u << (rt & 31)) | (1u << (next_rt & 31)));
+                    const uint32_t protect = (1u << (rt & 31)) | (1u << (rs & 31));
+                    out = allocate_source(c, out, next_rt, protect);
+                    out = allocate_source(c, out, next_rs, protect);
+                }
+            }
+        }
+        if (flags & 0x1000)
+            rp_block(c, "compiler_special_PC_hook_not_reconstructed", 0x6088);
+
+        const uint16_t next_flags = h(c, record + 16);
+        if (!(next_flags & 1)) {
+            const uint8_t dest = b(c, record + 2);
+            if ((flags & 0x40) && (flags & 0x8000) &&
+                    (b(c, record + 28) == dest || b(c, record + 29) == dest)) {
+                if (!(h(c, record + 32) & 1)) {
+                    if (b(c, record + 18) != dest) {
+                        out = rp_emit_record(c, (rp_pops_category)h(c, record + 20), record + 16, out, 0);
+                        wh(c, record + 20, RP_CAT_EMPTY);
+                    }
+                } else if (b(c, record + 19) >= RP_OP_BGEZ) {
+                    rp_block(c, "load_delay_branch_capture_not_reconstructed", 0x5064);
+                }
+            }
+            out = rp_emit_record(c, category, record, out, 0);
+            record += 16;
+            continue;
+        }
+
+        /* Direct J/JAL with an ordinary delay slot. Conditional, indirect and
+         * nested-delay hazards remain explicit until their paths are recovered.
+         */
+        if (category != RP_CAT_JUMP_DIRECT || (next_flags & 0x40) ||
+                (h(c, record + 32) & 1))
+            rp_block(c, "complex_delay_slot_controller_not_reconstructed", 0x61B0);
+        const uint32_t link = b(c, record + 2);
+        if (link) {
+            const uint32_t pc = rp_u32(c, c->gp + 0xB50) + ((record - RECORD_BASE) >> 2);
+            out = rp_emit_known_value(c, link, pc + 8, out, 0);
+        }
+        out = rp_emit_record(c, (rp_pops_category)h(c, record + 20), record + 16, out, 0);
+        out = rp_emit_record(c, category, record, out, h(c, record + 22));
+        record += (h(c, record + 16) & 8) ? 16 : 32;
+    }
+    out = rp_emit_flush_registers(c, out, 11);
+    rp_w32(c, c->gp + 0x740, out);
+    rp_event(c, "milestone", "POPS_BIOS_record_walk_complete_before_linking", 0x64F8, out);
+    return out;
 }

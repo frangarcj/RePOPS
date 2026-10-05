@@ -33,4 +33,5 @@ uint32_t rp_emit_memory(rp_context *, uint32_t, uint32_t, uint32_t, uint32_t, ui
 uint32_t rp_emit_memory_record(rp_context *, uint32_t, uint32_t);
 uint32_t rp_emit_store_state(rp_context *, uint32_t, uint32_t, uint32_t, uint32_t);
 uint32_t rp_emit_exit_target(rp_context *, uint32_t, uint32_t);
+uint32_t rp_pops_emit_block_records(rp_context *, uint32_t);
 #endif

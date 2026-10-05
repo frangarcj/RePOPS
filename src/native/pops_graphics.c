@@ -215,7 +215,165 @@ static void raise_irq(rp_context *c, uint32_t bits)
     }
 }
 
-/* +0x11410 up to its first display refresh. ROUND.W.S uses nearest/even. */
+/* +0x30C24's idle-UI path. Headless services report no HOME/power events;
+ * non-idle paths remain explicit rather than inventing a menu transition.
+ */
+static uint32_t poll_idle_ui(rp_context *c)
+{
+    rp_function(c, 0x30C24, "pops.poll_idle_UI_path");
+    if (*(uint8_t *)rp_memory(c, 0x450C14, 1) || *(uint8_t *)rp_memory(c, 0x4A0C10, 1))
+        rp_block(c, "UI_storage_event_not_reconstructed", 0x30C24);
+    ++c->services;
+    rp_event(c, "headless_adapter", "impose_and_power_no_pending_events", 0x30C24, 0);
+    rp_w32(c, 0x14D0C0, 0);
+    if (rp_u32(c, 0x14D090)) rp_block(c, "active_UI_state_not_reconstructed", 0x30C24);
+    rp_w32(c, 0x14D0BC, 0);
+    for (unsigned i = 0; i < 2; ++i) {
+        const uint32_t address = 0x14D0B4 + i * 4, value = rp_u32(c, address);
+        if ((int32_t)value > 0) {
+            rp_w32(c, address, value - 1);
+            if (value == 1) rp_block(c, "UI_countdown_callback_not_reconstructed", 0x1A8A8);
+        }
+    }
+    if (rp_u32(c, 0x14D094) || rp_u32(c, 0x14D0B0))
+        rp_block(c, "UI_transition_not_reconstructed", 0x30C24);
+    return 0;
+}
+
+/* +0x1B7C8. The provider display-mode request is captured, not sent to a GPU. */
+static void display_mode(rp_context *c, uint32_t mode)
+{
+    rp_function(c, 0x1B7C8, "pops.set_display_mode");
+    if ((int32_t)mode < 0) mode = (rp_u32(c, c->gp + 0x3668) >> 13) & 1;
+    rp_w8(c, c->gp + 0x365E, (uint8_t)mode);
+    if (!rp_u32(c, 0x14D090)) {
+        const uint32_t state = rp_u32(c, 0x49CBD4);
+        if (!state && mode == 1) rp_w32(c, 0x49CBD4, 1);
+        else if (state == 1 && !mode) rp_w32(c, 0x49CBD4, 2);
+    }
+    ++c->services;
+    rp_event(c, "headless_adapter", "display_mode_request_captured", mode ? 0 : 0xE0, 0x01E00110);
+}
+
+static uint32_t graphics_word(rp_context *c, uint32_t cursor, uint32_t word)
+{
+    rp_w32(c, cursor, word);
+    return cursor + 4;
+}
+
+/* +0x115B4: the reset path with PS1 display disabled and no active UI. This
+ * constructs the actual GE words but does not render or invent a framebuffer.
+ * Device/display services are explicit headless adapters, not PSP timing.
+ */
+static void refresh_disabled_display(rp_context *c)
+{
+    rp_function(c, 0x115B4, "pops.refresh_disabled_display_path");
+    const uint32_t gp = c->gp, status = rp_u32(c, gp + 0x3630);
+    if (!(status & 0x04000000) && *(uint8_t *)rp_memory(c, gp + 0x3657, 1) == 8) {
+        rp_w8(c, gp + 0x3661, 1);
+        return;
+    }
+    const uint32_t mode = rp_u32(c, gp + 0x3668), flags = rp_u32(c, gp + 0x6AC);
+    const uint8_t old_field = *(uint8_t *)rp_memory(c, gp + 0x3660, 1);
+    rp_w8(c, gp + 0x3661, 0);
+    rp_w8(c, gp + 0x365D, (uint8_t)(((mode >> 10) & 1) & ((mode >> 13) & 1)));
+    if (*(uint8_t *)rp_memory(c, gp + 0x365E, 1) != ((mode >> 13) & 1)) {
+        display_mode(c, (mode >> 13) & 1);
+        rp_w8(c, gp + 0x3665, *(uint8_t *)rp_memory(c, gp + 0x3665, 1) & 1);
+    }
+    const uint32_t next_frame = rp_u32(c, gp + 0x35C0) + 1;
+    if (!(flags & 8) && (mode & 0x800))
+        rp_block(c, "PAL_frame_correction_not_reconstructed", 0x125A4);
+    const uint8_t dirty = *(uint8_t *)rp_memory(c, gp + 0x365F, 1);
+    if (flags & 0x8000) {
+        if (old_field || dirty) rp_w8(c, gp + 0x366A, 0);
+        else {
+            const uint8_t count = *(uint8_t *)rp_memory(c, gp + 0x366A, 1);
+            if (count == 60) rp_block(c, "display_idle_callback_not_reconstructed", 0x1AF14);
+            rp_w8(c, gp + 0x366A, (uint8_t)(count + 1));
+        }
+    }
+    ++c->services;
+    rp_event(c, "headless_adapter", "impose_service_54F2AE52_return_unused", 0x2270, 0);
+    (void)poll_idle_ui(c);
+    const uint8_t initialized = *(uint8_t *)rp_memory(c, gp + 0x3666, 1);
+    if (!initialized) {
+        rp_w8(c, gp + 0x3666, 0xFF);
+        rp_function(c, 0x34350, "pops.restore_display_buffer");
+        ++c->services;
+        rp_event(c, "headless_adapter", "display_buffer_request_captured", 0x041BC000, 512);
+    }
+    if (!(status & 0x800000) || (mode & 0x1000) ||
+            *(uint8_t *)rp_memory(c, gp + 0x3664, 1))
+        rp_block(c, "active_display_refresh_not_reconstructed", 0x115B4);
+    if (initialized && !old_field && !dirty)
+        rp_block(c, "repeat_idle_refresh_not_reconstructed", 0x1252C);
+    if (*(uint8_t *)rp_memory(c, gp + 0x3658, 1) & 0x80)
+        rp_block(c, "GE_previous_frame_sync_not_reconstructed", 0x12504);
+    uint32_t out = rp_u32(c, gp + 0x362C), start = out;
+    out = graphics_word(c, out, 0x13041B92);
+    out = graphics_word(c, out, 0x0A000000);
+    out = graphics_word(c, out, 0x0A0000C0);
+
+    /* The reset texture cache has no dirty entries. Any occupied entry that
+     * would require the relocation/copy path is still a separate boundary.
+     */
+    bool free_slot = false;
+    for (unsigned group = 0; group < 2; ++group)
+        for (unsigned row = 0; row < 5; ++row) {
+            const uint32_t p = gp + 0x3400 + group * 0x80 + row * 24;
+            if (!*(uint8_t *)rp_memory(c, p + 4, 1) && !(rp_u32(c, p) & 0x08000000) &&
+                    (!*(uint8_t *)rp_memory(c, p + 29, 1) || !*(uint8_t *)rp_memory(c, p + 28, 1)))
+                free_slot = true;
+        }
+    if (free_slot)
+        for (unsigned group = 0; group < 2; ++group)
+            for (unsigned row = 0; row < 5; ++row) {
+                const uint32_t p = gp + 0x3400 + group * 0x80 + row * 24;
+                if (*(uint8_t *)rp_memory(c, p + 4, 1) & (rp_u32(c, p) >> 27))
+                    rp_block(c, "texture_cache_relocation_not_reconstructed", 0x11B54);
+            }
+    put_half(c, gp + 0x3654, half(c, gp + 0x3654) | 0xC000);
+    rp_w32(c, gp + 0x362C, 0x49A00000);
+    rp_w8(c, gp + 0x3656, 0xFF); rp_w8(c, gp + 0x3658, 0xFF);
+    const uint32_t x0 = (uint32_t)(int32_t)(int16_t)half(c, gp + 0x3620);
+    const uint32_t y0 = (uint32_t)(int32_t)(int16_t)half(c, gp + 0x3622);
+    const uint32_t x1 = (uint32_t)(int32_t)(int16_t)half(c, gp + 0x3624);
+    const uint32_t y1 = (uint32_t)(int32_t)(int16_t)half(c, gp + 0x3626);
+    out = graphics_word(c, out, 0xD4000000 | x0 | y0 << 10);
+    out = graphics_word(c, out, 0xD5000000 | x1 | y1 << 10);
+    out = graphics_word(c, out, 0x13041B93);
+    out = graphics_word(c, out, 0x0A000000);
+    ++c->services;
+    rp_event(c, "headless_adapter", "virtual_vblank_at_requested_frame_no_realtime_wait", next_frame, 0);
+    c->ge_stalled_list = 0;
+    ++c->services;
+    rp_event(c, "headless_adapter", "GE_stall_release_captured_not_rendered", 0xE7F06E2B, 0);
+    rp_w32(c, gp + 0x35C0, next_frame);
+    rp_w32(c, gp + 0x3608, rp_u32(c, 0x49F40294));
+    rp_w32(c, gp + 0x360C, rp_u32(c, gp + 0x1AC) - rp_u32(c, gp + 0x1B0));
+    rp_w8(c, gp + 0x3660, 0);
+    const uint8_t idle = *(uint8_t *)rp_memory(c, gp + 0x3668, 1);
+    if (idle < 128) {
+        rp_w8(c, gp + 0x3668, (uint8_t)(idle - 1));
+        if (!idle) {
+            ++c->services;
+            rp_event(c, "headless_adapter", "impose_power_tick_request", 0x1A23C094, 0);
+        }
+    }
+    const uint32_t rate = rp_u32(c, gp + 0x6DC);
+    if ((int32_t)rate > 0) {
+        const uint32_t numerator = (rate >> 16) & 0x7FFF, denominator = rate & 0xFFFF;
+        rp_w32(c, gp + 0x35E0, denominator - numerator);
+        if (rp_u32(c, gp + 0x35D4))
+            rp_block(c, "display_timer_unlink_not_reconstructed", 0x9668);
+        if (!denominator) rp_block(c, "display_rate_zero_divisor", 0x115B4);
+        schedule_event(c, gp + 0x35D0, (0x89D00 / denominator) * numerator);
+    }
+    rp_event(c, "milestone", "first_disabled_display_command_sequence", start, (out - start) / 4);
+}
+
+/* +0x11410, first-frame path. ROUND.W.S uses nearest/even. */
 static void begin_frame(rp_context *c)
 {
     rp_function(c, 0x11410, "pops.begin_frame_prefix");
@@ -241,7 +399,7 @@ static void begin_frame(rp_context *c)
             rp_u32(c, c->gp + 0x35C8) || (rp_u32(c, c->gp + 0x6AC) & 0x20000000)) {
         if (!(mode & 0x800) || !(rp_u32(c, c->gp + 0x6AC) & 8)) {
             rp_w8(c, c->gp + 0x3667, 1);
-            rp_block(c, "function_not_reconstructed", 0x115B4);
+            refresh_disabled_display(c);
         }
     }
 }

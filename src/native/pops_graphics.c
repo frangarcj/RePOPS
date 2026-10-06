@@ -330,7 +330,7 @@ static void refresh_display(rp_context *c)
             }
     put_half(c, RP_GPU_ADDRESS(c, draw_mode), half(c, RP_GPU_ADDRESS(c, draw_mode)) | 0xC000);
     rp_w32(c, RP_GPU_ADDRESS(c, list_cursor), 0x49A00000);
-    rp_w8(c, RP_GPU_ADDRESS(c, unknown_3656), 0xFF); rp_w8(c, RP_GPU_ADDRESS(c, ge_transfer_pending), 0xFF);
+    rp_w8(c, RP_GPU_ADDRESS(c, texture_depth), 0xFF); rp_w8(c, RP_GPU_ADDRESS(c, ge_transfer_pending), 0xFF);
     const uint32_t x0 = (uint32_t)(int32_t)(int16_t)half(c, RP_GPU_ADDRESS(c, draw_area_start[0]));
     const uint32_t y0 = (uint32_t)(int32_t)(int16_t)half(c, RP_GPU_ADDRESS(c, draw_area_start[1]));
     const uint32_t x1 = (uint32_t)(int32_t)(int16_t)half(c, RP_GPU_ADDRESS(c, draw_area_end[0]));

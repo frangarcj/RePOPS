@@ -459,6 +459,193 @@ static uint32_t flat_polygon(rp_context *c, uint32_t packet, unsigned count, uin
     return work;
 }
 
+static uint32_t leading_zeroes(uint32_t word)
+{ return word ? (uint32_t)__builtin_clz(word) : 32; }
+
+/* +0x148B8..+0x149E0 and cold branches +0x14D28..+0x14E1C.
+ * Preserve POPS's indexed-texture conversion lists and cache group tags;
+ * the host does not decode or upload a replacement texture here. */
+static uint32_t prepare_rectangle_texture(rp_context *c, uint32_t out)
+{
+    const uint32_t mode = GPU16(draw_mode) & 0x7FF;
+    uint32_t depth = (mode >> 7) & 3, stride = 1024, format = depth + 4;
+    const uint32_t bank = (mode >> 4) & 1, page = mode & 15;
+    uint32_t wx = GPU8(texture_window_offset[0]);
+    const uint32_t wy = GPU8(texture_window_offset[1]);
+    SET_GPU16(draw_mode, mode);
+    out = emit_ge_word(c, out, 0x13041B90);
+    out = emit_ge_word(c, out, 0x0A000080 | (((mode >> 5) & 3) << 4));
+    uint32_t texture;
+    if (!(depth & 2)) {
+        wx <<= depth;
+        if (!(wx & 3)) {
+            const unsigned entry = mode & 31;
+            texture = GPU32(texture_cache[entry].storage_address) +
+                      ((wx & 1023) | (wy << 10)) * 4;
+            if (!GPU8(texture_cache[entry].cache_flags)) {
+                const int root = (int)entry - (int8_t)GPU8(texture_cache[entry].group_offset);
+                if (root < 0 || root + (page > 11 ? 3 : 2) >= 32)
+                    rp_block(c, "GPU_texture_cache_group_domain", 0x14D40);
+                for (unsigned i = 0; i < (page > 11 ? 4u : 3u); ++i)
+                    SET_GPU8(texture_cache[root + i].cache_flags, format);
+                const uint32_t storage = GPU32(texture_cache[root].storage_address);
+                const uint32_t origin = (uint32_t)(int32_t)(int16_t)GPU16(texture_cache[root].group_x_origin);
+                out = emit_ge_word(c, out, (origin & 0x3FFFF) | ((0x3AC0 + bank) << 18));
+                out = emit_ge_word(c, out, 0xB4000000 | (storage & 0xFFFFFF));
+                out = emit_ge_word(c, out, 0xB5000000 +
+                                   (((storage & 0xFF00003F) | (stride << 6)) >> 8));
+                out = emit_ge_word(c, out, 0x0A0000C0);
+            }
+        } else {
+            const uint32_t origin = (((wx + page * 32) * 2) & 0xFFFC1FFF) | ((wy & 31) << 13);
+            stride = 32;
+            texture = 0x041A0000;
+            out = emit_ge_word(c, out, UINT32_C(0xEDFFFC07) + GPU8(texture_window_size[1]) * 8192);
+            out = emit_ge_word(c, out, (origin & 0x3FFFF) | ((0x3AC0 + bank) << 18));
+            out = emit_ge_word(c, out, 0xB41A0000);
+            out = emit_ge_word(c, out, 0xB5040008);
+            out = emit_ge_word(c, out, 0x0A0000C4);
+        }
+        stride >>= depth;
+    } else {
+        texture = UINT32_C(0x04000000) | (((bank * 32 + wy) * 8 & 511) << 11) |
+                  (((page * 8 + wx) * 8 & 1023) << 1);
+        depth = 2;
+        format = 1;
+    }
+    if (GPU8(texture_depth) != depth) {
+        SET_GPU8(texture_depth, depth);
+        out = emit_ge_word(c, out, 0xC3000000 | format);
+    }
+    const uint32_t zx = leading_zeroes(GPU8(texture_window_size[0]));
+    const uint32_t zy = leading_zeroes(GPU8(texture_window_size[1]));
+    out = emit_ge_word(c, out, 0xA8000000 + ((stride & 0xFF00FFFF) | ((texture >> 24) << 16)));
+    out = emit_ge_word(c, out, 0xA0000000 | (texture & 0xFFFFFF));
+    out = emit_ge_word(c, out, UINT32_C(0xB8000322) + ((31 - zy) << 8) - zx);
+    out = emit_ge_word(c, out, UINT32_C(0x4AB27F8D) + zx * 0x8000 +
+                      (uint32_t)(int32_t)(int16_t)GPU16(texture_offset_word_bias[0]));
+    out = emit_ge_word(c, out, UINT32_C(0x4BB27F8E) + zy * 0x8000 +
+                      (uint32_t)(int32_t)(int16_t)GPU16(texture_offset_word_bias[1]));
+    out = emit_ge_word(c, out, 0xCB000000);
+    return emit_ge_word(c, out, 0xCC000000);
+}
+
+/* +0x14760..+0x14FC8: rectangle dimensions, work accounting and inline GE
+ * sprite records. Their non-obvious Z/UV word overlap is retained exactly. */
+static uint32_t rectangle_packet(rp_context *c, uint32_t packet, uint32_t *cursor)
+{
+    const uint32_t command = rp_u32(c, RP_FIELD_ADDRESS(packet, rp_gpu_rectangle_packet_layout, command));
+    const uint32_t position = rp_u32(c, RP_FIELD_ADDRESS(packet, rp_gpu_rectangle_packet_layout, position));
+    const bool textured = (command & 0x04000000) != 0;
+    const unsigned size = (command >> 27) & 3;
+    uint32_t width, height;
+    if (!size) {
+        const uint32_t extent_address = textured ?
+            RP_FIELD_ADDRESS(packet, rp_gpu_textured_rectangle_packet_layout, extent) :
+            RP_FIELD_ADDRESS(packet, rp_gpu_rectangle_packet_layout, extent);
+        const uint32_t extent = rp_u32(c, extent_address);
+        width = extent & 1023;
+        height = (extent >> 16) & 511;
+    } else width = height = size == 1 ? 1 : (size - 1) * 8;
+    const int32_t off_x = (int16_t)GPU16(drawing_offset[0]), off_y = (int16_t)GPU16(drawing_offset[1]);
+    int32_t x = coordinate11(position, 0) + off_x, y = coordinate11(position, 16) + off_y;
+    const uint32_t flags = rp_u32(c, RP_DEVICE_ADDRESS(c, compatibility_flags));
+    if ((flags & 0x02000000) && height == 1 &&
+        (((GPU8(frame_phase) >> 1) ^ (uint32_t)y) & GPU8(draw_mode_gate))) return 30;
+    if (x > 1023) x -= 2048;
+    if (y > 1023) y -= 2048;
+    if (x < -1024) x += 2048;
+    if (y < -1024) y += 2048;
+    const int32_t draw_x0 = (int16_t)GPU16(draw_area_start[0]), draw_y0 = (int16_t)GPU16(draw_area_start[1]);
+    const int32_t draw_x1 = (int16_t)GPU16(draw_area_end[0]), draw_y1 = (int16_t)GPU16(draw_area_end[1]);
+    const int32_t right = x + (int32_t)width < draw_x1 ? x + (int32_t)width : draw_x1;
+    const int32_t bottom = y + (int32_t)height < draw_y1 ? y + (int32_t)height : draw_y1;
+    const int32_t left = x > draw_x0 ? x : draw_x0, top = y > draw_y0 ? y : draw_y0;
+    if (right < left || bottom < top) return 30;
+    const uint32_t area = (uint32_t)((right - left) * (bottom - top));
+    uint32_t weighted = area >> 1;
+    if ((command & 0x02000000) || ((GPU32(status) >> 11) & 2)) weighted += area;
+    uint32_t work = 30 + (weighted >> (GPU8(draw_mode_gate) & 31));
+    SET_GPU8(previous_field, GPU8(previous_field) | GPU8(draw_area_intersects_display));
+    const uint32_t vx = (uint32_t)(x - off_x), vy = (uint32_t)(y - off_y);
+    uint32_t out = *cursor, color = 0x55000000 | (command & 0xFFFFFF);
+    if (!textured) {
+        const uint32_t mode = GPU16(draw_mode);
+        if (mode & 0x4000) {
+            SET_GPU16(draw_mode, mode - 0x4000);
+            out = emit_ge_word(c, out, 0x13041B90);
+            out = emit_ge_word(c, out, 0x0A000080 | (((mode >> 5) & 3) << 4));
+        }
+        if (GPU8(draw_area_exceeds_display))
+            invalidate_rectangle_cache(c, vx, vy, vx + width, vy + height, true);
+        const uint32_t record = out;
+        out = emit_ge_word(c, out, 0x14000000);
+        out = emit_ge_word(c, out, color);
+        out = emit_ge_word(c, out, (UINT32_C(0x51B7FD00) | (((command >> 25) & 3) << 6)) - record);
+        rp_w32(c, RP_FIELD_ADDRESS(record, rp_gpu_rectangle_ge_layout, vertices[0].x), (vx & 0xFFFF) | (vy << 16));
+        rp_cd_w16(c, RP_FIELD_ADDRESS(record, rp_gpu_rectangle_ge_layout, vertices[1].x), (uint16_t)(vx + width));
+        rp_cd_w16(c, RP_FIELD_ADDRESS(record, rp_gpu_rectangle_ge_layout, vertices[1].y), (uint16_t)(vy + height));
+        out = record + sizeof(rp_gpu_rectangle_ge_layout);
+    } else {
+        const uint32_t mode = GPU16(draw_mode);
+        if (mode != (mode & 0x7FF)) {
+            if (mode & 0xC000) out = prepare_rectangle_texture(c, out);
+            uint32_t cost = (GPU8(texture_window_size[0]) * GPU8(texture_window_size[1])) << ((GPU8(texture_depth) + 1) & 31);
+            if (cost < 128) cost = 0;
+            if (cost > area) cost = area;
+            if ((flags & 0x00400000) && cost > 1024) {
+                cost *= 2;
+                SET_GPU16(draw_mode, GPU16(draw_mode) | 0x2000);
+            }
+            work += cost;
+        }
+        const uint32_t record = out;
+        const uint32_t body = RP_FIELD_ADDRESS(record, rp_gpu_textured_rectangle_ge_layout, offset_command);
+        const uint32_t palette = rp_cd_u16(c, RP_FIELD_ADDRESS(packet, rp_gpu_textured_rectangle_packet_layout, palette));
+        out = emit_ge_word(c, out, 0xB0000000 | ((palette & 0x7FFF) << 5));
+        out = emit_ge_word(c, out, 0xC4000010);
+        if (flags & 0x04000000)
+            invalidate_rectangle_cache(c, (uint32_t)x, (uint32_t)y, (uint32_t)x + width, (uint32_t)y + height, false);
+        const uint32_t u = rp_cd_u8(c, RP_FIELD_ADDRESS(packet, rp_gpu_textured_rectangle_packet_layout, u));
+        const uint32_t v = rp_cd_u8(c, RP_FIELD_ADDRESS(packet, rp_gpu_textured_rectangle_packet_layout, v));
+        uint32_t uv = u | (v << 16);
+        rp_w32(c, RP_FIELD_ADDRESS(record, rp_gpu_textured_rectangle_ge_layout, vertices[0].u), uv);
+        if (!(width & 1) && !(((uv + width - 1) << (GPU8(texture_depth) & 31)) & 15)) uv &= ~1u;
+        const uint32_t rotated = (uv >> 16) | (uv << 16);
+        const uint32_t end_uv = rotated + (height | (width << 16));
+        rp_w32(c, RP_FIELD_ADDRESS(record, rp_gpu_textured_rectangle_ge_layout, vertices[0].x), (vx & 0xFFFF) | (vy << 16));
+        rp_w32(c, RP_FIELD_ADDRESS(record, rp_gpu_textured_rectangle_ge_layout, vertices[0].z), end_uv);
+        rp_w32(c, RP_FIELD_ADDRESS(record, rp_gpu_textured_rectangle_ge_layout, vertices[1].v), (end_uv & 0xFFFF) | ((vx + width) << 16));
+        rp_w32(c, RP_FIELD_ADDRESS(record, rp_gpu_textured_rectangle_ge_layout, vertices[1].y), vy + height);
+        if (command & 0x01000000) color = 0x55808080;
+        else if (GPU8(texture_depth) & 2) color &= GPU32(texture_color_word_mask);
+        const uint32_t scale_u = (leading_zeroes(GPU8(texture_window_size[0])) + 0x906C) << 15;
+        const uint32_t scale_v = (leading_zeroes(GPU8(texture_window_size[1])) + 0x926C) << 15;
+        out = emit_ge_word(c, out, 0x14000000);
+        out = emit_ge_word(c, out, scale_u);
+        out = emit_ge_word(c, out, scale_v);
+        out = emit_ge_word(c, out, color);
+        out = emit_ge_word(c, out, (UINT32_C(0x53B7FD00) | (((command >> 25) & 3) << 6)) - body);
+        const uint32_t mask_mode = (GPU32(status) >> 11) & 3;
+        bool alternate = (color & 0x808080) == 0x808080;
+        if (!alternate && (GPU8(texture_depth) & 2) && ((color | (color >> 8) | (color >> 16)) & 255) > 4) {
+            const uint32_t tex_mode = GPU16(draw_mode);
+            const int32_t tx = (int32_t)((tex_mode & 15) * 8 + GPU8(texture_window_offset[0]));
+            const int32_t ty = (int32_t)((GPU8(texture_window_offset[1]) & ~32u) | (((tex_mode >> 4) & 1) << 5));
+            alternate = draw_x0 <= (tx + (int32_t)GPU8(texture_window_size[0])) * 8 && tx * 8 <= draw_x1 &&
+                        draw_y0 <= (ty + (int32_t)GPU8(texture_window_size[1])) * 8 && ty * 8 <= draw_y1;
+        }
+        const uint32_t adjustment = alternate ? UINT32_C(0xFFFFFFC0) : mask_mode < 3 ? 64 : 0;
+        out = emit_ge_word(c, out, (UINT32_C(0x51B7FC80) | ((mask_mode & 1) << 2)) + adjustment - body);
+        rp_w32(c, RP_FIELD_ADDRESS(record, rp_gpu_textured_rectangle_ge_layout, restore_u), scale_u - 0x40000);
+        rp_w32(c, RP_FIELD_ADDRESS(record, rp_gpu_textured_rectangle_ge_layout, restore_v), scale_v - 0x40000);
+        out = record + sizeof(rp_gpu_textured_rectangle_ge_layout);
+    }
+    *cursor = out;
+    rp_event(c, "GPU_rectangle", textured ? "textured_GE_record_emitted" : "plain_GE_record_emitted", command, work);
+    return work;
+}
+
 /* Reached state/fill/flat paths of +0x133D0. GE words are retained in guest RAM;
  * list services remain the existing explicit headless execution adapter. */
 static uint32_t consume_packet(rp_context *c, uint32_t source, uint32_t bytes)
@@ -535,6 +722,13 @@ static uint32_t consume_packet(rp_context *c, uint32_t source, uint32_t bytes)
             continue;
         } else if (mode == 7) {
             out = drawing_environment(c, word, out);
+        } else if (mode == 3) {
+            const uint32_t packet_bytes = 8 + ((word & 0x04000000) ? 4 : 0) +
+                                          (((word >> 27) & 3) ? 0 : 4);
+            if (bytes - offset < packet_bytes)
+                rp_block(c, "GPU_rectangle_truncated_packet", 0x14760);
+            work += rectangle_packet(c, source + offset, &out);
+            offset += packet_bytes - 4;
         } else if (mode == 1 && !(word & 0x14000000)) {
             const unsigned count = word & 0x08000000 ? 4 : 3;
             const uint32_t packet_size = (count + 1) * sizeof(uint32_t);
@@ -694,7 +888,7 @@ static void reset_control(rp_context *c)
     SET_GPU16(vertical_range[0], 0x10); SET_GPU16(vertical_range[1], 0x100);
     SET_GPU8(display_dirty, 2);
     SET_GPU32(list_cursor, 0x49A00000);
-    SET_GPU8(interlaced, 0xFF); SET_GPU8(unknown_3656, 0xFF);
+    SET_GPU8(interlaced, 0xFF); SET_GPU8(texture_depth, 0xFF);
     SET_GPU8(display_mode_gate, 0xFF); SET_GPU8(texture_window_size[1], 0x20);
     SET_GPU8(display_mode_bytes[1], 0);
     for (unsigned i = 0; i < 2; ++i) {

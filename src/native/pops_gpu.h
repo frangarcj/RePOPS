@@ -17,15 +17,35 @@ typedef struct {
     uint32_t offset_command, color_command, template_jump;
     rp_gpu_position_layout vertices[4];
 } rp_gpu_flat_ge_layout;
+typedef struct { uint32_t command, position, extent; } rp_gpu_rectangle_packet_layout;
+typedef struct {
+    uint32_t command, position;
+    uint8_t u, v;
+    uint16_t palette;
+    uint32_t extent;
+} rp_gpu_textured_rectangle_packet_layout;
+typedef struct { uint16_t u, v; int16_t x, y, z; } rp_gpu_textured_vertex_layout;
+typedef struct {
+    uint32_t palette_address, palette_load, offset_command, scale_u, scale_v;
+    uint32_t color_command, draw_call, mode_jump;
+    rp_gpu_textured_vertex_layout vertices[2];
+    uint32_t restore_u, restore_v;
+} rp_gpu_textured_rectangle_ge_layout;
+typedef struct {
+    uint32_t offset_command, color_command, template_jump;
+    rp_gpu_position_layout vertices[2];
+} rp_gpu_rectangle_ge_layout;
 
 /* Selected core GPU fields, recovered from +0x12FBC and their producers.
  * This is a wire view: use named addresses, never cast the guest backing. */
 typedef struct {
-    uint8_t earlier_000[0x6E8];
+    uint8_t earlier_000[0x6D4];
+    uint32_t texture_color_word_mask;
+    uint8_t unknown_6d8[0x6E8 - 0x6D8];
     uint32_t dma_cost_scaling;
     uint8_t unknown_6ec[0x710 - 0x6EC];
     uint32_t data_read_cycle_cost;
-    uint32_t unknown_714;
+    int16_t texture_offset_word_bias[2];
     int32_t copy_cost_shift;
     uint8_t unknown_71c[0x3400 - 0x71C];
     rp_gpu_texture_cache_entry texture_cache[32];
@@ -57,7 +77,7 @@ typedef struct {
     uint32_t transfer_read_latch, texture_window;
     uint8_t texture_window_offset[2], texture_window_size[2];
     uint16_t draw_mode;
-    uint8_t unknown_3656, command_mode, ge_transfer_pending, read_selector;
+    uint8_t texture_depth, command_mode, ge_transfer_pending, read_selector;
     uint8_t draw_area_exceeds_display, draw_area_intersects_display;
     uint8_t draw_mode_gate, display_mode_gate;
     uint8_t interlaced, display_dirty, previous_field, refresh_on_ready, frame_phase;
@@ -91,6 +111,14 @@ _Static_assert(offsetof(rp_core_gpu_layout, copy_destination) == 0x3640, "GPU co
 _Static_assert(offsetof(rp_core_gpu_layout, upload_end) == 0x3640, "GPU CPU-upload end alias");
 _Static_assert(sizeof(rp_gpu_flat_packet_layout) == 20, "flat quad packet");
 _Static_assert(sizeof(rp_gpu_flat_ge_layout) == 36, "flat GE body");
+_Static_assert(sizeof(rp_gpu_rectangle_ge_layout) == 24, "rectangle GE body");
+_Static_assert(sizeof(rp_gpu_textured_vertex_layout) == 10, "textured vertex stride");
+_Static_assert(sizeof(rp_gpu_textured_rectangle_packet_layout) == 16, "textured rectangle packet");
+_Static_assert(sizeof(rp_gpu_textured_rectangle_ge_layout) == 60, "textured rectangle GE body");
+_Static_assert(offsetof(rp_gpu_textured_rectangle_ge_layout, vertices) == 32, "rectangle GE vertices");
+_Static_assert(offsetof(rp_core_gpu_layout, texture_color_word_mask) == 0x6D4, "texture color mask");
+_Static_assert(offsetof(rp_core_gpu_layout, texture_offset_word_bias) == 0x714, "texture offset bias");
+_Static_assert(offsetof(rp_core_gpu_layout, texture_depth) == 0x3656, "texture depth selector");
 _Static_assert(offsetof(rp_gpu_flat_ge_layout, vertices[1].x) == 18, "flat second vertex");
 _Static_assert(offsetof(rp_core_gpu_layout, texture_cache) == 0x3400, "GPU texture cache base");
 _Static_assert(offsetof(rp_core_gpu_layout, dma_cost_scaling) == 0x6E8, "GPU DMA cost scaling");

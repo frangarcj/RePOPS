@@ -4,6 +4,20 @@ Historical native runs retain `result/retained-trace-result.json` instead of
 their full trace once superseded. Keep the latest two traces and the GE-preview
 provenance source; decompilers and focused verification outputs are not pruned.
 
+## Current: textured rectangles pass and execution reaches the harness budget
+
+`out/gpu-rectangle.4dYayz/result/` emits 180 rectangle records after the mixed
+pixel uploads. It reaches `generated_execution_diagnostic_budget`, not a new
+unreconstructed function: 77,923,030 generated-code observations and 89,574
+transfers, `game_executed: false`. The current host dispatcher stops after
+500,000 helper/executor iterations; that is not a guest hardware limit.
+
+The mode-3 GE emitter now handles plain/textured rectangles, texture cache
+preparation, CLUT, coordinate/cost rules and the original overlapping sprite
+layout. Cold/warm indexed, unaligned-window, direct-color, raw-color and fixed
+size fixtures pass, along with native build and display tests. See
+`gpu_rectangles.md`. These are not rendered frames or proof of game boot.
+
 ## Current: mixed pixel uploads reach a textured rectangle
 
 `out/mixed-upload.pgEy9j/result/` passes the pending port/DMA combination and

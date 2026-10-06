@@ -277,6 +277,105 @@ static void check_mixed_upload(rp_context *c)
     c->regions[3] = (rp_region){0};
 }
 
+static void prepare_rectangle_fixture(rp_context *c, uint16_t draw_mode)
+{
+    reset_status(c);
+    rp_w32(c, RP_GPU_ADDRESS(c, list_cursor), 0x49A00800);
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, draw_mode), draw_mode);
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, draw_area_end[0]), 320);
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, draw_area_end[1]), 240);
+    rp_w8(c, RP_GPU_ADDRESS(c, draw_area_intersects_display), 1);
+    rp_w8(c, RP_GPU_ADDRESS(c, texture_depth), 0xFF);
+    rp_w8(c, RP_GPU_ADDRESS(c, texture_window_size[0]), 32);
+    rp_w8(c, RP_GPU_ADDRESS(c, texture_window_size[1]), 32);
+    rp_w32(c, RP_GPU_ADDRESS(c, texture_color_word_mask), UINT32_MAX);
+    for (unsigned i = 0; i < 32; ++i) {
+        const unsigned column = i & 15, plane = column == 15 ? 3 : column % 3;
+        const unsigned group = column - plane;
+        const uint32_t storage = (i < 16 ? 0x04360000u : 0x04100000u) + group / 3 * 0x20000;
+        rp_w32(c, RP_GPU_ADDRESS(c, texture_cache[i].storage_address), storage + plane * 128);
+        rp_w8(c, RP_GPU_ADDRESS(c, texture_cache[i].group_offset), (uint8_t)plane);
+        rp_cd_w16(c, RP_GPU_ADDRESS(c, texture_cache[i].group_x_origin), (uint16_t)(plane ? 0 : group * 64));
+    }
+    c->regions[0].bytes[0xD5338 + 24] = 2;
+    c->regions[0].bytes[0xD5338 + 25] = 3;
+    c->regions[0].bytes[0xD5338 + 26] = 1;
+    c->regions[0].bytes[0xD5338 + 29] = 2;
+    dma_fixture = true;
+    scheduled = 0;
+}
+
+static void check_rectangles(rp_context *c)
+{
+    if (setjmp(c->stop)) {
+        fprintf(stderr, "Unexpected rectangle boundary: %s\n", c->stop_kind);
+        abort();
+    }
+    const uint32_t out = 0x49A00800;
+    const uint32_t packet[] = {0x64808080, 0x001E0014, 0x12340305, 0x00080010};
+    prepare_rectangle_fixture(c, 0xC20A);
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, texture_offset_word_bias[0]), 16);
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, texture_offset_word_bias[1]), (uint16_t)-32);
+    for (unsigned i = 0; i < 4; ++i) rp_pops_gpu_write(c, 0x1810, packet[i]);
+    const uint32_t prefix[] = {0x13041B90, 0x0A000080, 0xEB000240,
+        0xB43C0000, 0xB5040100, 0x0A0000C0, 0xC3000004,
+        0xA8040400, 0xA03C0080, 0xB8000808, 0x4ABF7F9D, 0x4BBF7F6E,
+        0xCB000000, 0xCC000000};
+    for (unsigned i = 0; i < sizeof(prefix) / sizeof(prefix[0]); ++i)
+        assert(rp_u32(c, out + i * 4) == prefix[i]);
+    const uint32_t record = out + sizeof(prefix), body = record + 8;
+    const uint32_t words[] = {0xB0024680, 0xC4000010, 0x14000000,
+        0x48430000, 0x49430000, 0x55808080, UINT32_C(0x53B7FD80) - body,
+        UINT32_C(0x51B7FC40) - body, 0x00030005, 0x001E0014, 0x0015000B,
+        0x0024000B, 0x00000026, 0x483F0000, 0x493F0000};
+    for (unsigned i = 0; i < sizeof(words) / sizeof(words[0]); ++i)
+        assert(rp_u32(c, record + i * 4) == words[i]);
+    assert(scheduled_delay == 222);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)) == out + sizeof(prefix) + sizeof(words));
+    assert(rp_cd_u16(c, RP_GPU_ADDRESS(c, draw_mode)) == 0x20A);
+    for (unsigned i = 0; i < 32; ++i)
+        assert(rp_cd_u8(c, RP_GPU_ADDRESS(c, texture_cache[i].cache_flags)) == (i >= 9 && i <= 11 ? 4 : 0));
+    const uint32_t warm = rp_u32(c, RP_GPU_ADDRESS(c, list_cursor));
+    for (unsigned i = 0; i < 4; ++i) rp_pops_gpu_write(c, 0x1810, packet[i]);
+    assert(scheduled_delay == 94 && rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)) == warm + 60);
+    assert(rp_u32(c, warm) == 0xB0024680);
+
+    prepare_rectangle_fixture(c, 0xC00A);
+    rp_w8(c, RP_GPU_ADDRESS(c, texture_window_offset[0]), 1);
+    for (unsigned i = 0; i < 4; ++i) rp_pops_gpu_write(c, 0x1810, packet[i]);
+    assert(rp_u32(c, out + 8) == 0xEE03FC07);
+    assert(rp_u32(c, out + 12) == 0xEB000282);
+    assert(rp_u32(c, out + 20) == 0xB5040008);
+    assert(rp_u32(c, out + 32) == 0xA8040020);
+
+    prepare_rectangle_fixture(c, 0xC10A);
+    rp_pops_gpu_write(c, 0x1810, 0x65800000); /* Raw texture forces neutral color. */
+    for (unsigned i = 1; i < 4; ++i) rp_pops_gpu_write(c, 0x1810, packet[i]);
+    assert(rp_cd_u8(c, RP_GPU_ADDRESS(c, texture_depth)) == 2);
+    assert(rp_u32(c, out + 8) == 0xC3000001);
+    assert(rp_u32(c, out + 16) == 0xA0000500);
+    assert(rp_u32(c, out + 40 + 20) == 0x55808080);
+
+    prepare_rectangle_fixture(c, 0xC00A);
+    memset(rp_memory(c, out + 8, sizeof(rp_gpu_rectangle_ge_layout)), 0xA5, sizeof(rp_gpu_rectangle_ge_layout));
+    rp_pops_gpu_write(c, 0x1810, 0x60112233);
+    rp_pops_gpu_write(c, 0x1810, packet[1]);
+    rp_pops_gpu_write(c, 0x1810, packet[3]);
+    assert(scheduled_delay == 94 && rp_u32(c, out + 12) == 0x55112233);
+    assert(rp_cd_u16(c, RP_FIELD_ADDRESS(out + 8, rp_gpu_rectangle_ge_layout, vertices[0].z)) == 0xA5A5);
+    assert(rp_cd_u16(c, RP_FIELD_ADDRESS(out + 8, rp_gpu_rectangle_ge_layout, vertices[1].x)) == 36);
+    assert(rp_cd_u16(c, RP_FIELD_ADDRESS(out + 8, rp_gpu_rectangle_ge_layout, vertices[1].y)) == 38);
+
+    prepare_rectangle_fixture(c, 0xC080);
+    rp_pops_gpu_write(c, 0x1810, 0x74808080); /* Fixed 8x8, no size word. */
+    rp_pops_gpu_write(c, 0x1810, packet[1]);
+    rp_pops_gpu_write(c, 0x1810, packet[2]);
+    assert(scheduled_delay == 126);
+    assert(rp_u32(c, out + 24) == 0xC3000005);
+    assert(rp_u32(c, out + 28) == 0xA8040200);
+    dma_fixture = false;
+}
+
 int main(void)
 {
     rp_context *c = calloc(1, sizeof(*c));
@@ -579,6 +678,7 @@ int main(void)
     check_vram_copy(c);
     check_cpu_upload(c);
     check_mixed_upload(c);
+    check_rectangles(c);
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[1].bytes);
     free(c->regions[2].bytes); free(c);
     puts("GPU: GE uploads, mixed port/DMA prefixes, CPU pixel order, mask, wrap and odd tail passed; rendering pending.");

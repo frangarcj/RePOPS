@@ -3,6 +3,7 @@
 #include "pops_cdrom.h"
 #include "pops_dma.h"
 #include "pops_gpu.h"
+#include "pops_timer.h"
 #include "pops_emit.h"
 #include <string.h>
 
@@ -130,6 +131,10 @@ static void native_helper(rp_context *c)
     case 0x85F4:
         rp_pops_me_service_due(c);
         r[2] = rp_pops_spu_read_register(c, r[4], r[5]);
+        transfer(c, r[31]);
+        return;
+    case 0x9BE0:
+        r[2] = rp_pops_timer_read(c, r[4], r[5]);
         transfer(c, r[31]);
         return;
     case 0x9C60:
@@ -285,6 +290,10 @@ static void native_helper(rp_context *c)
                 } else if (handler == 0x12FBC) {
                     rp_core_set_downcount(c, r[25]);
                     r[2] = rp_pops_gpu_read(c, address, width);
+                    r[25] = rp_core_downcount(c);
+                } else if (handler == 0x9BE0) {
+                    rp_core_set_downcount(c, r[25]);
+                    r[2] = rp_pops_timer_read(c, address, width);
                     r[25] = rp_core_downcount(c);
                 } else if (handler == 0x85F4) {
                     rp_core_set_downcount(c, r[25]);

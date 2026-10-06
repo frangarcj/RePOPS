@@ -1,5 +1,18 @@
 # RePops progress
 
+## Current: timer reads reach GPU DMA control reads
+
+`out/timer-read.2JJRXM/result/` passes the timer reader +0x9BE0 and reaches
+DMA channel 2 control at 0x1F8010A8: 39,303,310 generated-cache observations
+and 39,018 entry transfers. `game_executed` remains false.
+
+`pops_timer.h` names the three counter layouts. Reader, synchronization,
+scheduling and the touched writer paths use those fields. Counter reads use
+guest cycles or the paused count; signed-halfword conversion applies only
+to width 1. Mode reads return the previous word then clear bits above bit 9.
+The original +0x9BE0..+0x9C5F and focused timer/Unicorn checks were reviewed.
+See `timer_reads.md`; the next reader is +0x9158, not another timer issue.
+
 ## Current: GP1 reset and GPU queries reach timer reads
 
 `out/gpu-query.GeOu9d/result/` passes the existing-list reset and two GPU

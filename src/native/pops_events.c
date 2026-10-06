@@ -1,6 +1,12 @@
 #include "runtime.h"
 #include "pops_cdrom.h"
 #include "pops_dma.h"
+#include "pops_timer.h"
+#include "pops_gpu.h"
+
+#define TIMER32(member) rp_u32(c, RP_TIMER_FIELD(timer, member))
+#define SET_TIMER32(member, value) rp_w32(c, RP_TIMER_FIELD(timer, member), (uint32_t)(value))
+#define TIMER8(member) rp_cd_u8(c, RP_TIMER_FIELD(timer, member))
 
 /* +0x8AA4: width selects one of three stores or a no-op return. */
 void rp_pops_shadow_write(rp_context *c, uint32_t address, uint32_t value, uint32_t width)
@@ -115,12 +121,12 @@ uint32_t rp_pops_irq_read(rp_context *c, uint32_t address)
 static uint32_t timer_sync(rp_context *c, uint32_t timer)
 {
     rp_function(c, 0x9B6C, "pops.synchronize_timer_counter");
-    const uint32_t now = rp_u32(c, c->gp + 0x1AC) - rp_u32(c, c->gp + 0x1B0);
-    const unsigned shift = *(uint8_t *)rp_memory(c, timer + 0x1D, 1) & 31;
-    uint32_t count = (now - rp_u32(c, timer + 0x14)) >> shift;
-    const uint32_t target = rp_u32(c, timer + 0x10);
+    const uint32_t now = rp_core_guest_cycles(c);
+    const unsigned shift = TIMER8(clock_shift) & 31;
+    uint32_t count = (now - TIMER32(origin_cycles)) >> shift;
+    const uint32_t target = TIMER32(target_with_flags);
     if (count < target) return count;
-    const uint32_t mode = rp_u32(c, timer + 0x18);
+    const uint32_t mode = TIMER32(mode_with_status);
     uint32_t flags = mode | 0x800;
     if (mode & 8) {
         if (!target) rp_block(c, "timer_zero_period_not_supported", 0x9B6C);
@@ -129,8 +135,29 @@ static uint32_t timer_sync(rp_context *c, uint32_t timer)
         flags = mode | 0x1800;
         count &= 0xFFFF;
     }
-    rp_w32(c, timer + 0x18, flags);
-    rp_w32(c, timer + 0x14, now - (count << shift));
+    SET_TIMER32(mode_with_status, flags);
+    SET_TIMER32(origin_cycles, now - (count << shift));
+    return count;
+}
+
+/* +0x9BE0..+0x9C5F: paused timers expose their saved count. Only width 1
+ * sign-extends that count; mode reads instead return the old word and clear
+ * its bits above bit 9. This function does not advance an independent clock. */
+uint32_t rp_pops_timer_read(rp_context *c, uint32_t address, uint32_t width)
+{
+    rp_function(c, 0x9BE0, "pops.read_timer_register");
+    const unsigned channel = (address >> 4) & 3;
+    if (channel >= 3) rp_block(c, "timer_read_unmapped_channel", address);
+    const uint32_t timer = RP_TIMER_BASE(c, channel);
+    uint32_t count = TIMER32(origin_cycles);
+    if ((int32_t)TIMER32(target_with_flags) >= 0) count = timer_sync(c, timer);
+    if (address & 15) {
+        count = TIMER32(mode_with_status);
+        SET_TIMER32(mode_with_status, count & 0x3FF);
+    } else if (width == 1) {
+        count = (uint32_t)(int32_t)(int16_t)count;
+    }
+    rp_event(c, "timer_read", "counter_or_mode_from_guest_cycles", address, count);
     return count;
 }
 
@@ -139,9 +166,9 @@ static void timer_schedule(rp_context *c, uint32_t timer)
 {
     rp_function(c, 0x9A54, "pops.schedule_timer_counter");
     const uint32_t count = timer_sync(c, timer);
-    const uint32_t mode = rp_u32(c, timer + 0x18);
-    uint32_t period = (mode & 0x18) ? rp_u32(c, timer + 0x10) : 0x10000;
-    const unsigned shift = *(uint8_t *)rp_memory(c, timer + 0x1D, 1) & 31;
+    const uint32_t mode = TIMER32(mode_with_status);
+    uint32_t period = (mode & 0x18) ? TIMER32(target_with_flags) : 0x10000;
+    const unsigned shift = TIMER8(clock_shift) & 31;
     if (!(mode & 0x30)) {
         if (!(period & (period - 1))) return;
         const uint32_t horizon = UINT32_C(0x80000000) >> shift;
@@ -158,48 +185,48 @@ void rp_pops_timer_write(rp_context *c, uint32_t address, uint32_t value)
     const uint32_t reg = address & 0xF;
     if (channel >= 3)
         rp_block(c, "timer_write_path_not_reconstructed", address);
-    const uint32_t timer = c->gp + 0x64C + channel * 0x20;
-    if ((int32_t)rp_u32(c, timer + 0x10) >= 0) (void)timer_sync(c, timer);
-    const uint32_t now = rp_u32(c, c->gp + 0x1AC) - rp_u32(c, c->gp + 0x1B0);
+    const uint32_t timer = RP_TIMER_BASE(c, channel);
+    if ((int32_t)TIMER32(target_with_flags) >= 0) (void)timer_sync(c, timer);
+    const uint32_t now = rp_core_guest_cycles(c);
     value &= 0xFFFF;
     if (reg == 4) {
-        const uint32_t old = rp_u32(c, timer + 0x18);
+        const uint32_t old = TIMER32(mode_with_status);
         value &= 0x3FF;
         const uint32_t mode = (old & ~UINT32_C(0x3FF)) | value;
-        rp_w32(c, timer + 0x18, mode);
+        SET_TIMER32(mode_with_status, mode);
         if (!(mode & 1) || (mode & 6) < 4) {
-            rp_w32(c, timer + 0x10, rp_u32(c, timer + 0x10) & 0x1FFFF);
+            SET_TIMER32(target_with_flags, TIMER32(target_with_flags) & 0x1FFFF);
             value |= 0x8000;
         }
-        if ((int32_t)rp_u32(c, timer + 0x10) >= 0) rp_w32(c, timer + 0x14, now);
+        if ((int32_t)TIMER32(target_with_flags) >= 0) SET_TIMER32(origin_cycles, now);
         if ((old & 0x3FF) == value) return;
         const unsigned shift = channel == 1 ? ((value & 0x100) ? 11 : 0) :
                                ((value & (channel == 2 ? 0x200 : 0x100)) ? 3 : 0);
-        rp_w8(c, timer + 0x1D, (uint8_t)shift);
+        rp_w8(c, RP_TIMER_FIELD(timer, clock_shift), (uint8_t)shift);
     } else if (reg == 8) {
         const uint32_t target = (value & 0xFFFF) ? (value & 0xFFFF) : 0x10000;
-        const uint32_t old = rp_u32(c, timer + 0x10);
+        const uint32_t old = TIMER32(target_with_flags);
         if (old == target) return;
-        rp_w32(c, timer + 0x10, (old & UINT32_C(0xC0000000)) | target);
-        const uint32_t shadow = c->gp + (address & 0xFFF) + 0x2000;
+        SET_TIMER32(target_with_flags, (old & UINT32_C(0xC0000000)) | target);
+        const uint32_t shadow = RP_DEVICE_ADDRESS(c, io_register_shadow) + (address & 0xFFF);
         rp_w8(c, shadow, (uint8_t)target); rp_w8(c, shadow + 1, (uint8_t)(target >> 8));
     } else if (reg == 0) {
         /* This POPS path resets the counter origin; the supplied value is not used. */
-        rp_w32(c, timer + 0x14, (int32_t)rp_u32(c, timer + 0x10) < 0 ? 0 : now);
+        SET_TIMER32(origin_cycles, (int32_t)TIMER32(target_with_flags) < 0 ? 0 : now);
     } else return;
     if (reg != 8) {
-        const uint32_t mode = rp_u32(c, timer + 0x18);
+        const uint32_t mode = TIMER32(mode_with_status);
         if (channel & mode & 1) {
-            const uint32_t phase = *(uint8_t *)rp_memory(c, c->gp + 0x3662, 1) & 1;
-            uint32_t target = rp_u32(c, timer + 0x10);
+            const uint32_t phase = rp_cd_u8(c, RP_GPU_ADDRESS(c, frame_phase)) & 1;
+            uint32_t target = TIMER32(target_with_flags);
             const bool stopped = ((mode & 6) ^ (phase << 1)) == 6;
             target = stopped ? target | UINT32_C(0x80000000) : target & 0x1FFFF;
-            rp_w32(c, timer + 0x10, target);
-            rp_w32(c, timer + 0x14, stopped ? 0 : now);
+            SET_TIMER32(target_with_flags, target);
+            SET_TIMER32(origin_cycles, stopped ? 0 : now);
         }
     }
-    if (rp_u32(c, timer + 4)) rp_pops_remove_event(c, timer);
-    if ((int32_t)rp_u32(c, timer + 0x10) >= 0) timer_schedule(c, timer);
+    if (TIMER32(event.prev)) rp_pops_remove_event(c, timer);
+    if ((int32_t)TIMER32(target_with_flags) >= 0) timer_schedule(c, timer);
 }
 
 /* +0x98C4: I_STAT acknowledges with AND; I_MASK replaces the mask. Only a

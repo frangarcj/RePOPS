@@ -1,4 +1,5 @@
 #include "../src/native/runtime.h"
+#include "../src/native/pops_timer.h"
 #include <assert.h>
 #include <stdlib.h>
 
@@ -74,19 +75,59 @@ int main(void)
     assert(rp_u32(c, c->gp + 0x20F4) == 0x81800000);
     rp_pops_dma_control_write(c, 0x1F8010F4, 0x01800000, 2);
     assert(rp_u32(c, c->gp + 0x20F4) == 0x00800000);
-    const uint32_t timer = c->gp + 0x64C + 0x20;
-    rp_w32(c, timer + 0x10, 0x10000);
+    const uint32_t timer = RP_TIMER_BASE(c, 1);
+    rp_w32(c, RP_TIMER_FIELD(timer, target_with_flags), 0x10000);
     rp_pops_timer_write(c, 0x1F801114, 0x100);
-    assert((rp_u32(c, timer + 0x18) & 0x3FF) == 0x100);
-    assert(*(uint8_t *)rp_memory(c, timer + 0x1D, 1) == 11);
-    assert(rp_u32(c, timer + 0x14) == 124 && !rp_u32(c, timer + 4));
+    assert((rp_u32(c, RP_TIMER_FIELD(timer, mode_with_status)) & 0x3FF) == 0x100);
+    assert(rp_cd_u8(c, RP_TIMER_FIELD(timer, clock_shift)) == 11);
+    assert(rp_u32(c, RP_TIMER_FIELD(timer, origin_cycles)) == 124 && !rp_u32(c, RP_TIMER_FIELD(timer, event.prev)));
     rp_pops_timer_write(c, 0x1F801114, 0x18);
-    assert(rp_u32(c, timer + 4));
+    assert(rp_u32(c, RP_TIMER_FIELD(timer, event.prev)));
     rp_pops_timer_write(c, 0x1F801118, 10);
-    assert(rp_u32(c, timer + 0x10) == 10);
-    assert(rp_u32(c, timer + 8) == 134 && rp_u32(c, head) == timer);
+    assert(rp_u32(c, RP_TIMER_FIELD(timer, target_with_flags)) == 10);
+    assert(rp_u32(c, RP_TIMER_FIELD(timer, event.deadline_cycles)) == 134 && rp_u32(c, head) == timer);
     assert(rp_u32(c, c->gp + 0x1B0) == 10);
+
+    /* Timer read shares the writer's state and clears only mode/status bits,
+     * with signed-halfword conversion confined to counter reads. */
+    rp_w32(c, RP_CORE_CLOCK_ADDRESS(c, event_deadline), 0x9003);
+    rp_core_set_downcount(c, 0);
+    rp_w32(c, RP_TIMER_FIELD(timer, target_with_flags), 0x10000);
+    rp_w32(c, RP_TIMER_FIELD(timer, origin_cycles), 0);
+    rp_w32(c, RP_TIMER_FIELD(timer, mode_with_status), 0);
+    rp_w8(c, RP_TIMER_FIELD(timer, clock_shift), 0);
+    assert(rp_pops_timer_read(c, 0x1F801110, 2) == 0x9003);
+    assert(rp_pops_timer_read(c, 0x1F801110, 1) == 0xFFFF9003);
+    assert(rp_pops_timer_read(c, 0x1F801110, 5) == 0x9003);
+    rp_w32(c, RP_TIMER_FIELD(timer, mode_with_status), 0x1C18);
+    assert(rp_pops_timer_read(c, 0x1F801114, 2) == 0x1C18);
+    assert(rp_u32(c, RP_TIMER_FIELD(timer, mode_with_status)) == 0x18);
+
+    rp_w32(c, RP_CORE_CLOCK_ADDRESS(c, event_deadline), 30);
+    rp_core_set_downcount(c, 3);
+    rp_w32(c, RP_TIMER_FIELD(timer, target_with_flags), 10);
+    rp_w32(c, RP_TIMER_FIELD(timer, origin_cycles), 0);
+    rp_w32(c, RP_TIMER_FIELD(timer, mode_with_status), 8);
+    assert(rp_pops_timer_read(c, 0x1F801110, 2) == 7);
+    assert(rp_u32(c, RP_TIMER_FIELD(timer, origin_cycles)) == 20);
+    assert(rp_pops_timer_read(c, 0x1F801114, 2) == 0x808);
+    assert(rp_u32(c, RP_TIMER_FIELD(timer, mode_with_status)) == 8);
+    assert(rp_core_downcount(c) == 3);
+
+    rp_w32(c, RP_TIMER_FIELD(timer, target_with_flags), 0x8000000A);
+    rp_w32(c, RP_TIMER_FIELD(timer, origin_cycles), 0x1234FFFF);
+    assert(rp_pops_timer_read(c, 0x1F801110, 2) == 0x1234FFFF);
+    assert(rp_pops_timer_read(c, 0x1F801110, 1) == UINT32_MAX);
+    rp_w32(c, RP_TIMER_FIELD(timer, mode_with_status), 0xFFFF8821);
+    assert(rp_pops_timer_read(c, 0x1F801114, 1) == 0xFFFF8821);
+    assert(rp_u32(c, RP_TIMER_FIELD(timer, mode_with_status)) == 0x21);
+
+    const uint32_t timer2 = RP_TIMER_BASE(c, 2);
+    rp_w32(c, RP_TIMER_FIELD(timer2, target_with_flags), 0x10000);
+    rp_w32(c, RP_TIMER_FIELD(timer2, origin_cycles), 3);
+    rp_w8(c, RP_TIMER_FIELD(timer2, clock_shift), 3);
+    assert(rp_pops_timer_read(c, 0x1F801120, 2) == 3);
     fclose(c->trace); free(c);
-    puts("Guest scheduler: unlink, callback debit, overshoot and future-event wait passed.");
+    puts("Guest events/timers: scheduling, typed writes, counter widths, paused reads and status clearing passed.");
     return 0;
 }

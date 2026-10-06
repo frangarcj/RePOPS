@@ -42,6 +42,7 @@ enum {
     rp_display_sprite_layout, member)
 
 uint32_t rp_pops_display_active_lists(rp_context *, uint32_t cursor);
+uint32_t rp_pops_display_next_frame(rp_context *);
 _Static_assert(sizeof(rp_display_resolution_layout) == 9, "resolution row");
 _Static_assert(sizeof(rp_display_fit_layout) == 6, "display fit row");
 _Static_assert(sizeof(rp_display_sprite_layout) == 20, "GE sprite pair");

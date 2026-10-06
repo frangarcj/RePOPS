@@ -50,3 +50,21 @@ external output, active UI and other lifecycle paths are separate work.
 After migrating the common caller to named fields, the final repeat at
 `out/display-typed.Aw1FII/result/` gives the same blocker and counters. Native
 display, GPU, GTE and Unicorn checks pass with that source state.
+
+## PAL target-vcount correction
+
+The reached branch at +0x125A4 now updates the signed phase accumulator at
+core +0x3670 and selects the original one- or two-vblank target. It uses
+0x1BF4A/0xFFF91BE2 for noninterlaced output and 0x1B6CB/0xFFF91797 for the
+interlaced case, with the original PAL bit and compatibility-flag gate.
+The helper changes neither the CPU downcount nor emitted GE work.
+
+The display fixture checks a sequence crossing zero, both constant pairs,
+and the disabled/non-PAL gates. The headless timing adapter still implements
+the requested vblank; this is not a hardware refresh-rate measurement.
+
+`out/display-pal.JO3Se5/result/` passes the PAL branch and reaches a later
+DMA callback boundary at +0x8698. It records 213,278,892 generated-instruction
+observations and 2,457,632 transfers. The corrected target selection changes
+the observed path/timing, so transfer counts need not increase monotonically.
+No rendered framebuffer or successful game boot is claimed.

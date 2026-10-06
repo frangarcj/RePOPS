@@ -97,9 +97,35 @@ int main(void)
         assert(!"24-bit transfer was silently accepted");
     }
     assert(strcmp(c->stop_kind, "display_24bit_or_external_path_not_reconstructed") == 0);
+
+    seed(c);
+    rp_w32(c, RP_GPU_ADDRESS(c, frame_counter), 100);
+    rp_w32(c, RP_GPU_ADDRESS(c, display_mode), 0x800);
+    rp_core_set_downcount(c, 123);
+    const uint32_t targets[] = {102, 103, 104, 105, 106, 108};
+    const int32_t phases[] = {-451614, -337108, -222602, -108096, 6410, -445204};
+    for (unsigned i = 0; i < 6; ++i) {
+        assert(rp_pops_display_next_frame(c) == targets[i]);
+        assert((int32_t)rp_u32(c, RP_GPU_ADDRESS(c, pal_frame_phase)) == phases[i]);
+        rp_w32(c, RP_GPU_ADDRESS(c, frame_counter), targets[i]);
+    }
+    assert(rp_core_downcount(c) == 123);
+    rp_w8(c, RP_GPU_ADDRESS(c, interlaced), 1);
+    rp_w32(c, RP_GPU_ADDRESS(c, pal_frame_phase), 0);
+    assert(rp_pops_display_next_frame(c) == 110);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, pal_frame_phase)) == 0xFFF91797);
+    assert(rp_pops_display_next_frame(c) == 109);
+    assert((int32_t)rp_u32(c, RP_GPU_ADDRESS(c, pal_frame_phase)) == -340382);
+    rp_w32(c, RP_DEVICE_ADDRESS(c, compatibility_flags), 8);
+    assert(rp_pops_display_next_frame(c) == 109);
+    assert((int32_t)rp_u32(c, RP_GPU_ADDRESS(c, pal_frame_phase)) == -340382);
+    rp_w32(c, RP_DEVICE_ADDRESS(c, compatibility_flags), 0);
+    rp_w32(c, RP_GPU_ADDRESS(c, display_mode), 0);
+    assert(rp_pops_display_next_frame(c) == 109);
+    assert((int32_t)rp_u32(c, RP_GPU_ADDRESS(c, pal_frame_phase)) == -340382);
     fclose(c->trace);
     for (unsigned i = 0; i < RP_REGION_COUNT; ++i) free(c->regions[i].bytes);
     free(c);
-    puts("Display: typed sprites, scissor/GE words, border clear, wrap and split submission passed; no rendering.");
+    puts("Display: GE lists, vertices and original PAL phase/target selection passed; no rendering.");
     return 0;
 }

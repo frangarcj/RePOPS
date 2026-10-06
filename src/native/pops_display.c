@@ -20,6 +20,27 @@ static int32_t product_q8(int32_t a, int32_t b)
 static uint32_t scissor(uint32_t op, int32_t x, int32_t y)
 { return op | ((uint32_t)y << 10) | (uint32_t)x; }
 
+/* +0x1164C..+0x1166C and +0x125A4: select the requested display vcount
+ * using the original signed phase accumulator. This does not change guest
+ * CPU cycles or synthesize additional GPU work. */
+uint32_t rp_pops_display_next_frame(rp_context *c)
+{
+    uint32_t next = GPU32(frame_counter) + 1;
+    if ((rp_u32(c, RP_DEVICE_ADDRESS(c, compatibility_flags)) & 8) ||
+        !(GPU32(display_mode) & 0x800)) return next;
+    const uint32_t phase = GPU32(pal_frame_phase);
+    uint32_t delta;
+    if ((int32_t)phase >= 0) {
+        ++next;
+        delta = GPU8(interlaced) ? UINT32_C(0xFFF91797) : UINT32_C(0xFFF91BE2);
+    } else {
+        delta = GPU8(interlaced) ? 0x1B6CB : 0x1BF4A;
+    }
+    rp_w32(c, RP_GPU_ADDRESS(c, pal_frame_phase), phase + delta);
+    rp_event(c, "milestone", "PAL_frame_target_selected", next, phase + delta);
+    return next;
+}
+
 /* Active, internal-screen, 16-bit branch inside +0x115B4. The caller retains
  * the common cache maintenance, draw-state restoration and frame lifecycle.
  * GE commands and vertex buffers are produced, not interpreted here. */

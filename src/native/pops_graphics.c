@@ -258,9 +258,7 @@ static void refresh_display(rp_context *c)
         display_mode(c, (mode >> 13) & 1);
         rp_w8(c, RP_GPU_ADDRESS(c, external_field_mode), *(uint8_t *)rp_memory(c, RP_GPU_ADDRESS(c, external_field_mode), 1) & 1);
     }
-    const uint32_t next_frame = rp_u32(c, RP_GPU_ADDRESS(c, frame_counter)) + 1;
-    if (!(flags & 8) && (mode & 0x800))
-        rp_block(c, "PAL_frame_correction_not_reconstructed", 0x125A4);
+    const uint32_t next_frame = rp_pops_display_next_frame(c);
     const uint8_t dirty = *(uint8_t *)rp_memory(c, RP_GPU_ADDRESS(c, display_dirty), 1);
     if (flags & 0x8000) {
         if (old_field || dirty) rp_w8(c, RP_GPU_ADDRESS(c, display_mode_bytes[2]), 0);

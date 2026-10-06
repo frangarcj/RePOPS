@@ -88,6 +88,7 @@ typedef struct {
         struct { uint8_t display_mode_bytes[3]; uint8_t packet_extra_words; };
     };
     uint8_t packet_word_count;
+    int32_t pal_frame_phase;
 } rp_core_gpu_layout;
 
 #define RP_GPU_ADDRESS(c, member) RP_FIELD_ADDRESS((c)->gp, rp_core_gpu_layout, member)
@@ -130,6 +131,7 @@ _Static_assert(offsetof(rp_core_gpu_layout, read_selector) == 0x3659, "GPU read 
 _Static_assert(offsetof(rp_core_gpu_layout, frame_phase) == 0x3662, "GPU frame phase");
 _Static_assert(offsetof(rp_core_gpu_layout, refresh_on_ready) == 0x3661, "GPU ready refresh flag");
 _Static_assert(offsetof(rp_core_gpu_layout, display_mode) == 0x3668, "GPU display mode");
+_Static_assert(offsetof(rp_core_gpu_layout, pal_frame_phase) == 0x3670, "PAL frame phase");
 _Static_assert(offsetof(rp_core_gpu_layout, packet_extra_words) == 0x366B, "GPU packet extra words");
 _Static_assert(offsetof(rp_core_gpu_layout, packet_word_count) == 0x366C, "GPU packet count");
 #endif

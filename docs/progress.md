@@ -4,6 +4,15 @@ Historical native runs retain `result/retained-trace-result.json` instead of
 their full trace once superseded. Keep the latest two traces and the GE-preview
 provenance source; decompilers and focused verification outputs are not pruned.
 
+## Current: PAL target-vcount selection passes; next callback is +0x8698
+
+`out/display-pal.JO3Se5/result/` passes the original phase-accumulator branch
+at +0x125A4 and reaches DMA callback +0x8698. It records 213,278,892 generated
+instruction observations and 2,457,632 transfers. Display/GPU contract tests
+pass, including both PAL constant pairs and the compatibility gates.
+See `display_active.md`. `game_executed` remains false; no framebuffer is
+rendered. The next callback must be recovered rather than forced successful.
+
 ## Current: MDEC quantization input passes; PAL frame correction is next
 
 `out/mdec-input.gBy4ri/result/` prepares the two quantization banks through

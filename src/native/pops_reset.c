@@ -1,4 +1,5 @@
 #include "runtime.h"
+#include "pops_state.h"
 #include "pops_cdrom.h"
 #include "pops_emit.h"
 #include "../me_startup.h"
@@ -364,8 +365,8 @@ static void spu_state_reset(rp_context *c)
             memcpy(reverse + j * 2, coefficients + i * 8 + (3 - j) * 2, 2);
     }
     memcpy(rp_memory(c, 0x09FF0846, 10), rp_module_memory(c, 0xD4020, 10), 10);
-    halfword(c, 0x09FF0850, 0x7FFF);
-    halfword(c, 0x09FF0854, 0x6000);
+    halfword(c, RP_MIXER_ADDRESS(envelope_thresholds[0]), 0x7FFF);
+    halfword(c, RP_MIXER_ADDRESS(envelope_thresholds[2]), 0x6000);
     memcpy(rp_memory(c, 0x09FF0800, 0x46), rp_module_memory(c, 0xD402C, 0x46), 0x46);
     memset(rp_memory(c, 0x09F40000, 0x802C0), 0, 0x802C0);
     const uint32_t config = rp_u32(c, c->gp + 0x700);

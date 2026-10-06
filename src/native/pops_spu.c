@@ -84,8 +84,103 @@ enum {
     VOICE_BYTES = sizeof(rp_mixer_voice_layout)
 };
 
-/* +0x1418..+0x1484, with the terminal release transition +0x16D8.
- * Other ADSR phase transitions remain explicit boundaries. */
+/* The original rate calculation rotates a u32 before storing a halfword.
+ * At the slowest rates the period truncates to zero and the step is disabled. */
+static void set_envelope_rate(rp_context *c, uint32_t voice, uint32_t step,
+                              unsigned rate, bool exponential)
+{
+    const int shift = (int)rate - 11;
+    uint32_t period = 1;
+    if (shift > 0) {
+        period = (UINT32_C(1) << shift) & 0xFFFF;
+        if (!period) step = 0;
+    } else {
+        const unsigned rotate = (unsigned)shift & 31;
+        step = (step >> rotate) | (step << ((0u - rotate) & 31));
+    }
+    exponential = exponential && step != 0;
+    if (exponential) step &= 0x7FF8;
+    write_half(c, voice + VOICE_STEP, (uint16_t)step);
+    write_half(c, voice + VOICE_PERIOD, (uint16_t)period);
+    rp_w8(c, voice + VOICE_EXPONENTIAL, exponential);
+}
+
+/* +0x153C is shared by exponential attack and rising sustain. */
+static void slow_envelope_rise(rp_context *c, uint32_t voice, unsigned phase)
+{
+    uint32_t step = (uint32_t)signed_half(read_half(c, voice + VOICE_STEP));
+    rp_w8(c, voice + VOICE_STATE, (uint8_t)(phase & ~3u));
+    write_half(c, voice + VOICE_THRESHOLD, 0x7FFF);
+    if (step < 16) {
+        write_half(c, voice + VOICE_PERIOD, (step & 8) ? 2 : 4);
+        if (!(step & 8)) step <<= 1;
+    }
+    write_half(c, voice + VOICE_STEP, (uint16_t)(step >> 2));
+}
+
+/* +0x14C8..+0x16E0: all nontrivial entries of the pinned phase table.
+ * This updates the rate for the next tick; the caller retains today's level. */
+static void transition_voice_envelope(rp_context *c, uint32_t voice,
+                                      unsigned phase, int32_t level)
+{
+    const uint32_t cfg = rp_u32(c, voice + VOICE_FIELD(envelope.configuration));
+    switch (phase) {
+    case RP_ENV_KEYON_DELAY:
+        rp_w8(c, voice + VOICE_MANUAL_LOOP, 0);
+        /* fall through */
+    case RP_ENV_ATTACK_SETUP: {
+        const unsigned knee = (cfg >> 15) & 1;
+        const unsigned next = RP_ENV_ATTACK + knee;
+        rp_w8(c, voice + VOICE_STATE, (uint8_t)next);
+        write_half(c, voice + VOICE_THRESHOLD,
+                   read_half(c, RP_MIXER_ADDRESS(envelope_thresholds[knee * 2])));
+        set_envelope_rate(c, voice, ((cfg >> 8) & 3) ^ 7, (cfg >> 10) & 31, false);
+        if (knee && level >= 0x6000) slow_envelope_rise(c, voice, next);
+        break;
+    }
+    case RP_ENV_ATTACK_KNEE: case RP_ENV_SUSTAIN_KNEE:
+        slow_envelope_rise(c, voice, phase);
+        break;
+    case RP_ENV_ATTACK: {
+        const unsigned rate = (cfg >> 4) & 15;
+        rp_w8(c, voice + VOICE_STATE, RP_ENV_DECAY);
+        rp_w8(c, voice + VOICE_EXPONENTIAL, 1);
+        write_half(c, voice + VOICE_STEP, (uint16_t)((UINT32_C(0xFFFFC000) >> rate) & 0x7FF8));
+        write_half(c, voice + VOICE_PERIOD, (uint16_t)(rate > 11 ? 1u << (rate - 11) : 1));
+        write_half(c, voice + VOICE_THRESHOLD, (uint16_t)(((cfg & 15) << 11) + 0x7FF));
+        break;
+    }
+    case RP_ENV_DECAY: {
+        const unsigned mode = cfg >> 30, next = RP_ENV_SUSTAIN_RISE + mode;
+        const uint32_t step = ((cfg >> 22) & 3) ^ ((mode & 1) ? 0xFFF8u : 7u);
+        set_envelope_rate(c, voice, step, (cfg >> 24) & 31, mode == 3);
+        rp_w8(c, voice + VOICE_STATE, (uint8_t)next);
+        if (mode == 2 && level >= 0x6000) slow_envelope_rise(c, voice, next);
+        else write_half(c, voice + VOICE_THRESHOLD,
+                        read_half(c, RP_MIXER_ADDRESS(envelope_thresholds[mode])));
+        break;
+    }
+    case RP_ENV_RELEASE_SETUP:
+        rp_w8(c, voice + VOICE_STATE, RP_ENV_RELEASE);
+        write_half(c, voice + VOICE_THRESHOLD, 0);
+        set_envelope_rate(c, voice, 0xFFF8, (cfg >> 16) & 31, (cfg & (1u << 21)) != 0);
+        break;
+    case RP_ENV_SUSTAIN_FALL: case RP_ENV_SUSTAIN_EXP_FALL: case RP_ENV_RELEASE:
+        rp_w8(c, voice + VOICE_STOPPED, 0xFF);
+        /* fall through */
+    case RP_ENV_SUSTAIN_RISE:
+        write_half(c, voice + VOICE_PERIOD, 0);
+        write_half(c, voice + VOICE_STEP, 0);
+        rp_w8(c, voice + VOICE_EXPONENTIAL, 0);
+        break;
+    default: return;
+    }
+    rp_event(c, "milestone", "ME_envelope_phase_transition", phase,
+             *(uint8_t *)rp_memory(c, voice + VOICE_STATE, 1));
+}
+
+/* +0x1418..+0x1484: retain counter wrap and unclamped reported envelope on
+ * nonterminal ticks; threshold transitions prepare the following tick. */
 static void advance_voice_envelope(rp_context *c, uint32_t voice, unsigned index)
 {
     const int32_t state = (int8_t)*(uint8_t *)rp_memory(c, voice + VOICE_STATE, 1);
@@ -103,25 +198,11 @@ static void advance_voice_envelope(rp_context *c, uint32_t voice, unsigned index
     if (next == threshold || ((old - threshold) ^ (next - threshold)) < 0) {
         if (next > 0x7FFF) next = 0x7FFF;
         level = next < 0 ? 0 : next;
-        switch (state) {
-        case 17: case 19: case 24:
-            rp_w8(c, voice + VOICE_STOPPED, 0xFF);
-            /* These transitions converge at +0x1670. */
-            /* fall through */
-        case 16:
-            write_half(c, voice + VOICE_PERIOD, 0);
-            write_half(c, voice + VOICE_STEP, 0);
-            rp_w8(c, voice + VOICE_EXPONENTIAL, 0);
-            break;
-        case 4: case 5: case 8: case 9: case 12: case 18: case 20:
-            rp_event(c, "me_boundary", "envelope_transition_state", voice, (uint32_t)state);
-            rp_block(c, "ME_envelope_phase_transition_not_reconstructed", 0x14C0);
-        default: break;
-        }
+        transition_voice_envelope(c, voice, (unsigned)state, next);
     }
     write_half(c, voice + VOICE_LEVEL, (uint16_t)level);
     if (*(uint8_t *)rp_memory(c, voice + VOICE_STOPPED, 1)) next = 0;
-    write_half(c, SHARED + index * 0x10 + 0xC, (uint16_t)next);
+    write_half(c, RP_SHARED_ADDRESS(voices[index].envelope), (uint16_t)next);
     write_half(c, voice + VOICE_COUNTDOWN, read_half(c, voice + VOICE_PERIOD));
 }
 

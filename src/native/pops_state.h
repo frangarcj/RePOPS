@@ -25,6 +25,16 @@ typedef struct {
     uint32_t raw_volume_pair;
 } rp_master_volume_layout;
 
+/* Recovered phase values from the callback's threshold table at +0xD4074.
+ * Knee phases slow a rising envelope at 0x6000 before its final threshold. */
+typedef enum {
+    RP_ENV_ATTACK_SETUP = 4, RP_ENV_KEYON_DELAY = 5,
+    RP_ENV_ATTACK = 8, RP_ENV_ATTACK_KNEE = 9, RP_ENV_DECAY = 12,
+    RP_ENV_SUSTAIN_RISE = 16, RP_ENV_SUSTAIN_FALL = 17,
+    RP_ENV_SUSTAIN_KNEE = 18, RP_ENV_SUSTAIN_EXP_FALL = 19,
+    RP_ENV_RELEASE_SETUP = 20, RP_ENV_RELEASE = 24
+} rp_envelope_phase;
+
 typedef struct {
     uint32_t configuration;
     int8_t phase;
@@ -99,7 +109,8 @@ typedef struct {
 } rp_me_shared_layout;
 
 typedef struct {
-    uint8_t coefficients[0x858];
+    uint8_t coefficients[0x850];
+    uint16_t envelope_thresholds[4];
     rp_mixer_voice_layout voices[24];
     rp_master_volume_layout master_volume;
     rp_reverb_parameters_layout reverb_parameters;
@@ -162,6 +173,7 @@ _Static_assert(sizeof(rp_mixer_voice_layout) == 0x74, "mixer voice layout");
 _Static_assert(offsetof(rp_mixer_voice_layout, envelope) == 0x18, "voice envelope offset");
 _Static_assert(offsetof(rp_mixer_voice_layout, decoded) == 0x3A, "voice decoded samples");
 _Static_assert(offsetof(rp_me_mixer_layout, voices) == 0x858, "mixer voice array");
+_Static_assert(offsetof(rp_me_mixer_layout, envelope_thresholds) == 0x850, "envelope threshold table");
 _Static_assert(sizeof(rp_reverb_parameters_layout) == 20, "reverb parameters layout");
 _Static_assert(sizeof(rp_reverb_channel_layout) == 64, "reverb channel layout");
 _Static_assert(offsetof(rp_me_shared_layout, pending_key_on) == 0x280, "shared mailbox layout");

@@ -1,5 +1,18 @@
 # RePops progress
 
+## Current: ME envelope phases reach the ordering-table DMA callback
+
+`out/me-phases.uYbFq9/result/` passes the threshold transitions at +0x14C0
+and reaches DMA callback +0x9364. It records 39,469,825 generated-cache
+observations, 40,346 entry transfers and `game_executed: false`.
+
+The attack, decay, sustain and release branches use named phase values and
+voice fields, with shared knee/rate logic matching the original instructions.
+Thirteen callback vectors pass with sanitizers, alongside the existing SPU
+and ME checks. The threshold table and its initializer share a native layout.
+See `me_envelope_phases.md`; this extends one partial original callback rather
+than increasing the function coverage count.
+
 ## Current: signed-half state emission reaches ME reconfiguration
 
 `out/signed-state.axjdmp/result/` passes +0x4930 using reconstructed C and

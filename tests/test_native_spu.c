@@ -67,6 +67,70 @@ static void check_reverb_alias_order(rp_context *c, unsigned phase, bool enabled
     assert(get_half(c, RP_MIXER_ADDRESS(capture_cursor)) == phase + 1);
 }
 
+static void check_envelope_phases(rp_context *c)
+{
+    /* Focused threshold ticks derived from the original phase table. These
+     * run through the full native callback, including its final status write. */
+    static const struct {
+        unsigned phase;
+        uint32_t configuration;
+        int16_t level, initial_step;
+        unsigned next_phase;
+        int16_t step;
+        uint16_t period, threshold;
+        uint8_t exponential, stopped;
+    } cases[] = {
+        {RP_ENV_ATTACK_SETUP, 0, 1000, 0, RP_ENV_ATTACK, 0x3800, 1, 0x7FFF, 0, 0},
+        {RP_ENV_KEYON_DELAY, 0x8000, 1000, 0, RP_ENV_ATTACK_KNEE, 0x3800, 1, 0x6000, 0, 0},
+        {RP_ENV_ATTACK_SETUP, 0x8000, 26000, 0, RP_ENV_ATTACK, 0xE00, 1, 0x7FFF, 0, 0},
+        {RP_ENV_ATTACK_KNEE, 0, 24572, 4, RP_ENV_ATTACK, 2, 4, 0x7FFF, 0, 0},
+        {RP_ENV_ATTACK, 0x35, 32760, 7, RP_ENV_DECAY, 0x7800, 1, 0x2FFF, 1, 0},
+        {RP_ENV_DECAY, 0x0B000000, 1000, 0, RP_ENV_SUSTAIN_RISE, 7, 1, 0x7FFF, 0, 0},
+        {RP_ENV_DECAY, 0xCB800000, 1000, 0, RP_ENV_SUSTAIN_EXP_FALL, 0x7FF8, 1, 0, 1, 0},
+        {RP_ENV_DECAY, 0x8B000000, 26000, 0, RP_ENV_SUSTAIN_RISE, 3, 4, 0x7FFF, 0, 0},
+        {RP_ENV_SUSTAIN_KNEE, 0, 24568, 8, RP_ENV_SUSTAIN_RISE, 2, 2, 0x7FFF, 0, 0},
+        {RP_ENV_RELEASE_SETUP, 0x000B0000, 1000, 0, RP_ENV_RELEASE, -8, 1, 0, 0, 0},
+        {RP_ENV_RELEASE_SETUP, 0x002B0000, 1000, 0, RP_ENV_RELEASE, 0x7FF8, 1, 0, 1, 0},
+        {RP_ENV_RELEASE_SETUP, 0x003F0000, 1000, 0, RP_ENV_RELEASE, 0, 0, 0, 0, 0},
+        {RP_ENV_RELEASE, 0, 4, -8, RP_ENV_RELEASE, 0, 0, 0, 0, 1}
+    };
+    for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        memset(c->regions[2].bytes, 0, c->regions[2].size);
+        if (setjmp(c->stop) != 0) {
+            fprintf(stderr, "Envelope vector %u: %s\n", i, c->stop_kind);
+            abort();
+        }
+        set_half(c, RP_SHARED_ADDRESS(control), 0xC000);
+        rp_w32(c, RP_SHARED_ADDRESS(dirty_voice_mask), 0x80000000);
+        set_half(c, RP_MIXER_ADDRESS(envelope_thresholds[0]), 0x7FFF);
+        set_half(c, RP_MIXER_ADDRESS(envelope_thresholds[2]), 0x6000);
+        rp_w32(c, RP_MIXER_ADDRESS(voices[0].sample_position), (uint32_t)-4096);
+        rp_w8(c, RP_MIXER_ADDRESS(voices[0].manual_repeat), 1);
+        rp_w8(c, RP_MIXER_ADDRESS(voices[0].envelope.phase), (uint8_t)cases[i].phase);
+        rp_w32(c, RP_MIXER_ADDRESS(voices[0].envelope.configuration), cases[i].configuration);
+        set_half(c, RP_MIXER_ADDRESS(voices[0].envelope.level), (uint16_t)cases[i].level);
+        set_half(c, RP_MIXER_ADDRESS(voices[0].envelope.step), (uint16_t)cases[i].initial_step);
+        set_half(c, RP_MIXER_ADDRESS(voices[0].envelope.threshold),
+                 cases[i].stopped ? 0 : (uint16_t)(cases[i].level + cases[i].initial_step));
+        set_half(c, RP_MIXER_ADDRESS(voices[0].envelope.countdown), 1);
+        set_half(c, RP_MIXER_ADDRESS(voices[0].envelope.period), 9);
+        uint32_t output = UINT32_MAX;
+        assert(rp_pops_spu_sample(c, &output));
+        assert(*(uint8_t *)rp_memory(c, RP_MIXER_ADDRESS(voices[0].envelope.phase), 1) == cases[i].next_phase);
+        assert((int16_t)get_half(c, RP_MIXER_ADDRESS(voices[0].envelope.step)) == cases[i].step);
+        assert(get_half(c, RP_MIXER_ADDRESS(voices[0].envelope.period)) == cases[i].period);
+        assert(get_half(c, RP_MIXER_ADDRESS(voices[0].envelope.countdown)) == cases[i].period);
+        assert(get_half(c, RP_MIXER_ADDRESS(voices[0].envelope.threshold)) == cases[i].threshold);
+        assert(*(uint8_t *)rp_memory(c, RP_MIXER_ADDRESS(voices[0].envelope.exponential), 1) == cases[i].exponential);
+        assert(*(uint8_t *)rp_memory(c, RP_MIXER_ADDRESS(voices[0].stopped), 1) == (cases[i].stopped ? 0xFF : 0));
+        assert(*(uint8_t *)rp_memory(c, RP_MIXER_ADDRESS(voices[0].manual_repeat), 1) ==
+               (cases[i].phase == RP_ENV_KEYON_DELAY ? 0 : 1));
+        assert(get_half(c, RP_MIXER_ADDRESS(voices[0].envelope.level)) ==
+               (cases[i].stopped ? 0 : (uint16_t)(cases[i].level + cases[i].initial_step)));
+        assert(get_half(c, RP_MIXER_ADDRESS(capture_cursor)) == 1);
+    }
+}
+
 int main(void)
 {
     rp_context *c = calloc(1, sizeof(*c));
@@ -211,7 +275,8 @@ int main(void)
     assert(get_half(c, RP_MIXER_ADDRESS(voices[0].envelope.step)) == 0);
     assert(get_half(c, RP_MIXER_ADDRESS(voices[0].envelope.countdown)) == 0);
     assert(*(uint8_t *)rp_memory(c, RP_MIXER_ADDRESS(voices[0].envelope.exponential), 1) == 0);
+    check_envelope_phases(c);
     fclose(c->trace); free(c->regions[2].bytes); free(c);
-    puts("SPU: voice/envelope changes, wet input, reverb ordering, postmix and CD boundary passed.");
+    puts("SPU: 13 envelope phase vectors, voice changes, reverb ordering and native postmix passed.");
     return 0;
 }

@@ -1,5 +1,18 @@
 # RePops progress
 
+## Current: active display lists reach a flat quadrilateral
+
+`out/display-active.G1CfFs/result/` passes active-screen refresh and reaches
+GP0 word 0x28000000 in +0x133D0: 39,944,042 generated-code observations,
+41,834 transfers, `game_executed: false`. The screen is not rendered yet.
+
+`pops_display.c` reconstructs the internal-screen 16-bit GE list and vertex
+preparation. Native table/vertex layouts and named fields are used in the
+new helper and touched common refresh path. Focused fixtures cover scissor
+words, nonzero coordinates, preserved Z words, border clear, wrap and wide
+submission. See `display_active.md`; the original function remains partial.
+Caffeinate PID 48162 was checked active rather than launched a second time.
+
 ## Current: NCDS passes and reaches active-display refresh
 
 `out/gte-ncds.SrXOEA/result/` executes 560 NCDS/RTPT/NCLIP calls and 279

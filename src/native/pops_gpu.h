@@ -26,7 +26,7 @@ typedef struct {
     uint32_t frame_counter, frame_cycle_origin;
     uint32_t previous_display_source, list_id;
     rp_guest_event_layout earlier_event;
-    uint32_t unknown_35e0;
+    uint32_t display_rate_remaining;
     rp_guest_event_layout frame_event;
     uint32_t remaining_frame_delay;
     rp_guest_event_layout ready_event;
@@ -44,7 +44,8 @@ typedef struct {
     uint8_t draw_area_exceeds_display, draw_area_intersects_display;
     uint8_t draw_mode_gate, display_mode_gate;
     uint8_t interlaced, display_dirty, previous_field, refresh_on_ready, frame_phase;
-    uint8_t unknown_3663[5];
+    uint8_t display_choice, external_output, external_field_mode;
+    uint8_t display_initialized, frame_refreshed;
     union {
         uint32_t display_mode;
         struct { uint8_t display_mode_bytes[3]; uint8_t packet_extra_words; };

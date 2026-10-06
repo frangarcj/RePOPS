@@ -3,23 +3,27 @@
  * Native helpers run after uc_emu_start returns, never from an engine hook.
  */
 #include "runtime.h"
+#include "pops_state.h"
 #include <unicorn/unicorn.h>
 #include <unicorn/mips.h>
 #include <stdlib.h>
 
-#define CODE_BEGIN UINT32_C(0x09B80000)
-#define CODE_END   UINT32_C(0x09C00000)
-#define RAM_CODE_BEGIN UINT32_C(0x09540000)
-#define RAM_CODE_END UINT32_C(0x097C0000)
+#define CODE_BEGIN RP_GENERATED_BIOS_BEGIN
+#define CODE_END RP_GENERATED_BIOS_END
+#define RAM_CODE_BEGIN RP_GENERATED_RAM_BEGIN
+#define RAM_CODE_END RP_GENERATED_RAM_END
 #define FAST_HELPERS UINT32_C(0x07000000)
 #define READ_WRITE (UC_PROT_READ | UC_PROT_WRITE)
 
 typedef struct generated_engine {
     uc_engine *uc;
     uc_hook trace, ram_trace;
+    uc_hook code_writes[4];
     rp_context *context;
     uint32_t published_end, ram_published_end;
     uint64_t outside_published_code;
+    uint64_t synchronized_revision;
+    bool synchronized, always_flush;
 } generated_engine;
 
 static void checked(rp_context *c, uc_err error, uint32_t address)
@@ -49,12 +53,22 @@ static void map_region(rp_context *c, uc_engine *uc, uint32_t base, uint32_t siz
     if (size) checked(c, uc_mem_map_ptr(uc, base, size, READ_WRITE, bytes), base);
 }
 
+static void observe_code_write(uc_engine *uc, uc_mem_type type, uint64_t address,
+                               int size, int64_t value, void *opaque)
+{
+    (void)uc; (void)type; (void)value;
+    generated_engine *engine = opaque;
+    rp_generated_code_access(engine->context, (uint32_t)address, (size_t)size);
+}
+
 void rp_unicorn_open(rp_context *c)
 {
     generated_engine *engine = calloc(1, sizeof(*engine));
     if (!engine) rp_block(c, "unicorn_context_allocation_failed", 0);
     c->generated_engine = engine;
     engine->context = c;
+    const char *legacy = getenv("REPOPS_UNICORN_ALWAYS_FLUSH");
+    engine->always_flush = legacy && legacy[0] == '1';
     checked(c, uc_open(UC_ARCH_MIPS, UC_MODE_MIPS32 | UC_MODE_LITTLE_ENDIAN, &engine->uc), 0);
     checked(c, uc_ctl_set_cpu_model(engine->uc, UC_CPU_MIPS32_24KF), 0);
     const uint64_t helpers[] = {0x89A0, 0x2888, 0x91BC, 0x94C4, 0x96AC, 0x1A80, 0x1A68, 0x2450, 0x2468, 0x7F00, 0x2648,
@@ -120,6 +134,15 @@ void rp_unicorn_open(rp_context *c)
                           observe_generated, engine, CODE_BEGIN, CODE_END - 1), CODE_BEGIN);
     checked(c, uc_hook_add(engine->uc, &engine->ram_trace, UC_HOOK_CODE,
                           observe_generated, engine, RAM_CODE_BEGIN, RAM_CODE_END - 1), RAM_CODE_BEGIN);
+    const uint64_t write_ranges[][2] = {
+        {CODE_BEGIN, CODE_END}, {RAM_CODE_BEGIN, RAM_CODE_END},
+        {CODE_BEGIN | 0x40000000, CODE_END | 0x40000000},
+        {RAM_CODE_BEGIN | 0x40000000, RAM_CODE_END | 0x40000000}
+    };
+    for (unsigned i = 0; i < 4; ++i)
+        checked(c, uc_hook_add(engine->uc, &engine->code_writes[i], UC_HOOK_MEM_WRITE,
+                              observe_code_write, engine, write_ranges[i][0], write_ranges[i][1] - 1),
+                (uint32_t)write_ranges[i][0]);
     c->generated_executor = "unicorn_MIPS32_24KF";
     rp_event(c, "execution_adapter", "Unicorn_generated_cache_PRX_nonexecutable", CODE_BEGIN, CODE_END);
 }
@@ -129,8 +152,8 @@ void rp_unicorn_run(rp_context *c)
     generated_engine *engine = c->generated_engine;
     if (!engine || !engine->uc) rp_block(c, "unicorn_not_initialized", c->run_pc);
     uc_engine *uc = engine->uc;
-    engine->published_end = rp_u32(c, c->gp + 0x1D0);
-    engine->ram_published_end = rp_u32(c, c->gp + 0x1CC);
+    engine->published_end = rp_u32(c, RP_CORE_CACHE_ADDRESS(c, bios_code_cursor));
+    engine->ram_published_end = rp_u32(c, RP_CORE_CACHE_ADDRESS(c, ram_code_cursor));
     engine->outside_published_code = 0;
     if (!((c->run_pc >= CODE_BEGIN && c->run_pc < engine->published_end) ||
           (c->run_pc >= RAM_CODE_BEGIN && c->run_pc < engine->ram_published_end)))
@@ -139,8 +162,14 @@ void rp_unicorn_run(rp_context *c)
     /* Native reconstruction can patch and extend the cache between runs.
      * Its memory is shared, but Unicorn's translated blocks need invalidation.
      */
-    checked(c, uc_ctl_remove_cache(uc, (uint64_t)CODE_BEGIN, (uint64_t)CODE_END), CODE_BEGIN);
-    checked(c, uc_ctl_remove_cache(uc, (uint64_t)RAM_CODE_BEGIN, (uint64_t)RAM_CODE_END), RAM_CODE_BEGIN);
+    if (!engine->synchronized || engine->always_flush ||
+            engine->synchronized_revision != c->generated_code_revision) {
+        checked(c, uc_ctl_remove_cache(uc, (uint64_t)CODE_BEGIN, (uint64_t)CODE_END), CODE_BEGIN);
+        checked(c, uc_ctl_remove_cache(uc, (uint64_t)RAM_CODE_BEGIN, (uint64_t)RAM_CODE_END), RAM_CODE_BEGIN);
+        engine->synchronized_revision = c->generated_code_revision;
+        engine->synchronized = true;
+        ++c->generated_cache_invalidations;
+    }
     for (unsigned i = 0; i < 32; ++i) {
         checked(c, uc_reg_write(uc, UC_MIPS_REG_0 + i, &c->run_gpr[i]), c->run_pc);
         uint64_t bits = c->run_fpr[i];

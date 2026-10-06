@@ -16,6 +16,17 @@ _Noreturn void rp_block(rp_context *c, const char *kind, uint32_t address)
     longjmp(c->stop, 1);
 }
 
+/* Conservative: obtaining even a read pointer to generated code invalidates
+ * its translation on the next entry. Raw pointer writes are covered too. */
+void rp_generated_code_access(rp_context *c, uint32_t address, size_t length)
+{
+    if (address >= 0x48000000 && address < 0x4A000000) address -= 0x40000000;
+    const uint64_t end = (uint64_t)address + length;
+    if (length && ((address < RP_GENERATED_RAM_END && end > RP_GENERATED_RAM_BEGIN) ||
+                   (address < RP_GENERATED_BIOS_END && end > RP_GENERATED_BIOS_BEGIN)))
+        ++c->generated_code_revision;
+}
+
 void *rp_memory(rp_context *c, uint32_t address, size_t length)
 {
     /* One native backing store for the cached/uncached RAM aliases used by
@@ -23,6 +34,7 @@ void *rp_memory(rp_context *c, uint32_t address, size_t length)
      */
     if (address >= 0x48000000 && address < 0x4A000000) address -= 0x40000000;
     if (address >= 0x44000000 && address < 0x44400000) address -= 0x40000000;
+    rp_generated_code_access(c, address, length);
     /* GP=0x10000 addresses PSP's 16-KiB scratchpad, not module-relative code.
      * The analysis image also has offsets in this numerical range; code
      * introspection must explicitly use rp_module_memory instead.

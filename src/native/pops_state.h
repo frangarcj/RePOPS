@@ -11,6 +11,11 @@ typedef struct {
 } rp_core_clock_layout;
 
 typedef struct {
+    uint8_t earlier_state[0x1CC];
+    uint32_t ram_code_cursor, bios_code_cursor;
+} rp_core_code_cache_layout;
+
+typedef struct {
     int16_t level, target, step;
     uint16_t countdown, period;
 } rp_volume_sweep_layout;
@@ -94,6 +99,7 @@ enum { RP_CAPTURE_SAMPLES = 512, RP_GUEST_SAMPLE_CYCLES = 0x300 };
 #define RP_ME_MIXER_BASE UINT32_C(0x09FF0000)
 #define RP_FIELD_ADDRESS(base, type, member) ((uint32_t)(base) + (uint32_t)offsetof(type, member))
 #define RP_CORE_CLOCK_ADDRESS(c, member) RP_FIELD_ADDRESS((c)->gp, rp_core_clock_layout, member)
+#define RP_CORE_CACHE_ADDRESS(c, member) RP_FIELD_ADDRESS((c)->gp, rp_core_code_cache_layout, member)
 #define RP_SHARED_ADDRESS(member) RP_FIELD_ADDRESS(RP_ME_SHARED_BASE, rp_me_shared_layout, member)
 #define RP_MIXER_ADDRESS(member) RP_FIELD_ADDRESS(RP_ME_MIXER_BASE, rp_me_mixer_layout, member)
 

@@ -7,6 +7,10 @@
 #include "me_worker.h"
 
 #define RP_REGION_COUNT 4
+enum {
+    RP_GENERATED_RAM_BEGIN = 0x09540000, RP_GENERATED_RAM_END = 0x097C0000,
+    RP_GENERATED_BIOS_BEGIN = 0x09B80000, RP_GENERATED_BIOS_END = 0x09C00000
+};
 /* Execution-adapter addresses, not original POPS entry points. */
 enum {
     RP_FAST_BIOS_LBU = 0x07000000, RP_FAST_RAM_SB = 0x07000040,
@@ -41,6 +45,7 @@ typedef struct rp_context {
      */
     uint32_t run_gpr[32], run_fpr[32], run_pc, run_next_pc, run_hi, run_lo;
     uint64_t generated_instructions;
+    uint64_t generated_code_revision, generated_cache_invalidations;
     uint32_t compiled_transfers;
     void *generated_engine;
     const char *generated_executor;
@@ -59,6 +64,7 @@ typedef struct rp_context {
 void rp_event(rp_context *, const char *kind, const char *name, uint32_t address, uint32_t value);
 _Noreturn void rp_block(rp_context *, const char *kind, uint32_t address);
 void *rp_memory(rp_context *, uint32_t address, size_t length);
+void rp_generated_code_access(rp_context *, uint32_t address, size_t length);
 void *rp_module_memory(rp_context *, uint32_t offset, size_t length);
 uint32_t rp_module_u32(rp_context *, uint32_t offset);
 uint32_t rp_u32(rp_context *, uint32_t);

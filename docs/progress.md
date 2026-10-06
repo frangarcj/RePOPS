@@ -1,5 +1,20 @@
 # RePops progress
 
+## Current: cache reuse reaches CD DMA control
+
+`out/cd-reuse.5qcfhr89/result/` completes in 56.5 seconds, delivers the real
+CD sector and passes the memory-control shadow write. The next boundary is
+the DMA channel-control write at 0x1F8010B8: 38,445,592 generated-cache
+observations and 13,404 transfers. No game boot is claimed.
+
+Unicorn translations now survive helper calls that do not touch generated
+code. Native pointer accesses and generated writes mark code revisions, with
+alias coverage and an always-flush comparison switch. Patch/fallback smoke
+checks pass under both policies. A 2,000-reentry microbenchmark improved from
+0.6311 to 0.5528 seconds; this is not a full-emulator performance percentage.
+The 477,783-record prefix through sector delivery matches the previous run
+except for its single host-clock reading. See `unicorn_cache_reuse.md`.
+
 ## Current: first real CD sector delivered
 
 `out/cd-sector.fwAsEX/result/` reads block zero from the local plain FFVI PBP,

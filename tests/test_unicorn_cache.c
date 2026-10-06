@@ -26,11 +26,15 @@ int main(void)
     rp_unicorn_open(c);
     rp_unicorn_run(c);
     assert(c->run_pc == 0x89A0 && c->run_gpr[31] == start + 16);
+    assert(c->generated_cache_invalidations == 1);
     assert(rp_u32(c, c->gp + 0x20) == 42 && c->run_fpr[20] == 42);
     c->run_fpr[20] = 153;
     c->run_pc = c->run_gpr[31];
     rp_unicorn_run(c);
     assert(c->run_pc == 0x2888 && rp_u32(c, c->gp + 0x24) == 153);
+    const char *legacy = getenv("REPOPS_UNICORN_ALWAYS_FLUSH");
+    const bool always_flush = legacy && legacy[0] == '1';
+    assert(c->generated_cache_invalidations == (always_flush ? 2u : 1u));
     /* A native cache patch must invalidate the previously translated fragment. */
     rp_w32(c, start + 16, 0x24030007);
     c->run_pc = start + 16;
@@ -76,8 +80,39 @@ int main(void)
         rp_unicorn_run(c);
         assert(c->run_pc == fallbacks[i] && c->run_gpr[4] == 0x1F801DAE);
     }
+    /* A pointer obtained through the uncached alias can patch cached code. */
+    uint8_t *patch = rp_memory(c, (start + 16) | 0x40000000, 4);
+    patch[0] = 9;
+    c->run_pc = start + 16;
+    rp_unicorn_run(c);
+    assert(rp_u32(c, c->gp + 0x24) == 9);
+    /* Writes performed by generated instructions also dirty translations. */
+    const uint32_t self = start + 0x200;
+    const uint32_t self_patch[] = {0x3C0409B8, 0x34840010, 0x3C052403, 0x34A5000B,
+                                  0xAC850000, 0x0C000A22, 0};
+    for (unsigned i = 0; i < sizeof(self_patch) / sizeof(self_patch[0]); ++i)
+        rp_w32(c, self + i * 4, self_patch[i]);
+    rp_w32(c, c->gp + 0x1D0, self + sizeof(self_patch));
+    c->run_pc = self;
+    rp_unicorn_run(c);
+    const uint64_t flushes = c->generated_cache_invalidations;
+    c->run_pc = start + 16;
+    rp_unicorn_run(c);
+    assert(c->generated_cache_invalidations == flushes + 1);
+    assert(rp_u32(c, c->gp + 0x24) == 11);
+    const char *iterations_text = getenv("REPOPS_BENCH_REENTRIES");
+    const unsigned iterations = iterations_text ? (unsigned)strtoul(iterations_text, NULL, 10) : 0;
+    const uint64_t before = c->generated_cache_invalidations;
+    for (unsigned i = 0; i < iterations; ++i) {
+        c->run_pc = start + 16;
+        rp_unicorn_run(c);
+        assert(c->run_pc == 0x2888 && rp_u32(c, c->gp + 0x24) == 11);
+    }
+    assert(c->generated_cache_invalidations - before == (always_flush ? iterations : 0));
+    if (iterations) printf("Reentries=%u invalidations=%llu\n", iterations,
+                          (unsigned long long)(c->generated_cache_invalidations - before));
     rp_unicorn_close(c);
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[2].bytes); free(c);
-    puts("Unicorn cache: helper exits, delay slot, shared memory, FPR bits and native patch passed.");
+    puts("Unicorn cache: exits, delay slots, reuse, native/alias/generated patches passed.");
     return 0;
 }

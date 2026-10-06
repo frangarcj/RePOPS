@@ -237,9 +237,10 @@ static void refresh_reverb_parameters(rp_context *c)
         write_half(c, RP_MIXER_ADDRESS(capture_cursor), 0);
 }
 
-/* Reverb-disabled route +0xC84 -> +0x65C. It still reads taps, advances
- * addresses and filters the old tail; disabling writes is not a reset. */
-static void advance_reverb_tail(rp_context *c, unsigned phase, int32_t *left, int32_t *right)
+/* +0x550..+0x924: disabling reverb suppresses RAM writes, not the read/filter
+ * path. Keep writes interleaved with reads because delay taps can alias. */
+static void advance_reverb(rp_context *c, unsigned phase, bool enabled,
+                           int32_t input, int32_t *left, int32_t *right)
 {
     const uint32_t address = rp_reverb_channel_address(phase);
     const uint32_t taps = RP_FIELD_ADDRESS(address, rp_reverb_channel_layout, taps);
@@ -254,20 +255,39 @@ static void advance_reverb_tail(rp_context *c, unsigned phase, int32_t *left, in
     bool irq_seen = irq == 0;
     for (unsigned i = 0; i < RP_RV_TAP_COUNT; ++i) irq_seen |= irq == channel.taps[i];
 
+    if (enabled) {
+        const int32_t driven = multiply_q15(clamp_sample(input), channel.input_gain);
+        const int32_t wall = signed_half(read_half(c, RP_MIXER_ADDRESS(reverb_parameters.wall_gain)));
+        const int32_t iir = signed_half(read_half(c, RP_MIXER_ADDRESS(reverb_parameters.iir_gain)));
+        const rp_reverb_tap reads[] = {RP_RV_SAME_READ, RP_RV_DIFF_READ};
+        const rp_reverb_tap writes[] = {RP_RV_SAME_WRITE, RP_RV_DIFF_WRITE};
+        for (unsigned i = 0; i < 2; ++i) {
+            const int32_t reflected = signed_half(read_half(c, channel.taps[reads[i]]));
+            const int32_t old = signed_half(read_half(c, channel.taps[writes[i]]));
+            uint32_t next = channel.taps[writes[i]] + sizeof(int16_t);
+            if (next == wrap) next = base;
+            const int32_t value = clamp_sample(old + multiply_q15(
+                driven + multiply_q15(reflected, wall) - old, iir));
+            write_half(c, next, (uint16_t)value);
+        }
+    }
+
     const unsigned combs[] = {RP_RV_COMB0, RP_RV_COMB1, RP_RV_COMB2, RP_RV_COMB3};
     int64_t sum = 0;
     for (unsigned i = 0; i < 4; ++i)
         sum += (int64_t)signed_half(read_half(c, channel.taps[combs[i]])) *
                        signed_half(read_half(c, RP_MIXER_ADDRESS(reverb_parameters.comb_gain) + i * sizeof(int16_t)));
     const int32_t first_old = signed_half(read_half(c, channel.taps[RP_RV_APF1_READ]));
-    const int32_t second_old = signed_half(read_half(c, channel.taps[RP_RV_APF2_READ]));
     const int32_t first_gain = signed_half(read_half(c, RP_MIXER_ADDRESS(reverb_parameters.allpass_gain[0])));
     const int32_t second_gain = signed_half(read_half(c, RP_MIXER_ADDRESS(reverb_parameters.allpass_gain[1])));
     const int32_t first = clamp_sample((int32_t)(sum >> 15) - multiply_q15(first_old, first_gain));
+    if (enabled) write_half(c, channel.taps[RP_RV_APF1_WRITE], (uint16_t)first);
+    const int32_t second_old = signed_half(read_half(c, channel.taps[RP_RV_APF2_READ]));
     const int32_t second = clamp_sample(first_old + multiply_q15(first, first_gain)
                                        - multiply_q15(second_old, second_gain));
+    if (enabled) write_half(c, channel.taps[RP_RV_APF2_WRITE], (uint16_t)second);
     int32_t signal = clamp_sample(second_old + multiply_q15(second, second_gain));
-    if (!*(uint8_t *)rp_memory(c, RP_MIXER_ADDRESS(reverb_tail_compatibility), 1)) signal = 0;
+    if (!enabled && !*(uint8_t *)rp_memory(c, RP_MIXER_ADDRESS(reverb_tail_compatibility), 1)) signal = 0;
 
     for (unsigned i = 0; i < RP_RV_TAP_COUNT; ++i) {
         uint32_t next = channel.taps[i] + 2;
@@ -293,9 +313,10 @@ static void advance_reverb_tail(rp_context *c, unsigned phase, int32_t *left, in
 }
 
 static uint32_t finish_active_mix(rp_context *c, uint16_t control, uint32_t dirty,
-                                  uint32_t left, uint32_t right)
+                                  uint32_t left, uint32_t right,
+                                  uint32_t reverb_left, uint32_t reverb_right)
 {
-    if (!(control & 0x4000)) left = right = 0;
+    if (!(control & 0x4000)) left = right = reverb_left = reverb_right = 0;
     const int32_t cd_state = (int8_t)*(uint8_t *)rp_memory(c, RP_SHARED_ADDRESS(cd_notification), 1);
     if (cd_state > 0)
         rp_block(c, "ME_CD_stream_mix_not_reconstructed", 0x2A0);
@@ -311,10 +332,9 @@ static uint32_t finish_active_mix(rp_context *c, uint16_t control, uint32_t dirt
     write_half(c, rp_capture_address(1, cursor), 0);
     const unsigned phase = cursor & 1;
     if (dirty & 0x80000000) refresh_reverb_parameters(c);
-    if (control & 0x80)
-        rp_block(c, "ME_enabled_reverb_write_path_not_reconstructed", 0x5AC);
     int32_t wet_left, wet_right;
-    advance_reverb_tail(c, phase, &wet_left, &wet_right);
+    advance_reverb(c, phase, (control & 0x80) != 0,
+                   (int32_t)(phase ? reverb_right : reverb_left), &wet_left, &wet_right);
     left += (uint32_t)multiply_q15(wet_left, signed_half(read_half(c, RP_SHARED_ADDRESS(reverb_volume[0]))));
     right += (uint32_t)multiply_q15(wet_right, signed_half(read_half(c, RP_SHARED_ADDRESS(reverb_volume[1]))));
 
@@ -353,7 +373,7 @@ static uint32_t finish_active_mix(rp_context *c, uint16_t control, uint32_t dirt
     return packed;
 }
 
-/* Reached active path: voices followed by idle CD, disabled-reverb maintenance
+/* Reached active path: voices followed by idle CD, reverb processing
  * and fixed master volume. Other routes retain explicit boundaries. */
 static uint32_t active_sample(rp_context *c, uint16_t control)
 {
@@ -496,7 +516,7 @@ static uint32_t active_sample(rp_context *c, uint16_t control)
     }
     rp_event(c, "milestone", "ME_24_voice_loop_complete", left_sum, right_sum);
     rp_event(c, "milestone", "ME_voice_reverb_inputs", reverb_left, reverb_right);
-    return finish_active_mix(c, control, dirty, left_sum, right_sum);
+    return finish_active_mix(c, control, dirty, left_sum, right_sum, reverb_left, reverb_right);
 }
 
 bool rp_pops_spu_sample(rp_context *c, uint32_t *packed)

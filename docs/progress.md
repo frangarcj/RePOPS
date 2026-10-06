@@ -1,5 +1,18 @@
 # RePops progress
 
+## Latest: enabled reverb returns to CPU execution
+
+The +0x5AC boundary is recovered in the shared enabled/disabled reverb path.
+It preserves IIR write-next cursors, ordered allpass writes/reads and the wet
+voice input selected by capture phase. Existing C layouts are reused; no fresh
+global type pass was needed. SPU and ME-worker smoke checks pass, including
+nonzero wet input, aliased taps and cursor wrap for both phases.
+
+`out/reverb-vertical.nvPi1C/result/` completes the integrated diagnostic at the
+next CPU helper +0x1DE8 (signed halfword read): 26,738,259 generated-cache hook
+observations and 2,643 transfers. This is not a game boot or an equivalence
+proof. The ME callback remains partial; see `me_enabled_reverb.md`.
+
 ## Current: active ME samples and SPU polling progress
 
 Vertical execution has resumed, interleaving each recovered function with the

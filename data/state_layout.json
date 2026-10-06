@@ -20,15 +20,15 @@
       "evidence": ["original:+0x934..+0x9B4", "original:+0xB48..+0xC6C", "src/native/pops_spu.c:finish_active_mix"]
     },
     "ReverbParameters": {
-      "size": "0x14", "confidence": "layout_confirmed_disabled_write_path_implemented",
+      "size": "0x14", "confidence": "layout_confirmed_enabled_and_disabled_reverb_paths_implemented",
       "fields": [["0x00", "work_area_base", "guest_address32"], ["0x04", "iir_gain", "i16"], ["0x06", "comb_gain", "i16[4]"], ["0x0E", "wall_gain", "i16"], ["0x10", "allpass_gain", "i16[2]"]],
       "evidence": ["original:+0x434..+0x550", "original:+0x5A4..+0x854", "src/native/pops_spu.c:refresh_reverb_parameters"]
     },
     "ReverbChannelState": {
-      "size": "0x40", "confidence": "layout_confirmed_disabled_write_path_implemented",
+      "size": "0x40", "confidence": "layout_confirmed_enabled_and_disabled_reverb_paths_implemented",
       "fields": [["0x00", "input_gain", "i32"], ["0x04", "same_write", "guest_address32"], ["0x08", "comb0_read", "guest_address32"], ["0x0C", "comb1_read", "guest_address32"], ["0x10", "same_read", "guest_address32"], ["0x14", "diff_write", "guest_address32"], ["0x18", "comb2_read", "guest_address32"], ["0x1C", "comb3_read", "guest_address32"], ["0x20", "diff_read", "guest_address32"], ["0x24", "allpass1_write", "guest_address32"], ["0x28", "allpass2_write", "guest_address32"], ["0x2C", "allpass1_read", "guest_address32"], ["0x30", "allpass2_read", "guest_address32"], ["0x34", "history", "i32[3]"]],
-      "evidence": ["original:+0x550..+0x924", "src/native/pops_spu.c:advance_reverb_tail"],
-      "warning": "Field names describe use; enabling reverb writes and the full timing model remain separate work."
+      "evidence": ["original:+0x550..+0x924", "src/native/pops_spu.c:advance_reverb"],
+      "warning": "Field names describe use; focused tests cover write order, tap aliasing, wrapping and wet input, not full hardware timing or equivalence."
     },
     "MeSharedPrefix": {
       "size": "0x2C0", "confidence": "confirmed_selected_fields_gaps_unresolved",

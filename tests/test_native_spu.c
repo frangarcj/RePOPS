@@ -4,6 +4,69 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void set_half(rp_context *c, uint32_t address, uint16_t value)
+{
+    rp_w8(c, address, (uint8_t)value);
+    rp_w8(c, address + 1, (uint8_t)(value >> 8));
+}
+
+static uint16_t get_half(rp_context *c, uint32_t address)
+{
+    const uint8_t *p = rp_memory(c, address, 2);
+    return (uint16_t)(p[0] | (uint16_t)p[1] << 8);
+}
+
+static void check_reverb_alias_order(rp_context *c, unsigned phase, bool enabled)
+{
+    memset(c->regions[2].bytes, 0, c->regions[2].size);
+    if (setjmp(c->stop) != 0) {
+        fprintf(stderr, "Unexpected reverb boundary: %s\n", c->stop_kind);
+        abort();
+    }
+    const uint32_t work = RP_SHARED_ADDRESS(sample_ram) + 0x4000;
+    const uint32_t end_sample = RP_ME_SHARED_BASE + sizeof(rp_me_shared_layout) - 2;
+    const uint32_t state = rp_reverb_channel_address(phase);
+    const uint32_t taps = RP_FIELD_ADDRESS(state, rp_reverb_channel_layout, taps);
+    set_half(c, RP_SHARED_ADDRESS(control), enabled ? 0xC0C0 : 0xC040);
+    set_half(c, RP_SHARED_ADDRESS(irq_address_units), 0x800);
+    set_half(c, RP_MIXER_ADDRESS(capture_cursor), (uint16_t)phase);
+    rp_w32(c, RP_MIXER_ADDRESS(reverb_parameters.work_area_base), work);
+    set_half(c, RP_MIXER_ADDRESS(reverb_parameters.iir_gain), 0x4000);
+    set_half(c, RP_MIXER_ADDRESS(reverb_parameters.wall_gain), 0x4000);
+    set_half(c, RP_MIXER_ADDRESS(reverb_parameters.comb_gain[0]), 0x4000);
+    set_half(c, RP_MIXER_ADDRESS(reverb_parameters.allpass_gain[0]), 0x4000);
+    set_half(c, RP_MIXER_ADDRESS(reverb_parameters.allpass_gain[1]), 0x4000);
+    for (unsigned i = 0; i < RP_RV_TAP_COUNT; ++i)
+        rp_w32(c, taps + i * sizeof(uint32_t), work + 0x100 + i * 4);
+    rp_w32(c, taps + RP_RV_SAME_WRITE * sizeof(uint32_t), end_sample);
+    rp_w32(c, taps + RP_RV_SAME_READ * sizeof(uint32_t), work + 0x40);
+    rp_w32(c, taps + RP_RV_DIFF_WRITE * sizeof(uint32_t), work + 0x20);
+    rp_w32(c, taps + RP_RV_DIFF_READ * sizeof(uint32_t), work);
+    rp_w32(c, taps + RP_RV_COMB0 * sizeof(uint32_t), work + 0x22);
+    rp_w32(c, taps + RP_RV_APF1_READ * sizeof(uint32_t), work + 0x80);
+    rp_w32(c, taps + RP_RV_APF1_WRITE * sizeof(uint32_t), work + 0xA0);
+    rp_w32(c, taps + RP_RV_APF2_READ * sizeof(uint32_t), work + 0xA0);
+    rp_w32(c, taps + RP_RV_APF2_WRITE * sizeof(uint32_t), work + 0xC0);
+    set_half(c, end_sample, 1000);
+    set_half(c, work + 0x40, 2000);
+    set_half(c, work + 0x80, 200);
+    set_half(c, work + 0xA0, 99);
+
+    uint32_t output;
+    assert(rp_pops_spu_sample(c, &output));
+    /* SAME wraps before writing; DIFF and COMB see those new samples.
+     * APF2 must read APF1's just-written 25, not its previous value 99. */
+    assert(get_half(c, work) == (enabled ? 1000 : 0));
+    assert(get_half(c, work + 0x22) == (enabled ? 250 : 0));
+    assert(get_half(c, work + 0xA0) == (enabled ? 25 : 99));
+    assert(get_half(c, work + 0xC0) == (enabled ? 200 : 0));
+    assert(rp_u32(c, RP_FIELD_ADDRESS(state, rp_reverb_channel_layout, history[2])) ==
+           (enabled ? 125u : 0u));
+    assert(rp_u32(c, taps + RP_RV_SAME_WRITE * sizeof(uint32_t)) == work);
+    assert(*(uint8_t *)rp_memory(c, RP_MIXER_ADDRESS(irq_latch), 1) == 1);
+    assert(get_half(c, RP_MIXER_ADDRESS(capture_cursor)) == phase + 1);
+}
+
 int main(void)
 {
     rp_context *c = calloc(1, sizeof(*c));
@@ -89,6 +152,18 @@ int main(void)
     assert(output == 0x007C01F2);
     assert(rp_u32(c, 0x49F401B8) == 0x40007FFE);
     assert((rp_u32(c, 0x09FF13E8) & 0xFFFF) == 1);
+    /* Voice 1 feeds the right reverb phase: 249 -> 248 -> 247 through the
+     * input gain and IIR. This catches dropping the voice wet-input sums. */
+    set_half(c, RP_SHARED_ADDRESS(control), 0xC080);
+    rp_w32(c, RP_SHARED_ADDRESS(reverb_mask), 2);
+    rp_w32(c, RP_MIXER_ADDRESS(reverb_channels[1].input_gain), 0x7FFF);
+    set_half(c, RP_MIXER_ADDRESS(reverb_parameters.iir_gain), 0x7FFF);
+    const uint32_t wet_work = RP_SHARED_ADDRESS(sample_ram) + 0x4000;
+    for (unsigned i = 0; i < RP_RV_TAP_COUNT; ++i)
+        rp_w32(c, RP_MIXER_ADDRESS(reverb_channels[1].taps) + i * sizeof(uint32_t),
+               wet_work + i * 8);
+    assert(rp_pops_spu_sample(c, &output));
+    assert(get_half(c, wet_work + 2) == 247);
     rp_w8(c, 0x49F40293, 1);
     output = 0xDEADBEEF;
     if (setjmp(c->stop) == 0) {
@@ -97,7 +172,11 @@ int main(void)
     }
     assert(strcmp(c->stop_kind, "ME_CD_stream_mix_not_reconstructed") == 0);
     assert(output == 0xDEADBEEF);
+    for (unsigned phase = 0; phase < 2; ++phase) {
+        check_reverb_alias_order(c, phase, false);
+        check_reverb_alias_order(c, phase, true);
+    }
     fclose(c->trace); free(c->regions[2].bytes); free(c);
-    puts("SPU: release, ADPCM, capture, idle postmix, master output and CD boundary passed.");
+    puts("SPU: voices, wet input, reverb writes/alias order/wrap, idle postmix and CD boundary passed.");
     return 0;
 }

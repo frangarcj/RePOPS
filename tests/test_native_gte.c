@@ -87,7 +87,38 @@ int main(void)
     rp_w32(c, RP_GTE_ADDRESS(c, translation[2]), (uint32_t)-32767);
     rp_pops_gte_rtpt(c, true);
     assert((int32_t)rp_u32(c, RP_GTE_ADDRESS(c, mac[1])) == -262192);
+    const struct {
+        int16_t xy[3][2];
+        int64_t determinant;
+    } triangles[] = {
+        {{{1,2},{4,2},{1,6}},12},
+        {{{1,2},{1,6},{4,2}},-12},
+        {{{1,2},{4,8},{7,14}},0},
+        {{{-32768,-32768},{32767,-32768},{-32768,32767}},INT64_C(4294836225)},
+        {{{-32768,-32768},{-32768,32767},{32767,-32768}},-INT64_C(4294836225)}
+    };
+    for (unsigned i = 0; i < sizeof(triangles) / sizeof(triangles[0]); ++i) {
+        identity(c);
+        for (unsigned v = 0; v < 3; ++v) {
+            half(c, RP_GTE_ADDRESS(c, screen[v].x), (uint16_t)triangles[i].xy[v][0]);
+            half(c, RP_GTE_ADDRESS(c, screen[v].y), (uint16_t)triangles[i].xy[v][1]);
+        }
+        uint8_t saved_screen[12];
+        memcpy(saved_screen, rp_memory(c, RP_GTE_ADDRESS(c, screen), 12), 12);
+        c->vfpu_s330_bits = UINT32_MAX;
+        c->run_gpr[9] = 0xA5A5A5A5;
+        rp_w32(c, RP_GTE_ADDRESS(c, flags_shadow), 0x87654321);
+        rp_pops_gte_nclip(c);
+        assert(rp_u32(c, RP_GTE_ADDRESS(c, mac[0])) == (uint32_t)triangles[i].determinant);
+        assert(c->run_lo == (uint32_t)triangles[i].determinant);
+        assert(c->run_hi == (uint32_t)((uint64_t)triangles[i].determinant >> 32));
+        assert(c->run_gpr[4] == c->run_lo && c->run_gpr[28] == c->gp);
+        assert(c->run_gpr[9] == 0xA5A5A5A5);
+        assert(c->vfpu_s330_bits == 0);
+        assert(rp_u32(c, RP_GTE_ADDRESS(c, flags_shadow)) == 0x87654321);
+        assert(memcmp(saved_screen, rp_memory(c, RP_GTE_ADDRESS(c, screen), 12), 12) == 0);
+    }
     fclose(c->trace); free(c->regions[0].bytes); free(c);
-    puts("GTE RTPT: identity projection, FIFO widths, flag variants, clipping, reciprocal and MAC truncation passed.");
+    puts("GTE: RTPT projection/FIFO/flags and NCLIP orientation/overflow/HI-LO/preservation passed.");
     return 0;
 }

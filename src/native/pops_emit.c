@@ -889,6 +889,12 @@ uint32_t rp_emit_record(rp_context *c, rp_pops_category category, uint32_t recor
     if (category == RP_CAT_GTE) {
         const uint32_t command = rp_u32(c, RP_GTE_RECORD_ADDRESS(record, command));
         rp_event(c, "GTE_compile", "original_command", record, command);
+        if ((command & 63) == RP_GTE_NCLIP) {
+            /* +0x71E8 selects last_slot=0: higher temporaries remain live. */
+            out = rp_emit_flush_registers(c, out, 0);
+            rp_event(c, "GTE_compile", "selected_NCLIP_helper", record, RP_GTE_NCLIP_HELPER);
+            return rp_emit_jump_delay(c, out, UINT32_C(0x30000000) + RP_GTE_NCLIP_HELPER);
+        }
         if ((command & 63) != RP_GTE_RTPT)
             rp_block(c, "GTE_command_emitter_not_reconstructed", command & 63);
         const uint32_t helper = gte_flags_are_needed(c, record) ?

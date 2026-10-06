@@ -1,5 +1,12 @@
 # RePops progress
 
+## Current: NCLIP emission reaches AVSZ3
+
+`out/gte-nclip.FWFdKx/result/` now compiles RTPT and NCLIP before stopping on
+AVSZ3 (0x2D). The block still has not executed. NCLIP's signed determinant,
+64-bit accumulator, MAC0 wrap and flag clearing have focused native checks;
+its emitter preserves the higher temporary slots. See `gte_projection.md`.
+
 ## Current: RTPT emission reaches the next GTE command
 
 `out/gte-rtpt.eYMNNx/result/` selects and emits the original RTPT helpers,

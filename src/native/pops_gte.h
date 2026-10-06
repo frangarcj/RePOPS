@@ -31,12 +31,15 @@ typedef struct {
 
 #define RP_GTE_ADDRESS(c, member) RP_FIELD_ADDRESS((c)->gp, rp_core_gte_layout, member)
 enum {
+    RP_GTE_NCLIP = 0x06,
+    RP_GTE_NCLIP_HELPER = 0x10B34,
     RP_GTE_RTPT = 0x30,
     RP_GTE_RTPT_FLAGS_HELPER = 0x10B14,
     RP_GTE_RTPT_NO_FLAGS_HELPER = 0x10B24,
     RP_GTE_RECIPROCAL_ANCHOR = 0x09800000
 };
 void rp_pops_gte_rtpt(rp_context *, bool update_flags);
+void rp_pops_gte_nclip(rp_context *);
 
 _Static_assert(sizeof(rp_gte_vector_layout) == 8, "GTE input vector stride");
 _Static_assert(offsetof(rp_core_gte_layout, ir) == 0x20, "GTE IR registers");

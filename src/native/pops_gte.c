@@ -19,6 +19,33 @@ static int32_t clamp(int32_t value, int32_t low, int32_t high)
     return value < low ? low : value > high ? high : value;
 }
 
+/* +0x10B34..+0x10B74. The raw MSUB word at +0x10B60 uses A2 and T0;
+ * the historical text listing incorrectly prints a zero source. POPS clears
+ * S330 even when the determinant exceeds signed 32-bit MAC0. */
+void rp_pops_gte_nclip(rp_context *c)
+{
+    rp_function(c, RP_GTE_NCLIP_HELPER, "pops.GTE_NCLIP");
+    const int32_t x0 = signed_half(c, RP_GTE_ADDRESS(c, screen[0].x));
+    const int32_t y0 = signed_half(c, RP_GTE_ADDRESS(c, screen[0].y));
+    const int32_t x1 = signed_half(c, RP_GTE_ADDRESS(c, screen[1].x));
+    const int32_t y1 = signed_half(c, RP_GTE_ADDRESS(c, screen[1].y));
+    const int32_t x2 = signed_half(c, RP_GTE_ADDRESS(c, screen[2].x));
+    const int32_t y2 = signed_half(c, RP_GTE_ADDRESS(c, screen[2].y));
+    const int64_t determinant = (int64_t)(x1 - x0) * (y2 - y0) -
+                                (int64_t)(x2 - x0) * (y1 - y0);
+    c->run_lo = (uint32_t)determinant;
+    c->run_hi = (uint32_t)((uint64_t)determinant >> 32);
+    c->run_gpr[2] = (uint32_t)y1;
+    c->run_gpr[4] = c->run_lo;
+    c->run_gpr[5] = (uint32_t)y0;
+    c->run_gpr[6] = (uint32_t)(x2 - x0);
+    c->run_gpr[8] = (uint32_t)(y1 - y0);
+    c->run_gpr[28] = 0x10000;
+    c->vfpu_s330_bits = 0;
+    rp_w32(c, RP_GTE_ADDRESS(c, mac[0]), c->run_lo);
+    rp_event(c, "milestone", "GTE_NCLIP_area_computed", RP_GTE_NCLIP_HELPER, c->run_lo);
+}
+
 /* +0x10B14/+0x10B24 enter the shared three-vector projection loops.
  * Retain POPS's low-MAC-word truncation before translation, its reciprocal
  * table and halfword FIFO writes. This is not a replacement PS1 GTE formula.

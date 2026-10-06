@@ -71,3 +71,8 @@ AVSZ invocation is observed in that run. The execution adapter still needs
 the emitted VFPU scalar-transfer path; a standalone MFV-to-S330 probe produces
 the same exception and confirms that stopping before the instruction avoids
 the exception. This is not yet proof of the integrated failing word.
+
+The subsequent run `out/gte-s330.XYmeKl/result/` uses the scalar-transfer
+bridge and executes RTPT, NCLIP and AVSZ3. Their observed results and the
+configuration checks are recorded in `unicorn_s330_bridge.md`. AVSZ4 and the
+no-flags RTPT entry have only focused fixture coverage so far.

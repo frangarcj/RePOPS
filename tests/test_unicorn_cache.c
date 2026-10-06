@@ -1,6 +1,7 @@
 #include "../src/native/runtime.h"
 #include <assert.h>
 #include <stdlib.h>
+#include <string.h>
 
 int main(void)
 {
@@ -100,6 +101,29 @@ int main(void)
     rp_unicorn_run(c);
     assert(c->generated_cache_invalidations == flushes + 1);
     assert(rp_u32(c, c->gp + 0x24) == 11);
+    /* The generated FLAG transfer is Allegrex VFPU, not MIPS32 COP2.
+     * Bridge its bits before Unicorn raises an exception; do not patch it. */
+    const uint32_t scalar_words[] = {0x4868000F,0x48E9000F,0x486A000F,0x0C000A22,0};
+    const uint32_t scalar_starts[] = {start + 0x300, ram + 0x100};
+    for (unsigned cache = 0; cache < 2; ++cache) {
+        const uint32_t scalar = scalar_starts[cache];
+        for (unsigned i = 0; i < sizeof(scalar_words) / sizeof(scalar_words[0]); ++i)
+            rp_w32(c, scalar + i * 4, scalar_words[i]);
+        rp_w32(c, c->gp + (cache ? 0x1CC : 0x1D0), scalar + sizeof(scalar_words));
+        c->vfpu_s330_bits = 0x81234567;
+        c->run_gpr[9] = 0x7FC01234;
+        c->run_pc = scalar;
+        rp_unicorn_run(c);
+        assert(c->run_pc == scalar + 4 && c->run_gpr[8] == 0x81234567);
+        rp_unicorn_run(c);
+        assert(c->run_pc == scalar + 8 && c->vfpu_s330_bits == 0x7FC01234);
+        rp_unicorn_run(c);
+        assert(c->run_pc == scalar + 12 && c->run_gpr[10] == 0x7FC01234);
+        rp_unicorn_run(c);
+        assert(c->run_pc == 0x2888);
+        for (unsigned i = 0; i < sizeof(scalar_words) / sizeof(scalar_words[0]); ++i)
+            assert(rp_u32(c, scalar + i * 4) == scalar_words[i]);
+    }
     const char *iterations_text = getenv("REPOPS_BENCH_REENTRIES");
     const unsigned iterations = iterations_text ? (unsigned)strtoul(iterations_text, NULL, 10) : 0;
     const uint64_t before = c->generated_cache_invalidations;
@@ -111,8 +135,19 @@ int main(void)
     assert(c->generated_cache_invalidations - before == (always_flush ? iterations : 0));
     if (iterations) printf("Reentries=%u invalidations=%llu\n", iterations,
                           (unsigned long long)(c->generated_cache_invalidations - before));
+    const uint32_t delayed = start + 0x380;
+    rp_w32(c, delayed, 0x08000000 | ((delayed + 16) >> 2));
+    rp_w32(c, delayed + 4, 0x4868000F);
+    rp_w32(c, c->gp + 0x1D0, delayed + 20);
+    c->run_pc = delayed;
+    if (setjmp(c->stop) == 0) {
+        rp_unicorn_run(c);
+        assert(!"VFPU delay slot silently lost its branch");
+    }
+    assert(c->stop_address == delayed + 4);
+    assert(strcmp(c->stop_kind, "unicorn_S330_transfer_in_delay_slot_not_supported") == 0);
     rp_unicorn_close(c);
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[2].bytes); free(c);
-    puts("Unicorn cache: exits, delay slots, reuse, native/alias/generated patches passed.");
+    puts("Unicorn cache: exits, reuse, patches and S330 bit transfers; unsupported delay slot refused.");
     return 0;
 }

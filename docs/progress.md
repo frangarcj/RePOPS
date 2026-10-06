@@ -1,5 +1,23 @@
 # RePops progress
 
+## Current: projected geometry runs through the scalar VFPU bridge
+
+`out/gte-s330.XYmeKl/result/` executes RTPT, reads its S330 flag bits, computes
+NCLIP area 77 and AVSZ3 ordering depth 1394. It reaches GTE command 0x13 in the
+next compilation: 39,470,320 observations and 40,359 transfers. The game has
+not booted and no frame is rendered.
+
+The user-requested Unicorn configuration probe tested all 16 exposed MIPS32
+models with CU2 disabled/enabled. None implements the MFV/MTV S330 words.
+The adapter handles only these raw-bit transfers without changing emitted
+code; unsupported delay slots remain explicit. See `unicorn_s330_bridge.md`.
+GTE, emitter and Unicorn focused checks pass. Caffeinate PID 48162 was verified
+active with power-management assertions; it was not duplicated.
+
+POPS ledger: 80 complete, 77 partial. The unchanged historical denominator
+still matches 66 complete and 54 partial out of 536 (12.3% / 22.4% combined).
+New GTE starts are absent as separate entries there and do not inflate it.
+
 ## Current: geometry block executes RTPT and exposes a bridge exception
 
 AVSZ3/4 emission completes the previously blocked compilation. In

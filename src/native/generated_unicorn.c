@@ -15,6 +15,8 @@
 #define RAM_CODE_END RP_GENERATED_RAM_END
 #define FAST_HELPERS UINT32_C(0x07000000)
 #define READ_WRITE (UC_PROT_READ | UC_PROT_WRITE)
+#define MFV_S330 UINT32_C(0x4860000F)
+#define MTV_S330 UINT32_C(0x48E0000F)
 
 typedef struct generated_engine {
     uc_engine *uc;
@@ -25,7 +27,29 @@ typedef struct generated_engine {
     uint64_t outside_published_code;
     uint64_t synchronized_revision;
     bool synchronized, always_flush;
+    const uint8_t *bios_code, *ram_code;
+    uint32_t previous_pc, scalar_pc, scalar_word;
+    bool scalar_delay_slot;
 } generated_engine;
+
+static const uint8_t *generated_bytes(const generated_engine *engine, uint32_t address)
+{
+    return address >= CODE_BEGIN ? engine->bios_code + (address - CODE_BEGIN) :
+                                  engine->ram_code + (address - RAM_CODE_BEGIN);
+}
+
+static uint32_t little_word(const uint8_t *p)
+{
+    return p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+static bool has_delay_slot(uint32_t word)
+{
+    const unsigned op = word >> 26;
+    return (op == 0 && ((word & 63) == 8 || (word & 63) == 9)) ||
+           (op >= 1 && op <= 7) || (op >= 20 && op <= 23) ||
+           (op >= 16 && op <= 19 && ((word >> 21) & 31) == 8);
+}
 
 static void checked(rp_context *c, uc_err error, uint32_t address)
 {
@@ -47,6 +71,20 @@ static void observe_generated(uc_engine *uc, uint64_t address, uint32_t size, vo
     }
     /* These are hook observations, not a promise of retired-instruction counts. */
     ++engine->context->generated_instructions;
+    const uint8_t *instruction = generated_bytes(engine, (uint32_t)address);
+    if (instruction[3] == 0x48) {
+        const uint32_t word = little_word(instruction);
+        const uint32_t operation = word & UINT32_C(0xFFE0FFFF);
+        if (operation == MFV_S330 || operation == MTV_S330) {
+            engine->scalar_pc = (uint32_t)address;
+            engine->scalar_word = word;
+            engine->scalar_delay_slot = engine->previous_pc == address - 4 &&
+                has_delay_slot(little_word(generated_bytes(engine, engine->previous_pc)));
+            uc_emu_stop(uc);
+            return;
+        }
+    }
+    engine->previous_pc = (uint32_t)address;
 }
 
 static void map_region(rp_context *c, uc_engine *uc, uint32_t base, uint32_t size, void *bytes)
@@ -95,6 +133,8 @@ void rp_unicorn_open(rp_context *c)
             map_region(c, engine->uc, region->base | 0x40000000, region->size, region->bytes);
     }
     map_region(c, engine->uc, 0x10000, sizeof(c->scratchpad), c->scratchpad);
+    engine->bios_code = rp_memory(c, CODE_BEGIN, CODE_END - CODE_BEGIN);
+    engine->ram_code = rp_memory(c, RAM_CODE_BEGIN, RAM_CODE_END - RAM_CODE_BEGIN);
     /* POPS eventually specializes hot guest-memory callsites. Give those
      * rehosted callsites direct aliases so long BIOS copy loops stay inside
      * Unicorn instead of round-tripping through C for every byte. */
@@ -158,6 +198,9 @@ void rp_unicorn_run(rp_context *c)
     engine->published_end = rp_u32(c, RP_CORE_CACHE_ADDRESS(c, bios_code_cursor));
     engine->ram_published_end = rp_u32(c, RP_CORE_CACHE_ADDRESS(c, ram_code_cursor));
     engine->outside_published_code = 0;
+    engine->previous_pc = 0;
+    engine->scalar_pc = 0;
+    engine->scalar_delay_slot = false;
     if (!((c->run_pc >= CODE_BEGIN && c->run_pc < engine->published_end) ||
           (c->run_pc >= RAM_CODE_BEGIN && c->run_pc < engine->ram_published_end)))
         rp_block(c, "unicorn_entry_outside_generated_cache", c->run_pc);
@@ -192,6 +235,28 @@ void rp_unicorn_run(rp_context *c)
     checked(c, uc_reg_read(uc, UC_MIPS_REG_HI, &c->run_hi), c->run_pc);
     checked(c, uc_reg_read(uc, UC_MIPS_REG_LO, &c->run_lo), c->run_pc);
 
+    /* Only scalar bit transfers used for POPS's GTE FLAG storage are bridged.
+     * Stop before COP2 executes; applying this after a CPU exception would
+     * retain Unicorn's exception state. Original generated words stay intact. */
+    if (engine->scalar_pc) {
+        if (engine->scalar_delay_slot)
+            rp_block(c, "unicorn_S330_transfer_in_delay_slot_not_supported", engine->scalar_pc);
+        checked(c, result, engine->scalar_pc);
+        if (c->run_pc != engine->scalar_pc)
+            rp_block(c, "unicorn_S330_stop_PC_mismatch", c->run_pc);
+        const unsigned reg = (engine->scalar_word >> 16) & 31;
+        const bool read = (engine->scalar_word & UINT32_C(0xFFE0FFFF)) == MFV_S330;
+        if (read) {
+            if (reg) c->run_gpr[reg] = c->vfpu_s330_bits;
+        } else {
+            c->vfpu_s330_bits = reg ? c->run_gpr[reg] : 0;
+        }
+        rp_event(c, "execution_adapter", read ? "MFV_S330_bits" : "MTV_S330_bits",
+                 engine->scalar_pc, c->vfpu_s330_bits);
+        c->run_pc = engine->scalar_pc + 4;
+        c->run_next_pc = c->run_pc + 4;
+        return;
+    }
     if (engine->outside_published_code)
         rp_block(c, "unicorn_fetch_outside_published_code", (uint32_t)engine->outside_published_code);
     if ((result == UC_ERR_OK || result == UC_ERR_FETCH_PROT) && c->run_pc < c->regions[0].size) {

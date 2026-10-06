@@ -1,5 +1,13 @@
 # RePops progress
 
+## Current: geometry block executes RTPT and exposes a bridge exception
+
+AVSZ3/4 emission completes the previously blocked compilation. In
+`out/gte-avsz.qi8QQM/result/`, RTPT runs in native C and projects three vertices.
+Resumption raises Unicorn exception 21: 39,470,240 observations and 40,358
+transfers. NCLIP/AVSZ have not run in this trace. The emitted VFPU scalar
+transfer is the next adapter investigation; no frame or game boot is claimed.
+
 ## Current: NCLIP emission reaches AVSZ3
 
 `out/gte-nclip.FWFdKx/result/` now compiles RTPT and NCLIP before stopping on

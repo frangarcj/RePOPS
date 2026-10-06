@@ -118,7 +118,38 @@ int main(void)
         assert(rp_u32(c, RP_GTE_ADDRESS(c, flags_shadow)) == 0x87654321);
         assert(memcmp(saved_screen, rp_memory(c, RP_GTE_ADDRESS(c, screen), 12), 12) == 0);
     }
+    const struct {
+        bool four;
+        uint16_t depths[4];
+        int16_t scale;
+        uint16_t expected;
+        uint32_t lo, hi, flags;
+    } averages[] = {
+        {false,{7,1,2,3},4096,6,24576,0,0},
+        {true, {7,1,2,3},4096,13,53248,0,0},
+        {false,{7,1,2,3},-4096,0,0xFFFFA000,UINT32_MAX,0x40000},
+        {false,{0,30000,30000,30000},4096,65535,368640000,0,0x40000},
+        {false,{65535,65535,65535,65535},32767,65535,0x7FFB8003,1,0x40000},
+        {true, {65535,65535,65535,65535},32767,0,0xFFFA0004,1,0x40000},
+        {true, {0,0,0,0},32767,0,0,0,0}
+    };
+    for (unsigned i = 0; i < sizeof(averages) / sizeof(averages[0]); ++i) {
+        identity(c);
+        for (unsigned v = 0; v < 4; ++v)
+            half(c, RP_GTE_ADDRESS(c, depth[v].value), averages[i].depths[v]);
+        half(c, RP_GTE_ADDRESS(c, depth_scale3), (uint16_t)averages[i].scale);
+        half(c, RP_GTE_ADDRESS(c, depth_scale4), (uint16_t)averages[i].scale);
+        half(c, RP_GTE_ADDRESS(c, ordering_depth_padding), 0xCAFE);
+        c->vfpu_s330_bits = UINT32_MAX;
+        c->run_gpr[8] = 0x12345678;
+        rp_pops_gte_avsz(c, averages[i].four);
+        assert(rp_u32(c, RP_GTE_ADDRESS(c, ordering_depth)) == (0xCAFE0000u | averages[i].expected));
+        assert(rp_u32(c, RP_GTE_ADDRESS(c, mac[0])) == averages[i].lo);
+        assert(c->run_lo == averages[i].lo && c->run_hi == averages[i].hi);
+        assert(c->vfpu_s330_bits == averages[i].flags);
+        assert(c->run_gpr[8] == 0x12345678);
+    }
     fclose(c->trace); free(c->regions[0].bytes); free(c);
-    puts("GTE: RTPT projection/FIFO/flags and NCLIP orientation/overflow/HI-LO/preservation passed.");
+    puts("GTE: RTPT, NCLIP and AVSZ3/4 depths, saturation, MAC truncation and preserved state passed.");
     return 0;
 }

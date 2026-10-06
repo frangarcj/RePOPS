@@ -889,6 +889,15 @@ uint32_t rp_emit_record(rp_context *c, rp_pops_category category, uint32_t recor
     if (category == RP_CAT_GTE) {
         const uint32_t command = rp_u32(c, RP_GTE_RECORD_ADDRESS(record, command));
         rp_event(c, "GTE_compile", "original_command", record, command);
+        if ((command & 63) == RP_GTE_AVSZ3 || (command & 63) == RP_GTE_AVSZ4) {
+            const uint32_t helper = (command & 63) == RP_GTE_AVSZ3 ?
+                RP_GTE_AVSZ3_HELPER : RP_GTE_AVSZ4_HELPER;
+            /* +0x7154/+0x716C flush HI/LO only, leaving GPR slots alive. */
+            out = rp_emit_flush_hilo(c, out);
+            rp_w8(c, RP_EMIT_ADDRESS(c, hilo_cached), 0);
+            rp_event(c, "GTE_compile", "selected_AVSZ_helper", record, helper);
+            return rp_emit_jump_delay(c, out, UINT32_C(0x30000000) + helper);
+        }
         if ((command & 63) == RP_GTE_NCLIP) {
             /* +0x71E8 selects last_slot=0: higher temporaries remain live. */
             out = rp_emit_flush_registers(c, out, 0);

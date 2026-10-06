@@ -8,7 +8,8 @@ typedef struct { int16_t x, y; } rp_gte_screen_layout;
 typedef struct { uint16_t value, padding; } rp_gte_depth_layout;
 typedef struct {
     rp_gte_vector_layout vectors[3];
-    uint8_t unknown_18[8];
+    uint8_t unknown_18[4];
+    uint16_t ordering_depth, ordering_depth_padding;
     int32_t ir[4];
     rp_gte_screen_layout screen[3];
     uint32_t screen_alias;
@@ -25,7 +26,10 @@ typedef struct {
     int16_t depth_cue_slope;
     uint16_t unknown_ee;
     int32_t depth_cue_intercept;
-    uint8_t unknown_f4[8];
+    int16_t depth_scale3;
+    uint16_t depth_scale3_padding;
+    int16_t depth_scale4;
+    uint16_t depth_scale4_padding;
     uint32_t flags_shadow;
 } rp_core_gte_layout;
 
@@ -33,6 +37,10 @@ typedef struct {
 enum {
     RP_GTE_NCLIP = 0x06,
     RP_GTE_NCLIP_HELPER = 0x10B34,
+    RP_GTE_AVSZ3 = 0x2D,
+    RP_GTE_AVSZ4 = 0x2E,
+    RP_GTE_AVSZ3_HELPER = 0x10BF0,
+    RP_GTE_AVSZ4_HELPER = 0x10C38,
     RP_GTE_RTPT = 0x30,
     RP_GTE_RTPT_FLAGS_HELPER = 0x10B14,
     RP_GTE_RTPT_NO_FLAGS_HELPER = 0x10B24,
@@ -40,8 +48,10 @@ enum {
 };
 void rp_pops_gte_rtpt(rp_context *, bool update_flags);
 void rp_pops_gte_nclip(rp_context *);
+void rp_pops_gte_avsz(rp_context *, bool four_vertices);
 
 _Static_assert(sizeof(rp_gte_vector_layout) == 8, "GTE input vector stride");
+_Static_assert(offsetof(rp_core_gte_layout, ordering_depth) == 0x1C, "GTE ordering depth");
 _Static_assert(offsetof(rp_core_gte_layout, ir) == 0x20, "GTE IR registers");
 _Static_assert(offsetof(rp_core_gte_layout, screen) == 0x30, "GTE screen FIFO");
 _Static_assert(offsetof(rp_core_gte_layout, depth) == 0x40, "GTE depth FIFO");
@@ -50,5 +60,7 @@ _Static_assert(offsetof(rp_core_gte_layout, rotation) == 0x80, "GTE rotation mat
 _Static_assert(offsetof(rp_core_gte_layout, translation) == 0x94, "GTE translation vector");
 _Static_assert(offsetof(rp_core_gte_layout, screen_offset) == 0xE0, "GTE screen offsets");
 _Static_assert(offsetof(rp_core_gte_layout, depth_cue_slope) == 0xEC, "GTE depth cue slope");
+_Static_assert(offsetof(rp_core_gte_layout, depth_scale3) == 0xF4, "GTE three-depth scale");
+_Static_assert(offsetof(rp_core_gte_layout, depth_scale4) == 0xF8, "GTE four-depth scale");
 _Static_assert(sizeof(rp_core_gte_layout) == 0x100, "GTE register prefix");
 #endif

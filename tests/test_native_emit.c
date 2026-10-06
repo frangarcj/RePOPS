@@ -254,7 +254,22 @@ int main(void)
     assert(rp_u32(c, nclip) == (0x30000000u + RP_GTE_NCLIP_HELPER) >> 2);
     assert(!*(uint8_t *)rp_memory(c, RP_EMIT_ADDRESS(c, temporary_guest[0]), 1));
     assert(*(uint8_t *)rp_memory(c, RP_EMIT_ADDRESS(c, temporary_guest[1]), 1) == 22);
+    for (unsigned four = 0; four < 2; ++four) {
+        rp_emit_init_registers(c, cursor);
+        rp_w8(c, RP_EMIT_ADDRESS(c, temporary_guest[0]), 21);
+        rp_w8(c, RP_EMIT_ADDRESS(c, temporary_guest[1]), 22);
+        rp_w8(c, RP_EMIT_ADDRESS(c, hilo_cached), 3);
+        rp_w32(c, RP_GTE_RECORD_ADDRESS(record, command), four ? 0x4B68002E : 0x4B58002D);
+        const uint32_t first = cursor;
+        const uint32_t helper = four ? RP_GTE_AVSZ4_HELPER : RP_GTE_AVSZ3_HELPER;
+        cursor = rp_emit_record(c, RP_CAT_GTE, record, cursor, 6);
+        assert(cursor == first + 8);
+        assert(rp_u32(c, first) == (0x30000000u + helper) >> 2);
+        assert(!*(uint8_t *)rp_memory(c, RP_EMIT_ADDRESS(c, hilo_cached), 1));
+        assert(*(uint8_t *)rp_memory(c, RP_EMIT_ADDRESS(c, temporary_guest[0]), 1) == 21);
+        assert(*(uint8_t *)rp_memory(c, RP_EMIT_ADDRESS(c, temporary_guest[1]), 1) == 22);
+    }
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[2].bytes); free(c);
-    puts("Emitter smoke: COP memory, RTPT flag liveness and NCLIP partial register flush passed.");
+    puts("Emitter smoke: COP memory, RTPT/NCLIP/AVSZ original calls and selective flush passed.");
     return 0;
 }

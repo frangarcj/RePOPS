@@ -11,7 +11,8 @@ typedef struct {
     uint32_t saved_register_slots[8];
     uint8_t unknown_1a0[0x740 - 0x1A0];
     uint32_t block_begin;
-    uint8_t unknown_744[0x754 - 0x744];
+    uint8_t unknown_744[0x751 - 0x744];
+    uint8_t hilo_cached, hilo_dirty, unknown_753;
     uint8_t temporary_dirty[12], temporary_guest[12], temporary_host[12];
     int8_t register_location[32];
     uint8_t unknown_798[0xB48 - 0x798];
@@ -20,6 +21,8 @@ typedef struct {
 } rp_core_emit_layout;
 #define RP_EMIT_ADDRESS(c, member) RP_FIELD_ADDRESS((c)->gp, rp_core_emit_layout, member)
 _Static_assert(offsetof(rp_core_emit_layout, temporary_guest) == 0x760, "emitter temporary owners");
+_Static_assert(offsetof(rp_core_emit_layout, hilo_cached) == 0x751, "emitter HI/LO cache");
+_Static_assert(offsetof(rp_core_emit_layout, hilo_dirty) == 0x752, "emitter HI/LO dirty mask");
 _Static_assert(offsetof(rp_core_emit_layout, register_location) == 0x778, "emitter register locations");
 _Static_assert(offsetof(rp_core_emit_layout, known_register_mask) == 0xB58, "emitter known mask");
 _Static_assert(offsetof(rp_core_emit_layout, last_analysis_record) == 0xB4C, "analysis record ceiling");

@@ -46,3 +46,28 @@ slot one live. These do not establish hardware or full-emulator equivalence.
 (command 0x2D) in the same not-yet-published block. Executed-code counts remain
 39,470,213 observations and 40,357 transfers; neither new helper has been
 observed on the integrated execution path yet.
+
+## AVSZ3 and AVSZ4
+
+Entries +0x10BF0 and +0x10C38 sum unsigned depth halfwords, multiply by their
+signed scale register and retain the full product in host HI/LO. POPS writes
+MAC0 from the low word and shifts that truncated signed word by 12 before
+clamping OTZ to 0..65535. OTZ is a halfword write; its padding is preserved.
+S330 receives bit 18 when the unclamped value is outside that range.
+
+Their emitters (+0x7154/+0x716C) flush dirty HI/LO and invalidate its cached
+state without discarding guest GPR temporary slots. The corresponding state
+fields are now named in `rp_core_emit_layout`.
+
+Seven native vectors exercise three/four depths, negative scale, saturation,
+zero and low-word wrap, including the four-depth product whose signed low
+word becomes negative. Emitter checks verify both original JAL destinations,
+HI/LO invalidation and preservation of the higher register slots.
+
+`out/gte-avsz.qi8QQM/result/` publishes the block and executes the native RTPT
+with-flags helper once. It reaches 39,470,240 observations and 40,358 transfers,
+then stops with Unicorn exception 21 on resuming generated code. No NCLIP or
+AVSZ invocation is observed in that run. The execution adapter still needs
+the emitted VFPU scalar-transfer path; a standalone MFV-to-S330 probe produces
+the same exception and confirms that stopping before the instruction avoids
+the exception. This is not yet proof of the integrated failing word.

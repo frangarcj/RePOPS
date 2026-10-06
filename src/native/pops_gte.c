@@ -46,6 +46,33 @@ void rp_pops_gte_nclip(rp_context *c)
     rp_event(c, "milestone", "GTE_NCLIP_area_computed", RP_GTE_NCLIP_HELPER, c->run_lo);
 }
 
+/* +0x10BF0/+0x10C38. Preserve the original MFLO-before-SRA truncation and
+ * halfword OTZ store, including the high padding halfword left untouched. */
+void rp_pops_gte_avsz(rp_context *c, bool four_vertices)
+{
+    const uint32_t helper = four_vertices ? RP_GTE_AVSZ4_HELPER : RP_GTE_AVSZ3_HELPER;
+    rp_function(c, helper, four_vertices ? "pops.GTE_AVSZ4" : "pops.GTE_AVSZ3");
+    uint32_t sum = 0;
+    for (unsigned i = four_vertices ? 0 : 1; i < 4; ++i)
+        sum += read_half(c, RP_GTE_ADDRESS(c, depth[i].value));
+    const int32_t scale = signed_half(c, four_vertices ?
+        RP_GTE_ADDRESS(c, depth_scale4) : RP_GTE_ADDRESS(c, depth_scale3));
+    const int64_t product = (int64_t)sum * scale;
+    c->run_lo = (uint32_t)product;
+    c->run_hi = (uint32_t)((uint64_t)product >> 32);
+    const int32_t scaled = (int32_t)c->run_lo >> 12;
+    const uint32_t flags = (uint32_t)((uint32_t)scaled > 0xFFFF) << 18;
+    const uint16_t depth = (uint16_t)clamp(scaled, 0, 0xFFFF);
+    rp_w32(c, RP_GTE_ADDRESS(c, mac[0]), c->run_lo);
+    write_half(c, RP_GTE_ADDRESS(c, ordering_depth), depth);
+    c->vfpu_s330_bits = flags;
+    c->run_gpr[2] = 0xFFFF;
+    c->run_gpr[4] = depth;
+    c->run_gpr[5] = flags;
+    c->run_gpr[6] = read_half(c, RP_GTE_ADDRESS(c, depth[3].value));
+    rp_event(c, "milestone", "GTE_ordering_depth_computed", helper, depth);
+}
+
 /* +0x10B14/+0x10B24 enter the shared three-vector projection loops.
  * Retain POPS's low-MAC-word truncation before translation, its reciprocal
  * table and halfword FIFO writes. This is not a replacement PS1 GTE formula.

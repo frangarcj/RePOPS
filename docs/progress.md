@@ -4,6 +4,18 @@ Historical native runs retain `result/retained-trace-result.json` instead of
 their full trace once superseded. Keep the latest two traces and the GE-preview
 provenance source; decompilers and focused verification outputs are not pruned.
 
+## Current: MDEC reset/status pass; DMA input is next
+
+`out/mdec-ports.KvdIhA/result/` executes the original MDEC reset and reads its
+status, then latches command 0x40000001 and reaches DMA callback +0xF54C.
+It records 209,054,869 generated-instruction observations and 2,466,732
+compiled transfers. Named stream state and port contract tests pass; see
+`mdec_ports.md`. No video decoding or rendered framebuffer is demonstrated.
+
+The added card trace markers show slot 0 and slot 1 present with command
+0x52 received. No completed sector-read marker is observed in this run;
+full sector-read behavior remains covered by the focused fixture.
+
 ## Current: card protocol no longer blocks; next access is MDEC control
 
 `out/card-serial.cKTsSK/result/` reaches the write at 0x1F801824, dispatched

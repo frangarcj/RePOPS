@@ -3,6 +3,7 @@
 #include "pops_cdrom.h"
 #include "pops_emit.h"
 #include "pops_serial.h"
+#include "pops_mdec.h"
 #include "../me_startup.h"
 #include <string.h>
 #include <time.h>
@@ -214,15 +215,6 @@ void rp_pops_install_dma(rp_context *c, uint32_t channel, uint32_t handler)
     rp_pops_map_io(c, 0x1F801080 + channel * 16, 8, 0x9158, 0);
     rp_pops_map_io(c, 0x1F801088 + channel * 16, 8, 0x9158, 0x92A4);
 }
-static void mdec_reset(rp_context *c)
-{
-    rp_function(c, 0x1B678, "pops.mdec_reset_entries");
-    rp_pops_install_dma(c, 0, 0xF54C);
-    rp_pops_install_dma(c, 1, 0xF654);
-    rp_pops_map_io(c, 0x1F801820, 8, 0xF6DC, 0xF70C);
-    memcpy(rp_memory(c, c->gp + 0x400, 0x1C), rp_module_memory(c, 0xD499C, 0x1C), 0x1C);
-    rp_w32(c, c->gp + 0x648, 0xE8F8);
-}
 static void irq_reset(rp_context *c)
 {
     rp_function(c, 0x1A2E0, "pops.interrupt_handler_entries");
@@ -424,7 +416,7 @@ void rp_pops_initialize_core(rp_context *c)
     cpu_reset(c);
     io_reset(c);
     dma_reset(c);
-    mdec_reset(c);
+    rp_pops_mdec_reset(c);
     irq_reset(c);
     disc_state_reset(c);
     serial_reset(c);

@@ -59,6 +59,7 @@ void rp_unicorn_open(rp_context *c)
     checked(c, uc_ctl_set_cpu_model(engine->uc, UC_CPU_MIPS32_24KF), 0);
     const uint64_t helpers[] = {0x89A0, 0x2888, 0x91BC, 0x94C4, 0x96AC, 0x1A80, 0x1A68, 0x2450, 0x2468, 0x7F00, 0x2648,
                                0x1A90, 0x1AA8, 0x1AC8, 0x1AE4, 0x1DD0,
+                               0x1DE8, 0x1E00, 0x1E20, 0x1E40,
                                0x2110, 0x2128, 0x2140, 0x2160, 0x2180,
                                0x267C, 0x2694, 0x26B4, 0x26D4, 0x2878, 0x2918, 0x98C4, 0x9C60, 0x85F4};
     checked(c, uc_ctl_exits_enable(engine->uc), 0);
@@ -99,7 +100,9 @@ void rp_unicorn_open(rp_context *c)
         {RP_FAST_RAM_LBU, 0x90820000, 0x2468},
         {RP_FAST_RAM_LW, 0x8C820000, 0x2128},
         {RP_FAST_RAM_SW, 0xAC850000, 0x2450},
-        {RP_FAST_RAM_SH, 0xA4850000, 0x2110}
+        {RP_FAST_RAM_SH, 0xA4850000, 0x2110},
+        {RP_FAST_RAM_LH, 0x84820000, 0x1DE8},
+        {RP_FAST_RAM_LHU, 0x94820000, 0x267C}
     };
     for (unsigned i = 0; i < sizeof(ram_helpers) / sizeof(ram_helpers[0]); ++i) {
         const uint32_t code[] = {

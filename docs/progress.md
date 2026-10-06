@@ -1,5 +1,23 @@
 # RePops progress
 
+## Current: signed reads reach the CD-ROM write boundary
+
+LH +0x1DE8 and its specialized entrances now share the existing memory routing
+with explicit sign extension and service width. Guarded LH/LHU RAM helpers
+avoid repeated C crossings without allowing I/O addresses through the fast path.
+The full POPS ledger now has 66 complete and 61 partial entries; LH is outside
+the historical inventory, so the comparable 11.2%/19.8% figures do not change.
+
+`out/half-fast-vertical.HU29bd/result/` stops at byte-store helper +0x1C70 when
+attempting the CD-ROM port 0x1F801800. The existing handler table selects writer
++0xD1B0, not yet reconstructed. It records 38,128,915 generated-cache hook
+observations and 3,203 transfers. No game boot is claimed.
+
+The baseline and guarded runs match all 58,245 selected device/audio/event
+effects and the final guest PC. Guarded reads remove 54,406 helper crossings
+(41.88%), not a measured wall-time percentage. Native SPU/ME and Unicorn smoke
+checks pass. See `cpu_signed_halfword.md` and its comparison artifact.
+
 ## Latest: enabled reverb returns to CPU execution
 
 The +0x5AC boundary is recovered in the shared enabled/disabled reverb path.

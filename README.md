@@ -66,11 +66,13 @@ second generated-code cache, returning to BIOS helpers and programming the
 interrupt registers. It now passes RAM decompression, timer setup, RAM exception
 vectors and SPU register reads/writes. The reached active ME callback now processes
 voices and idle postmix and returns packed samples. A cooperative host step
-also lets it progress during SPUSTAT polling. The current completed run stops
-at `ME_enabled_reverb_write_path_not_reconstructed`, `+0x5AC`, after a later
-SPUCNT=C080 write. It records 26,736,885 generated-cache instruction observations,
-2,615 entry transfers and 1,056 active callback samples (all zero in this startup
-path). A separate synthetic fixture produces a nonzero packed sample.
+also lets it progress during SPUSTAT polling. Enabled reverb now processes its
+ordered RAM writes; signed halfword readers let CPU initialization continue to
+the CD-ROM port. The current run stops at byte-store boundary `+0x1C70` for
+0x1F801800, before CD writer +0xD1B0 is reconstructed. It records 38,128,915
+generated-cache observations and 3,203 entry transfers. Guarded LH/LHU RAM
+reads remove 54,406 C crossings while preserving the selected device/audio
+event trace. A separate synthetic fixture produces a nonzero packed sample.
 These are not function-coverage measurements or proof that FFVI booted.
 No rendered game or audible music has been demonstrated.
 
@@ -79,7 +81,9 @@ used `REPOPS_DIAGNOSTIC_SKIP_UI=1 REPOPS_TIMEOUT=120 ./run_ffvi.sh`. The timeout
 setting changes the host cap, not the emulated clock. New native code uses the
 recovered names in `pops_state.h`; older anonymous fields are migrated as their
 functions are revisited. See [idle postmix](docs/me_idle_postmix.md) and
-[ME polling progress](docs/me_poll_scheduling.md).
+[ME polling progress](docs/me_poll_scheduling.md),
+[enabled reverb](docs/me_enabled_reverb.md), and
+[signed reads and their guarded execution](docs/cpu_signed_halfword.md).
 
 See [the current Unicorn integration](docs/unicorn_execution.md),
 [the earlier generated-execution experiment](docs/generated_code_execution.md),

@@ -186,12 +186,16 @@ static void native_helper(rp_context *c)
     }
     case 0x2128: case 0x2140: case 0x2160: case 0x2180:
     case 0x267C: case 0x2694: case 0x26B4: case 0x26D4:
+    case 0x1DE8: case 0x1E00: case 0x1E20: case 0x1E40:
     case 0x1AA8: case 0x1AC8: case 0x1AE4:
     case 0x1A90: {
         const bool word_read = c->run_pc >= 0x2128 && c->run_pc <= 0x2180;
-        const bool half_read = c->run_pc >= 0x267C && c->run_pc <= 0x26D4;
-        const uint32_t entry = word_read ? 0x2128 : half_read ? 0x267C : 0x1A90;
+        const bool signed_half_read = c->run_pc >= 0x1DE8 && c->run_pc <= 0x1E40;
+        const bool half_read = signed_half_read || (c->run_pc >= 0x267C && c->run_pc <= 0x26D4);
+        const uint32_t width = word_read ? 2 : signed_half_read ? 1 : half_read ? 5 : 0;
+        const uint32_t entry = word_read ? 0x2128 : signed_half_read ? 0x1DE8 : half_read ? 0x267C : 0x1A90;
         rp_function(c, entry, word_read ? "pops.dynamic_word_read" :
+                    signed_half_read ? "pops.dynamic_signed_halfword_read" :
                     half_read ? "pops.dynamic_unsigned_halfword_read" : "pops.dynamic_signed_byte_read");
         const uint32_t address = r[4], region = (address >> 23) & 63;
         if (word_read && (address & 3)) rp_block(c, "dynamic_word_read_unaligned", address);
@@ -201,11 +205,13 @@ static void native_helper(rp_context *c)
         if (!region) {
             if (word_read)
                 specialized = RP_FAST_RAM_LW;
+            else if (half_read)
+                specialized = signed_half_read ? RP_FAST_RAM_LH : RP_FAST_RAM_LHU;
             r[4] = (address & 0x1FFFFF) | 0x09800000;
             if (word_read) r[2] = rp_u32(c, r[4]);
             else if (half_read) {
                 const uint8_t *p = rp_memory(c, r[4], 2);
-                r[2] = p[0] | (uint32_t)p[1] << 8;
+                r[2] = rp_halfword_value(p[0] | (uint32_t)p[1] << 8, signed_half_read);
             }
             else {
                 const uint8_t byte = *(uint8_t *)rp_memory(c, r[4], 1);
@@ -213,12 +219,12 @@ static void native_helper(rp_context *c)
             }
         } else if (region == 63) {
             if (((address >> 10) & 0x1FFF) == 0) {
-                specialized = word_read ? 0x2140 : half_read ? 0x2694 : 0x1AA8;
+                specialized = word_read ? 0x2140 : signed_half_read ? 0x1E00 : half_read ? 0x2694 : 0x1AA8;
                 r[4] = (address & 0x3FF) | 0x13000;
                 if (word_read) r[2] = rp_u32(c, r[4]);
                 else if (half_read) {
                     const uint8_t *p = rp_memory(c, r[4], 2);
-                    r[2] = p[0] | (uint32_t)p[1] << 8;
+                    r[2] = rp_halfword_value(p[0] | (uint32_t)p[1] << 8, signed_half_read);
                 }
                 else {
                     const uint8_t byte = *(uint8_t *)rp_memory(c, r[4], 1);
@@ -226,14 +232,14 @@ static void native_helper(rp_context *c)
                 }
                 r[25] += 4;
             } else if ((address >> 19) == 0x17F8) {
-                specialized = word_read ? 0x2160 : half_read ? 0x26B4 : 0x1AC8;
+                specialized = word_read ? 0x2160 : signed_half_read ? 0x1E20 : half_read ? 0x26B4 : 0x1AC8;
                 const uint32_t offset = 0x53C20 + (address & 0x7FFFF);
                 if (word_read) {
                     r[2] = rp_module_u32(c, offset);
                     r[25] -= 3;
                 } else if (half_read) {
                     const uint8_t *p = rp_module_memory(c, offset, 2);
-                    r[2] = p[0] | (uint32_t)p[1] << 8;
+                    r[2] = rp_halfword_value(p[0] | (uint32_t)p[1] << 8, signed_half_read);
                     r[25] -= 1;
                 } else {
                     const uint8_t byte = *(uint8_t *)rp_module_memory(c, offset, 1);
@@ -250,7 +256,7 @@ static void native_helper(rp_context *c)
                 } else if (handler == 0x85F4) {
                     rp_core_set_downcount(c, r[25]);
                     rp_pops_me_service_due(c);
-                    r[2] = rp_pops_spu_read_register(c, address, word_read ? 2 : half_read ? 5 : 0);
+                    r[2] = rp_pops_spu_read_register(c, address, width);
                     r[25] = rp_core_downcount(c);
                 } else if (handler == 0x8A54) {
                     rp_function(c, 0x8A54, "pops.read_shadow_register");
@@ -258,7 +264,7 @@ static void native_helper(rp_context *c)
                     if (word_read) r[2] = rp_u32(c, shadow);
                     else if (half_read) {
                         const uint8_t *p = rp_memory(c, shadow, 2);
-                        r[2] = p[0] | (uint32_t)p[1] << 8;
+                        r[2] = rp_halfword_value(p[0] | (uint32_t)p[1] << 8, signed_half_read);
                     } else {
                         const uint8_t byte = *(uint8_t *)rp_memory(c, shadow, 1);
                         r[2] = byte < 128 ? byte : (uint32_t)((int32_t)byte - 256);
@@ -269,7 +275,7 @@ static void native_helper(rp_context *c)
             }
         } else {
             /* +0x1C68 -> +0x8ADC: no call-site specialization in this path. */
-            r[5] = word_read ? 2 : half_read ? 5 : 0;
+            r[5] = width;
             rp_core_set_downcount(c, r[25]);
             r[2] = rp_pops_constant_read(c, r[4], r[5]);
             r[25] = rp_core_downcount(c);

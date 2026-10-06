@@ -62,6 +62,20 @@ int main(void)
     c->run_pc = probe; c->run_gpr[4] = 0x1F801104;
     rp_unicorn_run(c);
     assert(c->run_pc == 0x2110 && c->run_gpr[4] == 0x1F801104);
+    /* Repeated RAM reads stay in the engine, but the same callsite must exit
+     * to the right C helper when its address changes to I/O. */
+    const uint32_t readers[] = {RP_FAST_RAM_LH, RP_FAST_RAM_LHU};
+    const uint32_t fallbacks[] = {0x1DE8, 0x267C};
+    const uint32_t values[] = {UINT32_C(0xFFFFBEEF), 0xBEEF};
+    for (unsigned i = 0; i < 2; ++i) {
+        rp_w32(c, probe, 0x0C000000 | (readers[i] >> 2));
+        c->run_pc = probe; c->run_gpr[4] = 0x80000120;
+        rp_unicorn_run(c);
+        assert(c->run_pc == 0x2888 && c->run_gpr[2] == values[i]);
+        c->run_pc = probe; c->run_gpr[4] = 0x1F801DAE;
+        rp_unicorn_run(c);
+        assert(c->run_pc == fallbacks[i] && c->run_gpr[4] == 0x1F801DAE);
+    }
     rp_unicorn_close(c);
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[2].bytes); free(c);
     puts("Unicorn cache: helper exits, delay slot, shared memory, FPR bits and native patch passed.");

@@ -80,6 +80,9 @@ int main(void)
     assert(RP_MIXER_ADDRESS(master_volume.right.level) == 0x09FF1342);
     assert(RP_MIXER_ADDRESS(reverb_parameters.comb_gain) == 0x09FF1356);
     assert(rp_capture_address(1, 5) == 0x49F406CA);
+    assert(rp_halfword_value(0x8001, true) == UINT32_C(0xFFFF8001));
+    assert(rp_halfword_value(0x8001, false) == 0x8001);
+    assert(rp_halfword_value(0x7FFF, true) == 0x7FFF);
     c->regions[2] = (rp_region){0x09F40000, 0xC0000, calloc(1, 0xC0000)};
     assert(c->regions[2].bytes);
     uint32_t output = 0xFFFFFFFF;

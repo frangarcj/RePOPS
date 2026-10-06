@@ -96,6 +96,12 @@ enum { RP_CAPTURE_SAMPLES = 512, RP_GUEST_SAMPLE_CYCLES = 0x300 };
 #define RP_SHARED_ADDRESS(member) RP_FIELD_ADDRESS(RP_ME_SHARED_BASE, rp_me_shared_layout, member)
 #define RP_MIXER_ADDRESS(member) RP_FIELD_ADDRESS(RP_ME_MIXER_BASE, rp_me_mixer_layout, member)
 
+static inline uint32_t rp_halfword_value(uint32_t value, bool sign_extend)
+{
+    value &= UINT32_C(0xFFFF);
+    return sign_extend ? (value ^ UINT32_C(0x8000)) - UINT32_C(0x8000) : value;
+}
+
 static inline uint32_t rp_core_downcount(rp_context *c)
 {
     return rp_u32(c, RP_CORE_CLOCK_ADDRESS(c, event_downcount));

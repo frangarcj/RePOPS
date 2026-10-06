@@ -11,7 +11,8 @@
 enum {
     RP_FAST_BIOS_LBU = 0x07000000, RP_FAST_RAM_SB = 0x07000040,
     RP_FAST_RAM_LBU = 0x07000080, RP_FAST_RAM_LW = 0x070000C0,
-    RP_FAST_RAM_SW = 0x07000100, RP_FAST_RAM_SH = 0x07000140
+    RP_FAST_RAM_SW = 0x07000100, RP_FAST_RAM_SH = 0x07000140,
+    RP_FAST_RAM_LH = 0x07000180, RP_FAST_RAM_LHU = 0x070001C0
 };
 typedef struct rp_region { uint32_t base, size; uint8_t *bytes; } rp_region;
 /* Recovered fields of the single-disc provider path, not a POPSMAN RAM image.

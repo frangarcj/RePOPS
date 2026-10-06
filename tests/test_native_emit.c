@@ -1,4 +1,5 @@
 #include "../src/native/pops_emit.h"
+#include "../src/native/pops_gte.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -221,7 +222,29 @@ int main(void)
     for (uint32_t at = cop_store; at < cursor; at += 4)
         store_call |= rp_u32(c, at) == 0x0C000914;
     assert(store_call);
+    /* RTPT selects one of the original shared routines according to flag
+     * liveness, and emits a call rather than inlining a replacement GTE. */
+    for (unsigned scenario = 0; scenario < 4; ++scenario) {
+        rp_emit_init_registers(c, cursor);
+        memset(rp_memory(c, record, 32), 0, 32);
+        const uint32_t next = record + sizeof(rp_gte_record_layout);
+        rp_w32(c, RP_EMIT_ADDRESS(c, last_analysis_record), scenario ? next : record);
+        rp_w32(c, RP_GTE_RECORD_ADDRESS(record, command), 0x4A280030);
+        rp_w8(c, RP_GTE_RECORD_ADDRESS(next, flags) + 1, 0x20);
+        if (scenario == 2) {
+            rp_w8(c, RP_GTE_RECORD_ADDRESS(next, destination), 1);
+            rp_w8(c, RP_COP_RECORD_ADDRESS(next, cop_register), 63);
+        } else if (scenario == 3) {
+            rp_w8(c, RP_GTE_RECORD_ADDRESS(next, flags), RP_RECORD_EXIT);
+        }
+        const uint32_t first = cursor;
+        cursor = rp_emit_record(c, RP_CAT_GTE, record, cursor, 23);
+        const uint32_t helper = scenario == 1 ? RP_GTE_RTPT_NO_FLAGS_HELPER : RP_GTE_RTPT_FLAGS_HELPER;
+        assert(cursor == first + 8);
+        assert(rp_u32(c, first) == (0x30000000u + helper) >> 2);
+        assert(rp_u32(c, first + 4) == 0);
+    }
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[2].bytes); free(c);
-    puts("Emitter smoke: registers, signed state, COP memory widths/ignored destinations and stores passed.");
+    puts("Emitter smoke: register state, COP memory and original RTPT calls/flag liveness passed.");
     return 0;
 }

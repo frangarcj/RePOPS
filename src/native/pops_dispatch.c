@@ -3,6 +3,7 @@
 #include "pops_cdrom.h"
 #include "pops_dma.h"
 #include "pops_gpu.h"
+#include "pops_gte.h"
 #include "pops_timer.h"
 #include "pops_emit.h"
 #include <string.h>
@@ -112,6 +113,10 @@ static void native_helper(rp_context *c)
 {
     uint32_t *r = c->run_gpr;
     switch (c->run_pc) {
+    case RP_GTE_RTPT_FLAGS_HELPER: case RP_GTE_RTPT_NO_FLAGS_HELPER:
+        rp_pops_gte_rtpt(c, c->run_pc == RP_GTE_RTPT_FLAGS_HELPER);
+        transfer(c, r[31]);
+        return;
     case 0x127D8:
         rp_pops_gpu_write(c, r[4], r[5]);
         transfer(c, r[31]);

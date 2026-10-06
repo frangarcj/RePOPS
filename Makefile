@@ -15,6 +15,7 @@ NATIVE_SRC += src/native/pops_cdrom.c
 NATIVE_SRC += src/native/pops_cd_block.c
 NATIVE_SRC += src/native/pops_dma.c
 NATIVE_SRC += src/native/pops_gpu.c
+NATIVE_SRC += src/native/pops_gte.c
 CD_LIBS = -lz
 
 .PHONY: all native analyze test test-native-disc test-native-config test-native-me test-native-spu test-native-emit test-native-memory-card test-generated-code test-unicorn-cache clean-help
@@ -24,6 +25,15 @@ analyze: build/repops-analyze
 
 build/repops-native build/test_native_events build/test_native_cdrom: src/native/pops_timer.h src/native/pops_gpu.h
 build/test_native_gpu: src/native/pops_dma.h
+build/repops-native build/repops-analyze build/test_native_emit build/test_unicorn_cache: src/native/pops_gte.h
+
+build/test_native_gte: src/native/runtime.c src/native/pops_gte.c src/native/pops_gte.h src/native/pops_state.h src/native/runtime.h tests/test_native_gte.c
+	mkdir -p build
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_gte.c tests/test_native_gte.c -o $@
+
+.PHONY: test-native-gte
+test-native-gte: build/test_native_gte
+	./build/test_native_gte
 
 build/repops-analyze: src/native/runtime.c src/native/pops_analyze.c src/native/pops_compile.c src/native/pops_emit.c src/native/pops_emit_memory.c src/native/analyze_main.c src/native/runtime.h src/native/me_worker.h src/native/pops_emit.h src/native/pops_ir.h
 	mkdir -p build

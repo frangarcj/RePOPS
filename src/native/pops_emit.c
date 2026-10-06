@@ -1,4 +1,5 @@
 #include "pops_emit.h"
+#include "pops_gte.h"
 #include <string.h>
 
 static uint8_t byte(rp_context *c, uint32_t offset)
@@ -643,6 +644,46 @@ uint32_t rp_emit_exit_target(rp_context *c, uint32_t target, uint32_t out)
     return out;
 }
 
+/* +0x6FF0..+0x70EC follows the analyzed control flow until a flag read or
+ * overwrite. Do not always choose the no-flags helper just because the
+ * immediately following instruction does not read FLAG. */
+static bool gte_flags_are_needed(rp_context *c, uint32_t record)
+{
+    const uint32_t stride = sizeof(rp_gte_record_layout);
+    const uint32_t end = rp_u32(c, RP_EMIT_ADDRESS(c, last_analysis_record));
+    uint32_t cursor = record + stride, furthest = record;
+    for (unsigned steps = 0; cursor <= end; ++steps) {
+        if (steps == 4096) rp_block(c, "GTE_flag_analysis_diagnostic_budget", cursor);
+        const int8_t destination = *(int8_t *)rp_memory(c, RP_GTE_RECORD_ADDRESS(cursor, destination), 1);
+        const uint8_t selector = *(uint8_t *)rp_memory(c, RP_COP_RECORD_ADDRESS(cursor, cop_register), 1);
+        if (destination > 0 && selector == 63) return true;
+        const uint16_t flags = half(c, RP_GTE_RECORD_ADDRESS(cursor, flags));
+        if (flags & RP_RECORD_EXIT) return true;
+        if (flags & RP_RECORD_DELAY_SLOT) {
+            const uint32_t previous = cursor - stride;
+            if (!(half(c, RP_GTE_RECORD_ADDRESS(previous, flags)) & RP_RECORD_LOCAL_TARGET)) return true;
+            const uint32_t target = RP_ANALYSIS_RECORD_BASE +
+                (rp_u32(c, RP_GTE_RECORD_ADDRESS(previous, command)) -
+                 rp_u32(c, RP_EMIT_ADDRESS(c, analysis_base_pc))) * 4;
+            const uint16_t target_flags = half(c, RP_GTE_RECORD_ADDRESS(target, flags));
+            const uint8_t previous_op = *(uint8_t *)rp_memory(c, RP_GTE_RECORD_ADDRESS(previous, opcode), 1);
+            if (target < record) {
+                if (!(target_flags & RP_RECORD_GTE_FLAGS_OVERWRITTEN)) return true;
+                if (previous_op < RP_OP_BGEZ) return false;
+            } else if (previous_op >= RP_OP_BGEZ) {
+                if (!(target_flags & RP_RECORD_GTE_FLAGS_OVERWRITTEN) && furthest < target)
+                    furthest = target;
+            } else {
+                cursor = target;
+                continue;
+            }
+        }
+        if (cursor >= furthest && (flags & RP_RECORD_GTE_FLAGS_OVERWRITTEN)) return false;
+        cursor += stride;
+    }
+    return true;
+}
+
 /* +0x6914, selected original categories. Unsupported paths remain explicit
  * boundaries rather than silently emitting a different execution strategy.
  */
@@ -844,6 +885,17 @@ uint32_t rp_emit_record(rp_context *c, rp_pops_category category, uint32_t recor
         out = rp_emit_exit_target(c, rp_u32(c, c->gp + 0xB50) + ((record - 0x041B0000) >> 2), out);
         rp_w32(c, c->gp + 0xB44, 0);
         return out;
+    }
+    if (category == RP_CAT_GTE) {
+        const uint32_t command = rp_u32(c, RP_GTE_RECORD_ADDRESS(record, command));
+        rp_event(c, "GTE_compile", "original_command", record, command);
+        if ((command & 63) != RP_GTE_RTPT)
+            rp_block(c, "GTE_command_emitter_not_reconstructed", command & 63);
+        const uint32_t helper = gte_flags_are_needed(c, record) ?
+            RP_GTE_RTPT_FLAGS_HELPER : RP_GTE_RTPT_NO_FLAGS_HELPER;
+        out = rp_emit_flush_registers(c, out, 11);
+        rp_event(c, "GTE_compile", "selected_RTPT_helper", record, helper);
+        return rp_emit_jump_delay(c, out, UINT32_C(0x30000000) + helper);
     }
     if (category != RP_CAT_IMMEDIATE) rp_block(c, "emitter_category_not_reconstructed", category);
     const uint32_t src = *(uint8_t *)rp_memory(c, record + 12, 1);

@@ -14,13 +14,15 @@ typedef struct {
     uint8_t unknown_744[0x754 - 0x744];
     uint8_t temporary_dirty[12], temporary_guest[12], temporary_host[12];
     int8_t register_location[32];
-    uint8_t unknown_798[0xB58 - 0x798];
+    uint8_t unknown_798[0xB48 - 0x798];
+    uint32_t source_address_bias, last_analysis_record, analysis_base_pc, analysis_end_pc;
     uint32_t known_register_mask, known_register_values[32];
 } rp_core_emit_layout;
 #define RP_EMIT_ADDRESS(c, member) RP_FIELD_ADDRESS((c)->gp, rp_core_emit_layout, member)
 _Static_assert(offsetof(rp_core_emit_layout, temporary_guest) == 0x760, "emitter temporary owners");
 _Static_assert(offsetof(rp_core_emit_layout, register_location) == 0x778, "emitter register locations");
 _Static_assert(offsetof(rp_core_emit_layout, known_register_mask) == 0xB58, "emitter known mask");
+_Static_assert(offsetof(rp_core_emit_layout, last_analysis_record) == 0xB4C, "analysis record ceiling");
 _Static_assert(offsetof(rp_core_emit_layout, known_register_values) == 0xB5C, "emitter known values");
 
 /* Memory/COP analysis view only. Other compiler phases reuse some of these
@@ -43,6 +45,22 @@ enum {
 _Static_assert(sizeof(rp_cop_memory_record_layout) == 16, "COP memory record stride");
 _Static_assert(offsetof(rp_cop_memory_record_layout, displacement) == 8, "COP displacement");
 _Static_assert(offsetof(rp_cop_memory_record_layout, cop_register) == 14, "COP register selector");
+
+typedef struct {
+    uint16_t flags;
+    uint8_t destination, opcode;
+    uint16_t category, cost;
+    uint32_t command;
+    uint8_t sources[4];
+} rp_gte_record_layout;
+#define RP_GTE_RECORD_ADDRESS(record, member) RP_FIELD_ADDRESS(record, rp_gte_record_layout, member)
+_Static_assert(sizeof(rp_gte_record_layout) == 16, "GTE analysis record stride");
+_Static_assert(offsetof(rp_gte_record_layout, command) == 8, "GTE command payload");
+enum {
+    RP_ANALYSIS_RECORD_BASE = 0x041B0000,
+    RP_RECORD_DELAY_SLOT = 1, RP_RECORD_LOCAL_TARGET = 4,
+    RP_RECORD_EXIT = 0x10, RP_RECORD_GTE_FLAGS_OVERWRITTEN = 0x2000
+};
 
 /* All cursors/words are guest numeric addresses and Allegrex instructions.
  * None of these functions creates callable host machine code.

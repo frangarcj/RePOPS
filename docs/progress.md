@@ -1,5 +1,13 @@
 # RePops progress
 
+## Current: RTPT emission reaches the next GTE command
+
+`out/gte-rtpt.eYMNNx/result/` selects and emits the original RTPT helpers,
+then stops compiling NCLIP (command 6). The block has not executed yet:
+39,470,213 observations, 40,357 transfers, `game_executed: false`.
+Named GTE state and native projection fixtures pass alongside emitter and
+Unicorn checks. See `gte_projection.md` for the exact validation scope.
+
 ## Current: COP memory emission reaches the GTE command category
 
 `out/cop-memory.CXKuaJ/result/` compiles the reached COP memory records and

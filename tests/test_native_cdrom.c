@@ -275,6 +275,25 @@ int main(void)
     rp_cd_w16(c, RP_CD_ADDRESS(c, data_limit), 28);
     assert(rp_pops_cd_dma_transfer(c, 0x2400, 12, 0x11000000) == 12);
     for (unsigned i = 0; i < 12; ++i) assert(rp_cd_u8(c, 0x09802400 + i) == 0x5A);
+    /* Pause stops the sector event, but its two responses remain scheduled. */
+    rp_w8(c, RP_CD_ADDRESS(c, drive_status), 0x22);
+    rp_w8(c, RP_CD_ADDRESS(c, irq_enable), 0x1F);
+    rp_w8(c, RP_CD_ADDRESS(c, deferred_command), 0xFF);
+    rp_w32(c, RP_CD_ADDRESS(c, primary.event.callback), 0xC268);
+    rp_w32(c, RP_CD_ADDRESS(c, secondary.event.callback), 0xC268);
+    /* Outside the original 0xC672-cycle command-deferral window. */
+    rp_pops_schedule_event(c, RP_CD_ADDRESS(c, sector_event), 100000);
+    rp_w32(c, RP_DEVICE_ADDRESS(c, cd_timing_flags), 4);
+    const uint32_t pause_now = rp_core_guest_cycles(c);
+    rp_pops_cd_write(c, 0, 0); rp_pops_cd_write(c, 1, 9);
+    assert(!rp_u32(c, RP_CD_ADDRESS(c, sector_event.prev)));
+    assert(rp_cd_u8(c, RP_CD_ADDRESS(c, audio_muted)) == 1);
+    assert(rp_cd_u8(c, RP_CD_ADDRESS(c, drive_status)) == 2);
+    assert(rp_cd_u8(c, RP_CD_ADDRESS(c, primary.pending_irq)) == 3);
+    assert(rp_cd_u8(c, RP_CD_ADDRESS(c, secondary.pending_irq)) == 2);
+    assert(rp_u32(c, RP_CD_ADDRESS(c, primary.event.deadline_cycles)) == pause_now + 0x4000);
+    assert(rp_u32(c, RP_CD_ADDRESS(c, secondary.event.deadline_cycles)) == pause_now + 0xB9E99);
+    assert(rp_cd_u8(c, RP_CD_ADDRESS(c, irq_flags)) == 0);
     fclose(c->disc); fclose(c->trace);
     for (unsigned i = 0; i < RP_REGION_COUNT; ++i) free(c->regions[i].bytes);
     free(c);

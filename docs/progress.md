@@ -1,5 +1,15 @@
 # RePops progress
 
+## Current: Pause completes and reaches GPU register reads
+
+`out/cd-pause.3eV9ZD/result/` passes the pending Pause command and reaches
+GPU read helper +0x12FBC. Pause preserves its acknowledgement/completion
+events, cancels sector delivery and synchronizes audio instead of returning
+ready immediately. The observed completion delay is 761497 guest cycles.
+The integrated run records 39,246,306 generated-cache observations and 38,997
+entry transfers; `game_executed` remains false. Focused CD checks pass under
+ASan/UBSan. See `cd_pause.md` for the source range and remaining scope.
+
 ## Current: CD DMA completes and reaches Pause
 
 `out/cd-dma.PLQDH0/result/` transfers 2048 bytes from the delivered CD sector

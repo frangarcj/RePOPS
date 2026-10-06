@@ -469,6 +469,34 @@ static void command(rp_context *c, unsigned opcode)
         if (CD8(mode) & 0x40) rp_w32(c, RP_SHARED_ADDRESS(cd_volume_matrix), CD32(volume_matrix));
         break;
     }
+    case 9: { /* Pause: acknowledgement now, completion after the drive delay. */
+        SET8(saved_flag, 1);
+        if (CD8(lid_phase) || (CD8(drive_status) & 0x40)) {
+            SET8(error_flag, 1); SET8(error_code, 0x80);
+        }
+        if (!primary_response(c, 1, 0x4000)) break;
+        uint32_t delay = 0x5880;
+        if (!CD32(sector_event.prev)) {
+            if (CD32(secondary.event.prev)) {
+                delay = CD32(secondary.event.deadline_cycles) - rp_core_guest_cycles(c);
+                if ((int32_t)delay < 0x5880) delay = 0x5880;
+            }
+        } else {
+            delay = CD32(sector_event.deadline_cycles) - rp_core_guest_cycles(c);
+            if ((int32_t)delay < 0x5880) delay = 0x5880;
+            uint32_t minimum = (int8_t)CD8(drive_status) < 0 ? 0x5EF4C : 0xB9E99;
+            if (!(rp_u32(c, RP_DEVICE_ADDRESS(c, cd_timing_flags)) & 4)) minimum *= 6;
+            if ((int32_t)delay < (int32_t)minimum) delay = minimum;
+        }
+        SET8(audio_muted, 1);
+        rp_pops_cd_audio_sync(c);
+        SET8(current_track, 0); SET32(playing_sector, 0);
+        if (CD32(sector_event.prev)) rp_pops_remove_event(c, RP_CD_ADDRESS(c, sector_event));
+        SET8(drive_status, CD8(drive_status) & 0x17);
+        secondary_response(c, 1, delay);
+        rp_event(c, "milestone", "CD_pause_completion_scheduled", 9, delay);
+        break;
+    }
     case 2: {
         if (CD8(lid_phase)) { SET8(error_flag, 1); SET8(error_code, 0x80); }
         else if (CD8(parameters[1]) >= 0x60 || CD8(parameters[2]) >= 0x75 ||

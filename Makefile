@@ -27,6 +27,7 @@ analyze: build/repops-analyze
 
 build/repops-native build/test_native_events build/test_native_cdrom: src/native/pops_timer.h src/native/pops_gpu.h
 build/repops-native: src/native/pops_display.h
+build/repops-native build/test_native_memory_card build/test_native_events build/test_native_cdrom: src/native/pops_memory_card.h
 build/test_native_gpu: src/native/pops_dma.h
 build/repops-native build/repops-analyze build/test_native_emit build/test_unicorn_cache: src/native/pops_gte.h
 
@@ -66,17 +67,17 @@ build/test_native_gpu: src/native/runtime.c src/native/pops_gpu.c src/native/pop
 test-native-gpu: build/test_native_gpu
 	./build/test_native_gpu
 
-build/test_native_events: src/native/runtime.c src/native/pops_events.c src/native/pops_dma.c src/native/pops_serial.c src/native/pops_dma.h src/native/pops_serial.h src/native/runtime.h src/native/pops_state.h src/native/pops_cdrom.h tests/test_native_events.c
+build/test_native_events: src/native/runtime.c src/native/pops_events.c src/native/pops_dma.c src/native/pops_serial.c src/native/pops_memory_card.c src/native/pops_dma.h src/native/pops_serial.h src/native/runtime.h src/native/pops_state.h src/native/pops_cdrom.h tests/test_native_events.c
 	mkdir -p build
-	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_events.c src/native/pops_dma.c src/native/pops_serial.c tests/test_native_events.c -o $@
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_events.c src/native/pops_dma.c src/native/pops_serial.c src/native/pops_memory_card.c tests/test_native_events.c -o $@
 
 .PHONY: test-native-events
 test-native-events: build/test_native_events
 	./build/test_native_events
 
-build/test_native_cdrom: src/native/runtime.c src/native/pops_cdrom.c src/native/pops_cd_block.c src/native/pops_events.c src/native/pops_dma.c src/native/pops_serial.c src/native/pops_dma.h src/native/pops_serial.h src/native/pops_config.c src/native/pops_disc.c src/native/pops_cdrom.h src/native/pops_state.h tests/test_native_cdrom.c
+build/test_native_cdrom: src/native/runtime.c src/native/pops_cdrom.c src/native/pops_cd_block.c src/native/pops_events.c src/native/pops_dma.c src/native/pops_serial.c src/native/pops_memory_card.c src/native/pops_dma.h src/native/pops_serial.h src/native/pops_config.c src/native/pops_disc.c src/native/pops_cdrom.h src/native/pops_state.h tests/test_native_cdrom.c
 	mkdir -p build
-	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_cdrom.c src/native/pops_cd_block.c src/native/pops_events.c src/native/pops_dma.c src/native/pops_serial.c src/native/pops_config.c src/native/pops_disc.c tests/test_native_cdrom.c -lm -lz -o $@
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_cdrom.c src/native/pops_cd_block.c src/native/pops_events.c src/native/pops_dma.c src/native/pops_serial.c src/native/pops_memory_card.c src/native/pops_config.c src/native/pops_disc.c tests/test_native_cdrom.c -lm -lz -o $@
 
 .PHONY: test-native-cdrom
 test-native-cdrom: build/test_native_cdrom

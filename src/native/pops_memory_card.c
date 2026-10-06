@@ -1,7 +1,7 @@
-#include "runtime.h"
+#include "pops_memory_card.h"
 #include <string.h>
 
-enum { MC_GROUP_BASE = 0x10CB50, MC_GROUP_SIZE = 0x20088,
+enum { MC_GROUP_BASE = RP_MC_GROUP_BASE, MC_GROUP_SIZE = sizeof(rp_memory_card_layout),
        MC_DIRECTORY_BASE = 0x4A0C24, MC_DIRECTORY_SIZE = 0x2018,
        MC_RAW_POINTERS = 0x4A2C24, MC_CARD_BYTES = 0x20000 };
 
@@ -13,6 +13,80 @@ static uint32_t raw_card(rp_context *c, uint32_t slot)
 {
     check_slot(c, slot);
     return rp_u32(c, MC_RAW_POINTERS + slot * MC_DIRECTORY_SIZE);
+}
+
+/* +0xA508, ordinary card protocol. The serial event owns transfer timing;
+ * this routine returns one byte plus the original bit-8 termination tag.
+ * Extended slot-0 protocols and host writeback alarms remain explicit limits. */
+uint32_t rp_pops_mc_serial(rp_context *c, uint32_t phase, uint32_t slot, uint32_t transmit)
+{
+    rp_function(c, 0xA508, "pops.memory_card_serial_protocol_partial");
+    if (slot >= 2) return 0x1FF;
+    const uint8_t flags = rp_cd_u8(c, RP_MC_SLOT(slot, flags));
+    if (!phase) rp_event(c, "memory_card_serial", "slot_selected", slot, flags);
+    if (!(flags & 1)) return 0x1FF;
+    transmit &= 0xFF;
+    if (!slot) {
+        rp_function(c, 0x1C964, "pops.memory_card_state_query");
+        if (rp_u32(c, RP_MC_STATE_QUERY))
+            rp_block(c, "memory_card_extended_protocol_not_reconstructed", 0xA77C);
+    }
+    switch (phase) {
+    case 0: return 0xFF;
+    case 1: {
+        rp_w8(c, RP_MC_SLOT(slot, checksum), 0);
+        rp_cd_w16(c, RP_MC_SLOT(slot, sector), 0);
+        rp_w8(c, RP_MC_SLOT(slot, command), (uint8_t)transmit);
+        rp_event(c, "memory_card_serial", "command_received", slot, transmit);
+        const uint32_t status = rp_cd_u8(c, RP_MC_SLOT(slot, status));
+        if (transmit == 0x57) rp_w8(c, RP_MC_SLOT(slot, status), 0);
+        return transmit == 0x52 || transmit == 0x57 ? status : 0x1FF;
+    }
+    case 2: return 0x5A;
+    case 3: return 0x5D;
+    case 4: case 5:
+        rp_w8(c, RP_MC_SLOT(slot, checksum),
+              (uint8_t)(rp_cd_u8(c, RP_MC_SLOT(slot, checksum)) ^ transmit));
+        rp_cd_w16(c, RP_MC_SLOT(slot, sector),
+                  (uint16_t)((rp_cd_u16(c, RP_MC_SLOT(slot, sector)) << 8) + transmit));
+        return 0;
+    default: break;
+    }
+
+    const uint32_t sector = rp_cd_u16(c, RP_MC_SLOT(slot, sector));
+    if (rp_cd_u8(c, RP_MC_SLOT(slot, command)) == 0x52) {
+        if (sector >= RP_MC_SECTOR_COUNT) return 0x1FF;
+        if (phase < 8) return phase + 0x56;
+        if (phase == 8) return sector >> 8;
+        if (phase == 9) return sector & 0xFF;
+        if (phase == 138) return rp_cd_u8(c, RP_MC_SLOT(slot, checksum));
+        if (phase == 139) {
+            rp_event(c, "memory_card_serial", "sector_read_complete", slot, sector);
+            return 0x147;
+        }
+        if (phase > 139) rp_block(c, "memory_card_read_phase_out_of_range", phase);
+        const uint8_t value = rp_cd_u8(c, RP_MC_SLOT(slot, sectors[sector][phase - 10]));
+        rp_w8(c, RP_MC_SLOT(slot, checksum), rp_cd_u8(c, RP_MC_SLOT(slot, checksum)) ^ value);
+        return value;
+    }
+
+    if (phase < 135) {
+        /* The original stores payload before checking its checksum; a bad
+         * checksum must not silently roll back these in-memory writes. */
+        if (phase < 134 && sector < RP_MC_SECTOR_COUNT && sector != 0x3F)
+            rp_w8(c, RP_MC_SLOT(slot, sectors[sector][phase - 6]), (uint8_t)transmit);
+        rp_w8(c, RP_MC_SLOT(slot, checksum),
+              (uint8_t)(rp_cd_u8(c, RP_MC_SLOT(slot, checksum)) ^ transmit));
+        return 0xFF;
+    }
+    if (phase < 137) return phase - 0x2B;
+    if (phase != 137) rp_block(c, "memory_card_write_phase_out_of_range", phase);
+    if (rp_cd_u8(c, RP_MC_SLOT(slot, checksum))) return 0x14E;
+    if (sector >= RP_MC_SECTOR_COUNT) return 0x1FF;
+    if (sector == 0x3F) return 0x147;
+    rp_w8(c, RP_MC_SLOT(slot, flags), rp_cd_u8(c, RP_MC_SLOT(slot, flags)) | 2);
+    rp_event(c, "memory_card_serial", "write_needs_save_alarm", slot, sector);
+    rp_block(c, "memory_card_save_alarm_not_reconstructed", 0xA6AC);
 }
 
 /* +0x37204 with bank zero, then +0x37B8C. Raw card bytes follow the
@@ -120,8 +194,7 @@ void rp_pops_mc_worker_start(rp_context *c)
     if (rp_u32(c, 0x14D07C)) rp_block(c, "memory_card_restore_state_not_reconstructed", 0x1C970);
     uint32_t all_empty = 1;
     for (unsigned slot = 0; slot < 2; ++slot) {
-        const uint32_t group = MC_GROUP_BASE + slot * MC_GROUP_SIZE;
-        bind_slot(c, slot, group + 8);
+        bind_slot(c, slot, RP_MC_SLOT(slot, container_header));
         load_volatile_card(c, slot);
         repair_empty_slots(c, slot);
         /* Fresh-card directory data already came from the formatter; this
@@ -130,8 +203,8 @@ void rp_pops_mc_worker_start(rp_context *c)
         uint32_t free_blocks;
         const uint32_t result = rp_pops_mc_free_blocks(c, slot, &free_blocks);
         all_empty &= result == 0 && free_blocks == 15;
-        rp_w8(c, group, *(uint8_t *)rp_memory(c, group, 1) | 1);
-        rp_w8(c, group + 5, 0);
+        rp_w8(c, RP_MC_SLOT(slot, flags), rp_cd_u8(c, RP_MC_SLOT(slot, flags)) | 1);
+        rp_w8(c, RP_MC_SLOT(slot, status), 0);
         rp_event(c, "milestone", "volatile_memory_card_initialized", slot, free_blocks);
     }
     if (all_empty) {

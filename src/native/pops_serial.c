@@ -1,4 +1,5 @@
 #include "pops_serial.h"
+#include "pops_memory_card.h"
 
 static uint32_t serial_port(rp_context *c, uint32_t address)
 {
@@ -155,6 +156,9 @@ void rp_pops_serial_event(rp_context *c, uint32_t event, uint32_t callback)
         result = controller_protocol(c,
             (rp_cd_u16(c, RP_SERIAL_PORT(c, port, control)) >> 13) & 1,
             phase, transmit);
+    } else if (protocol == 0xA508) {
+        result = rp_pops_mc_serial(c, phase,
+            (rp_cd_u16(c, RP_SERIAL_PORT(c, port, control)) >> 13) & 1, transmit);
     } else if (protocol == 0x1A574) {
         rp_function(c, 0x1A574, "pops.serial_protocol_terminate");
         result = 0x1FF;

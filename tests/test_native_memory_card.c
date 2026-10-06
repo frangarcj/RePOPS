@@ -1,7 +1,76 @@
-#include "../src/native/runtime.h"
+#include "../src/native/pops_memory_card.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+
+static void serial_header(rp_context *c, unsigned slot, unsigned command, unsigned sector)
+{
+    assert(rp_pops_mc_serial(c, 0, slot, 0x81) == 0xFF);
+    assert(rp_pops_mc_serial(c, 1, slot, command) == 0);
+    assert(rp_pops_mc_serial(c, 2, slot, 0) == 0x5A);
+    assert(rp_pops_mc_serial(c, 3, slot, 0) == 0x5D);
+    assert(rp_pops_mc_serial(c, 4, slot, sector >> 8) == 0);
+    assert(rp_pops_mc_serial(c, 5, slot, sector & 0xFF) == 0);
+}
+
+static void check_serial_protocol(rp_context *c)
+{
+    for (unsigned slot = 0; slot < 2; ++slot) {
+        const unsigned sector = slot ? 1023 : 17;
+        uint8_t expected_xor = (uint8_t)((sector >> 8) ^ sector);
+        for (unsigned i = 0; i < 128; ++i)
+            rp_w8(c, RP_MC_SLOT(slot, sectors[sector][i]), (uint8_t)(i * 13 + slot));
+        serial_header(c, slot, 0x52, sector);
+        assert(rp_pops_mc_serial(c, 6, slot, 0) == 0x5C);
+        assert(rp_pops_mc_serial(c, 7, slot, 0) == 0x5D);
+        assert(rp_pops_mc_serial(c, 8, slot, 0) == sector >> 8);
+        assert(rp_pops_mc_serial(c, 9, slot, 0) == (sector & 0xFF));
+        for (unsigned i = 0; i < 128; ++i) {
+            const uint8_t expected = (uint8_t)(i * 13 + slot);
+            assert(rp_pops_mc_serial(c, 10 + i, slot, 0) == expected);
+            expected_xor ^= expected;
+        }
+        assert(rp_pops_mc_serial(c, 138, slot, 0) == expected_xor);
+        assert(rp_pops_mc_serial(c, 139, slot, 0) == 0x147);
+        assert(rp_cd_u8(c, RP_MC_SLOT(slot, flags)) == 1);
+    }
+    serial_header(c, 0, 0x52, 1024);
+    assert(rp_pops_mc_serial(c, 6, 0, 0) == 0x1FF);
+    rp_w8(c, RP_MC_SLOT(1, flags), 0);
+    assert(rp_pops_mc_serial(c, 0, 1, 0x81) == 0x1FF);
+    rp_w8(c, RP_MC_SLOT(1, flags), 1);
+
+    /* Bad-checksum writes still alter RAM; sector 0x3f writes do not.
+     * A valid ordinary write stops before an unreconstructed save alarm. */
+    const unsigned sectors[] = {7, 0x3F, 9};
+    for (unsigned attempt = 0; attempt < 3; ++attempt) {
+        const unsigned sector = sectors[attempt];
+        uint8_t checksum = (uint8_t)sector;
+        memset(rp_memory(c, RP_MC_SLOT(0, sectors[sector]), 128), 0xA5, 128);
+        serial_header(c, 0, 0x57, sector);
+        for (unsigned i = 0; i < 128; ++i) {
+            const uint8_t value = (uint8_t)(i ^ 0x69);
+            assert(rp_pops_mc_serial(c, 6 + i, 0, value) == 0xFF);
+            checksum ^= value;
+            assert(rp_cd_u8(c, RP_MC_SLOT(0, sectors[sector][i])) ==
+                   (sector == 0x3F ? 0xA5 : value));
+        }
+        assert(rp_pops_mc_serial(c, 134, 0, checksum ^ (attempt == 0)) == 0xFF);
+        assert(rp_pops_mc_serial(c, 135, 0, 0) == 0x5C);
+        assert(rp_pops_mc_serial(c, 136, 0, 0) == 0x5D);
+        if (attempt < 2) {
+            assert(rp_pops_mc_serial(c, 137, 0, 0) == (attempt == 0 ? 0x14E : 0x147));
+            assert(rp_cd_u8(c, RP_MC_SLOT(0, flags)) == 1);
+        } else {
+            if (!setjmp(c->stop)) {
+                (void)rp_pops_mc_serial(c, 137, 0, 0);
+                assert(!"Save alarm was falsely acknowledged");
+            }
+            assert(!strcmp(c->stop_kind, "memory_card_save_alarm_not_reconstructed"));
+            assert(rp_cd_u8(c, RP_MC_SLOT(0, flags)) == 3);
+        }
+    }
+}
 
 int main(void)
 {
@@ -48,7 +117,8 @@ int main(void)
     assert(rp_pops_mc_free_blocks(c, 0, &free_blocks) == 0); /* Original OR check. */
     rp_w8(c, 0x4A0C25, 'X');
     assert(rp_pops_mc_free_blocks(c, 0, &free_blocks) == 0x8101002F && free_blocks == 0);
+    check_serial_protocol(c);
     fclose(c->trace); free(c->regions[0].bytes); free(c);
-    puts("Memory-card startup: volatile formatting/checksum/free-block/ready-state tests passed.");
+    puts("Memory card: startup plus full serial reads, checksum/write ordering and save boundary passed.");
     return 0;
 }

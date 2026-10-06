@@ -4,6 +4,19 @@ Historical native runs retain `result/retained-trace-result.json` instead of
 their full trace once superseded. Keep the latest two traces and the GE-preview
 provenance source; decompilers and focused verification outputs are not pruned.
 
+## Current: card protocol no longer blocks; next access is MDEC control
+
+`out/card-serial.cKTsSK/result/` reaches the write at 0x1F801824, dispatched
+to the MDEC handler +0xF70C. It records 208,702,090 generated-instruction
+observations and 2,459,989 transfers; `game_executed` is still false.
+
+The normal card protocol uses the worker's existing volatile buffers and a
+shared typed layout. Complete sector reads/checksum and write-error behavior
+pass focused tests. The integrated trace passes card admission but records
+no completed sector-read markers; those full reads are currently fixture
+evidence, not an integrated success claim. Valid writeback alarms and the
+extended slot-0 protocol remain explicit boundaries. See `memory_card_serial.md`.
+
 ## Current: pending serial code reviewed; execution reaches the memory card
 
 The pending compact trace, EXT peephole and serial/controller integration

@@ -23,6 +23,7 @@ native: build/repops-native
 analyze: build/repops-analyze
 
 build/repops-native build/test_native_events build/test_native_cdrom: src/native/pops_timer.h src/native/pops_gpu.h
+build/test_native_gpu: src/native/pops_dma.h
 
 build/repops-analyze: src/native/runtime.c src/native/pops_analyze.c src/native/pops_compile.c src/native/pops_emit.c src/native/pops_emit_memory.c src/native/analyze_main.c src/native/runtime.h src/native/me_worker.h src/native/pops_emit.h src/native/pops_ir.h
 	mkdir -p build

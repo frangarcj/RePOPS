@@ -1,15 +1,30 @@
 #include "../src/native/pops_gpu.h"
 #include "../src/native/pops_cdrom.h"
+#include "../src/native/pops_dma.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* These state-only packets return zero delay and start without pending events.
- * Scheduler behavior is covered by the separate event tests. */
+/* Scheduler behavior is tested separately. DMA fixtures record its contract;
+ * ordinary state-only port packets must not unexpectedly schedule an event. */
+static bool dma_fixture;
+static unsigned scheduled;
+static uint32_t scheduled_event, scheduled_delay, delayed_words, delay_horizon;
 void rp_pops_schedule_event(rp_context *c, uint32_t event, uint32_t delay)
-{ (void)c; (void)event; (void)delay; abort(); }
+{
+    (void)c;
+    assert(dma_fixture);
+    ++scheduled; scheduled_event = event; scheduled_delay = delay;
+}
 void rp_pops_remove_event(rp_context *c, uint32_t event)
 { (void)c; (void)event; abort(); }
+uint32_t rp_pops_dma_delay_active(rp_context *c, uint16_t mask, uint32_t delay, uint32_t horizon)
+{
+    (void)c;
+    assert(dma_fixture && mask == 2);
+    delayed_words = delay; delay_horizon = horizon;
+    return 0;
+}
 
 /* The fixture checks calls to the capture adapter; it does not render the
  * two firmware templates. Their actual bytes are used by the integrated run. */
@@ -209,7 +224,43 @@ int main(void)
         assert(rp_u32(c, RP_GPU_ADDRESS(c, transfer_read_latch)) == answers[i]);
     }
 
-    fclose(c->trace); free(c->regions[0].bytes); free(c->regions[1].bytes); free(c);
-    puts("GPU: status, GP0 state words, GP1 reset/list ordering and display controls passed; rasterization pending.");
+    /* Two linked DMA nodes feed the same GE consumer directly from guest RAM.
+     * The GP0 port assembly buffer must not be repurposed as a DMA buffer. */
+    c->regions[2] = (rp_region){0x09800000, 0x1000, calloc(1, 0x1000)};
+    assert(c->regions[2].bytes);
+    reset_status(c);
+    rp_core_set_downcount(c, 1000);
+    rp_w32(c, RP_GPU_ADDRESS(c, list_cursor), 0x49A00000);
+    rp_w32(c, RP_GPU_ADDRESS(c, packet_words[0]), 0xA5A5A5A5);
+    rp_w32(c, 0x09800100, 0x02000200);
+    rp_w32(c, 0x09800104, 0xE3000001);
+    rp_w32(c, 0x09800108, 0xE4004002);
+    rp_w32(c, 0x09800200, 0x01FFFFFF);
+    rp_w32(c, 0x09800204, 0xE6000001);
+    dma_fixture = true;
+    assert(rp_pops_gpu_dma_transfer(c, 0x100, 0, 0x01000401) == 1);
+    assert(scheduled == 1 && scheduled_delay == 1);
+    assert(scheduled_event == RP_GPU_ADDRESS(c, ready_event));
+    assert(delayed_words == 17 && delay_horizon == 17);
+    assert(rp_core_downcount(c) == 983);
+    assert(rp_u32(c, 0x49A00000) == 0xD4000001);
+    assert(rp_u32(c, 0x49A00004) == 0xD5004002);
+    assert(rp_u32(c, 0x49A00008) == 0x13041B91);
+    assert(rp_u32(c, 0x49A0000C) == 0x0A000010);
+    assert(c->ge_stalled_list == 0x49A00010);
+    assert((rp_u32(c, RP_GPU_ADDRESS(c, status)) & 0x14000000) == 0x10000000);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, packet_words[0])) == 0xA5A5A5A5);
+
+    /* A self-linked empty node yields a tagged continuation, not completion. */
+    rp_w32(c, 0x09800300, 0x00000300);
+    assert(rp_pops_gpu_dma_transfer(c, 0x300, 0, 0x01000401) == 0x80000300);
+    assert(scheduled == 2 && scheduled_event == RP_DMA_ADDRESS(c, channels[2]));
+    assert(rp_u32(c, RP_DMA_CHANNEL(c, 2, event.callback)) == 0x8CAC);
+    assert(scheduled_delay == 36025 && delayed_words == 4);
+    assert(rp_core_downcount(c) == 983);
+
+    fclose(c->trace); free(c->regions[0].bytes); free(c->regions[1].bytes);
+    free(c->regions[2].bytes); free(c);
+    puts("GPU: port state, typed linked DMA, GE words, cycle debit and continuation passed; rendering pending.");
     return 0;
 }

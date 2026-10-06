@@ -1,4 +1,5 @@
 #include "pops_dma.h"
+#include "pops_gpu.h"
 
 /* +0x9158..+0x91BB and its width table at +0xD45AC. The helper refunds
  * four cycles before reading the shadow, including the default LHU path. */
@@ -26,7 +27,7 @@ uint32_t rp_pops_dma_read(rp_context *c, uint32_t address, uint32_t width)
 }
 
 /* +0x8BB8: postpone active channels matching the original mode mask. */
-static uint32_t delay_active(rp_context *c, uint16_t mask, uint32_t delay, uint32_t horizon)
+uint32_t rp_pops_dma_delay_active(rp_context *c, uint16_t mask, uint32_t delay, uint32_t horizon)
 {
     rp_function(c, 0x8BB8, "pops.delay_active_DMA_events");
     uint32_t total = 0;
@@ -119,9 +120,13 @@ void rp_pops_dma_try_channel(rp_context *c, unsigned channel)
     const uint32_t address = rp_u32(c, madr);
     if (address & 0x800000) { rp_pops_dma_finish(c, node); return; }
     const uint32_t callback = rp_u32(c, RP_DMA_CHANNEL(c, channel, transfer_callback));
-    if (callback != 0xCE18)
+    uint32_t moved;
+    if (callback == 0xCE18)
+        moved = rp_pops_cd_dma_transfer(c, address & 0xFFFFFC, bytes, chcr);
+    else if (callback == 0x12C74)
+        moved = rp_pops_gpu_dma_transfer(c, address & 0xFFFFFC, bytes, chcr);
+    else
         rp_block(c, "DMA_transfer_callback_not_reconstructed", callback);
-    const uint32_t moved = rp_pops_cd_dma_transfer(c, address & 0xFFFFFC, bytes, chcr);
     if ((int32_t)moved <= 0) {
         if (moved) rp_w32(c, madr, moved & 0xFFFFFC);
         else if (channel < 2) rp_cd_w16(c, RP_DMA_CHANNEL(c, channel, transfer_mode), 0);
@@ -133,7 +138,7 @@ void rp_pops_dma_try_channel(rp_context *c, unsigned channel)
     rp_w32(c, madr, address + ((chcr & 2) ? 0u - (words << 2) : words << 2));
     if (!mode) {
         cost += 3;
-        (void)delay_active(c, 7, cost, 0);
+        (void)rp_pops_dma_delay_active(c, 7, cost, 0);
         rp_core_set_downcount(c, rp_core_downcount(c) - cost);
         rp_pops_dma_finish(c, node);
     } else {
@@ -141,13 +146,13 @@ void rp_pops_dma_try_channel(rp_context *c, unsigned channel)
         if (mode == 1) {
             delay = ((words - 1) >> ((chcr >> 16) & 7)) << ((chcr >> 20) & 7);
             delay += moved * 3;
-            (void)delay_active(c, 7, delay, 0);
+            (void)rp_pops_dma_delay_active(c, 7, delay, 0);
             cost = 0;
         } else if (mode == 2) {
             const uint32_t blocks = rp_u32(c, RP_DMA_REGISTER(c, channel, block_control)) >> 16;
             cost += blocks * 2;
             const uint32_t horizon = cost + blocks * 2;
-            delay = horizon + delay_active(c, 2, cost, horizon);
+            delay = horizon + rp_pops_dma_delay_active(c, 2, cost, horizon);
             if (((dpcr >> 28) & 7) < priority) {
                 cost -= blocks * 4; delay += blocks * 4;
                 if ((int32_t)cost < 0) cost = 0;

@@ -5,7 +5,9 @@
 /* Selected core GPU fields, recovered from +0x12FBC and their producers.
  * This is a wire view: use named addresses, never cast the guest backing. */
 typedef struct {
-    uint8_t earlier_000[0x710];
+    uint8_t earlier_000[0x6E8];
+    uint32_t dma_cost_scaling;
+    uint8_t unknown_6ec[0x710 - 0x6EC];
     uint32_t data_read_cycle_cost;
     uint8_t unknown_714[0x3500 - 0x714];
     union {
@@ -44,11 +46,13 @@ typedef struct {
 #define RP_GPU_ADDRESS(c, member) RP_FIELD_ADDRESS((c)->gp, rp_core_gpu_layout, member)
 uint32_t rp_pops_gpu_read(rp_context *, uint32_t address, uint32_t width);
 void rp_pops_gpu_write(rp_context *, uint32_t address, uint32_t word);
+uint32_t rp_pops_gpu_dma_transfer(rp_context *, uint32_t address, uint32_t bytes, uint32_t control);
 /* Existing headless adapter for bounded state lists, not a POPSMAN body. */
 uint32_t rp_ge_capture_state_list(rp_context *, uint32_t address, int module_relative);
 enum { RP_GPU_DISPLAY_TRANSITION_ADDRESS = 0x49CBD4 };
 
 _Static_assert(offsetof(rp_core_gpu_layout, data_read_latch) == 0x35BC, "GPU data latch");
+_Static_assert(offsetof(rp_core_gpu_layout, dma_cost_scaling) == 0x6E8, "GPU DMA cost scaling");
 _Static_assert(offsetof(rp_core_gpu_layout, packet_words[47]) == 0x35BC, "GPU packet/latch alias");
 _Static_assert(offsetof(rp_core_gpu_layout, ready_event) == 0x35F8, "GPU ready event");
 _Static_assert(offsetof(rp_core_gpu_layout, status) == 0x3630, "GPU status");

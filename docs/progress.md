@@ -1,5 +1,23 @@
 # RePops progress
 
+## Current: GPU linked DMA reaches the fill packet
+
+`out/gpu-dma-linked.qooyux/result/` reads the actual five-word DMA payload
+and sends it to the reconstructed packet consumer. Its two state commands
+emit GE words before GP0(02h) reaches `GPU_fill_packet_not_reconstructed`
+at +0x134E0. There is still no rendered framebuffer or proven FFVI boot.
+
+The run records 39,303,523 generated-cache observations, 39,019 compiled-entry
+transfers, and `game_executed: false`. The new reader +0x9158 and linked-list
+callback +0x12C74 are connected through named DMA/GPU layouts. The consumer
+now accepts a RAM source directly rather than misusing the GP0 port buffer.
+Focused GPU, event/timer/DMA, CD/DMA and Unicorn checks pass. See
+`dma_register_reads.md` and `gpu_dma_linked.md` for scope and remaining paths.
+
+Comparable coverage is 66/536 complete (12.3%) and 119/536 complete or partial
+(22.2%). Full POPS ledger totals are 77 complete and 73 partial; distinct
+starts absent from the historical inventory remain separate from its denominator.
+
 ## Current: timer reads reach GPU DMA control reads
 
 `out/timer-read.2JJRXM/result/` passes the timer reader +0x9BE0 and reaches

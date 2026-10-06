@@ -1,5 +1,6 @@
 #include "pops_gpu.h"
 #include "pops_cdrom.h"
+#include "pops_dma.h"
 #include <string.h>
 
 #define GPU32(member) rp_u32(c, RP_GPU_ADDRESS(c, member))
@@ -88,7 +89,7 @@ static uint32_t drawing_environment(rp_context *c, uint32_t word, uint32_t out)
 
 /* Reached state-only paths of +0x133D0. GE words are retained in guest RAM;
  * list services remain the existing explicit headless execution adapter. */
-static uint32_t consume_packet(rp_context *c, uint32_t bytes)
+static uint32_t consume_packet(rp_context *c, uint32_t source, uint32_t bytes)
 {
     rp_function(c, 0x133D0, "pops.consume_GPU_packet_partial");
     uint32_t out = GPU32(list_cursor);
@@ -104,7 +105,7 @@ static uint32_t consume_packet(rp_context *c, uint32_t bytes)
     }
     unsigned mode = GPU8(command_mode);
     for (uint32_t offset = 0; offset < bytes; offset += 4) {
-        const uint32_t word = rp_u32(c, RP_GPU_ADDRESS(c, packet_words) + offset);
+        const uint32_t word = rp_u32(c, source + offset);
         if (!mode) mode = word >> 29;
         rp_event(c, "GPU_packet", "dispatch", mode, word);
         if (mode == 0) {
@@ -126,6 +127,84 @@ static uint32_t consume_packet(rp_context *c, uint32_t bytes)
     SET_GPU8(command_mode, mode);
     SET_GPU32(list_cursor, out);
     return 0;
+}
+
+/* +0x12C74 linked-list branch. Packet data goes directly to the original
+ * +0x133D0 consumer, not through the GP0 port's separate assembly buffer. */
+uint32_t rp_pops_gpu_dma_transfer(rp_context *c, uint32_t address, uint32_t bytes, uint32_t control)
+{
+    rp_function(c, 0x12C74, "pops.GPU_DMA_linked_list_partial");
+    if (!(control & 0x400)) {
+        rp_event(c, "GPU_DMA_boundary", "block_transfer_bytes", address, bytes);
+        rp_block(c, "GPU_DMA_block_transfer_not_reconstructed", 0x12E98);
+    }
+    uint32_t node = UINT32_C(0x09800000) | (address & 0x1FFFFF);
+    uint32_t previous = 1, consumed = 0, budget = 0x869, result = 0;
+    const uint32_t scaling = GPU32(dma_cost_scaling);
+    SET_GPU32(status, GPU32(status) & ~UINT32_C(0x14000000));
+    if (GPU32(ready_event.prev)) {
+        budget -= GPU32(ready_event.deadline_cycles) - rp_core_guest_cycles(c);
+        rp_pops_remove_event(c, RP_GPU_ADDRESS(c, ready_event));
+    }
+    for (unsigned visited = 0; ; ++visited) {
+        if (visited == 65536)
+            rp_block(c, "GPU_DMA_chain_diagnostic_budget", node);
+        const uint32_t header = rp_u32(c, node);
+        const uint32_t words = header >> 24;
+        uint32_t extra = 0;
+        rp_event(c, "GPU_DMA_packet", "linked_list_payload", node, header);
+        if (words) {
+            const uint32_t cost = words + 7;
+            consumed += cost;
+            const uint32_t work = consume_packet(c, node + 4, words * 4);
+            const int32_t scaled = (int32_t)(work << ((scaling >> 8) & 31)) >> (scaling & 31);
+            const int32_t difference = (int32_t)((uint32_t)scaled - cost);
+            if (difference > 0) extra = (uint32_t)difference;
+            budget -= extra;
+        } else {
+            consumed += 4;
+        }
+        if (header & 0x00800000) {
+            budget += extra;
+            const int32_t outstanding = (int32_t)(0x869u - budget);
+            result = outstanding > 1 ? (uint32_t)outstanding : 1;
+            SET_GPU32(status, GPU32(status) | UINT32_C(0x10000000));
+            rp_pops_schedule_event(c, RP_GPU_ADDRESS(c, ready_event), result + extra);
+            break;
+        }
+        const uint32_t next = UINT32_C(0x09800000) | (header & 0x1FFFFC);
+        result = next + UINT32_C(0x76800000);
+        if (next == node || next == previous) {
+            budget = UINT32_C(0xFFFF7BB4);
+            break;
+        }
+        previous = node;
+        if ((int32_t)budget < (int32_t)consumed && !(rp_u32(c, next) & 0x00800000))
+            break;
+        node = next;
+    }
+    const uint32_t horizon = consumed - budget + 0x869;
+    /* POPSMAN E7F06E2B writes the GE stall register. This remains a captured
+     * host service, not a reconstructed provider body or a rendered list. */
+    ++c->services;
+    c->ge_stalled_list = GPU32(list_cursor);
+    rp_event(c, "headless_adapter", "POPSMAN_E7F06E2B_GE_stall_request", c->ge_stalled_list, 0);
+    (void)rp_pops_dma_delay_active(c, 2, consumed, horizon);
+    if ((int32_t)horizon < (int32_t)(consumed << 1)) {
+        const uint32_t debit = consumed - (uint32_t)((int32_t)(horizon - consumed) >> 3);
+        if (GPU8(frame_phase) & 1) {
+            const uint32_t field = RP_DMA_ADDRESS(c, deferred_frame_debit);
+            rp_w32(c, field, rp_u32(c, field) + debit);
+        } else {
+            rp_core_set_downcount(c, rp_core_downcount(c) - debit);
+        }
+    }
+    if ((int32_t)result < 0) {
+        rp_w32(c, RP_DMA_CHANNEL(c, 2, event.callback), 0x8CAC);
+        rp_pops_schedule_event(c, RP_DMA_ADDRESS(c, channels[2]), horizon);
+    }
+    rp_event(c, "milestone", "GPU_DMA_linked_list_slice_returned", result, consumed);
+    return result;
 }
 
 /* +0x129B4..+0x12AB8, including the old-list branch +0x12ABC.
@@ -258,7 +337,7 @@ void rp_pops_gpu_write(rp_context *c, uint32_t address, uint32_t word)
         SET_GPU8(packet_word_count, received);
         return;
     }
-    const uint32_t delay = consume_packet(c, received * 4);
+    const uint32_t delay = consume_packet(c, RP_GPU_ADDRESS(c, packet_words), received * 4);
     if (GPU32(ready_event.prev)) {
         rp_core_set_downcount(c, rp_u32(c, RP_CORE_CLOCK_ADDRESS(c, event_deadline)) - GPU32(ready_event.deadline_cycles));
         rp_pops_remove_event(c, RP_GPU_ADDRESS(c, ready_event));

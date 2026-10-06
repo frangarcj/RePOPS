@@ -1,5 +1,20 @@
 # Reverse coverage snapshot
 
+## Latest comparable count: timer/DMA readers and linked GPU DMA
+
+`out/gpu-dma-linked.qooyux/result/coverage.json` compares the updated ledger
+against the same 536 historical internal entries. There are 66 matched complete
+bodies (12.3%) and 53 matched partial bodies (22.2% complete or partial).
+The full POPS ledger has 77 complete and 73 partial entries; additional starts
+outside the old inventory are still not mixed into that denominator.
+
+The new timer/DMA reader starts do not appear as separate functions in that
+older inventory. They therefore improve execution without increasing its
+complete-body percentage. The new GPU DMA entry is partial, not a finished GPU
+or rendered game. This is a body-status count, never a remaining-time estimate.
+
+## Historical snapshot
+
 Measured at source commit `10216324da532df2ca5b2672e6c7e5a635609b6b`.
 Input ledger: `data/function_progress.csv`. Reference inventory:
 `out/decompiled/pops_660/index.json` from the existing Allegrex/Ghidra analysis.

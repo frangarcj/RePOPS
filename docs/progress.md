@@ -19,6 +19,14 @@ the nested frame callback and the instruction-record unions were checked.
 No program-memory typing or mass C offset replacement has been performed.
 See `ghidra_state_types.md`; pre-existing projects and emulator source are unchanged.
 
+The next pass applies event/timer prototypes to four checked functions with
+`ApplyEventTypes.java`. Ghidra now renders event fields, timer fields and the
+embedded call `pops_schedule_guest_event(&timer->event, ...)`. The timer sync
+helper at +0x9B6C now has its observed u32 return, correcting the old void
+inference. All four exports completed with expected a0/a1 storage; unknown
+calling-convention warnings and unresolved GP globals are retained.
+See `typed_event_contracts.md`. No runtime features or offset refactor were added.
+
 The alternate initializer +0x1C254 uses incoming GP despite the raw decompiler
 displaying 0x10000. Its caller sets GP=0x09FF8000. A 0xB04-byte cleared prefix,
 distinct list links and a nibble-mask table are now documented without assigning

@@ -2,6 +2,7 @@
 #include "pops_state.h"
 #include "pops_cdrom.h"
 #include "pops_dma.h"
+#include "pops_gpu.h"
 #include "pops_emit.h"
 #include <string.h>
 
@@ -110,6 +111,10 @@ static void native_helper(rp_context *c)
 {
     uint32_t *r = c->run_gpr;
     switch (c->run_pc) {
+    case 0x12FBC:
+        r[2] = rp_pops_gpu_read(c, r[4], r[5]);
+        transfer(c, r[31]);
+        return;
     case 0xD088:
         r[2] = rp_pops_cd_read(c, r[4], r[5]);
         transfer(c, r[31]);
@@ -273,6 +278,10 @@ static void native_helper(rp_context *c)
                     r[25] = rp_core_downcount(c);
                 } else if (handler == 0xD088) {
                     r[2] = rp_pops_cd_read(c, address, width);
+                } else if (handler == 0x12FBC) {
+                    rp_core_set_downcount(c, r[25]);
+                    r[2] = rp_pops_gpu_read(c, address, width);
+                    r[25] = rp_core_downcount(c);
                 } else if (handler == 0x85F4) {
                     rp_core_set_downcount(c, r[25]);
                     rp_pops_me_service_due(c);

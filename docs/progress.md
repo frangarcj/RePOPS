@@ -1,5 +1,24 @@
 # RePops progress
 
+## Current: GPU status reads reach the GP0 writer
+
+`out/gpu-status.gm0dKa/result/` executes two reconstructed GPUSTAT reads and
+continues to writer +0x127D8, port 0x1810. Both status values are 0x1C800000,
+derived from initialized state rather than a forced ready response. The run
+records 39,246,356 generated-cache observations and 38,998 entry transfers;
+`game_executed` remains false. GPU packet processing is the next boundary.
+
+The reader and its native layout are in `pops_gpu.c`/`pops_gpu.h`. New C uses
+named fields for status, draw/display mode, timestamps and frame phase. GPU
+contract checks and the Unicorn cache smoke pass; GPUREAD remains an explicit
+boundary. See `gpu_register_read.md`. No renderer or active frame is claimed.
+
+Measured against the same 536-entry internal inventory: 66 complete (12.3%)
+and 51 partial (21.8% combined). The full ledger has 75 complete and 70 partial
+POPS entries, including starts absent from that inventory. These are body-status
+counts, not remaining time or game compatibility. The GPU reader is one such
+additional partial start, so it does not inflate the historical denominator.
+
 ## Current: Pause completes and reaches GPU register reads
 
 `out/cd-pause.3eV9ZD/result/` passes the pending Pause command and reaches

@@ -14,6 +14,7 @@ NATIVE_SRC += src/native/pops_compile_ram.c
 NATIVE_SRC += src/native/pops_cdrom.c
 NATIVE_SRC += src/native/pops_cd_block.c
 NATIVE_SRC += src/native/pops_dma.c
+NATIVE_SRC += src/native/pops_gpu.c
 CD_LIBS = -lz
 
 .PHONY: all native analyze test test-native-disc test-native-config test-native-me test-native-spu test-native-emit test-native-memory-card test-generated-code test-unicorn-cache clean-help
@@ -25,13 +26,21 @@ build/repops-analyze: src/native/runtime.c src/native/pops_analyze.c src/native/
 	mkdir -p build
 	$(CC) -std=c11 -Wall -Wextra -Werror $(CFLAGS) src/native/runtime.c src/native/pops_analyze.c src/native/pops_compile.c src/native/pops_emit.c src/native/pops_emit_memory.c src/native/analyze_main.c -o $@
 
-build/repops-native: $(NATIVE_SRC) src/native/runtime.h src/native/pops_state.h src/native/pops_cdrom.h src/native/pops_dma.h src/bootstrap.h src/me_startup.h src/me_registration.h src/native/me_worker.h src/native/pops_emit.h src/native/pops_ir.h
+build/repops-native: $(NATIVE_SRC) src/native/runtime.h src/native/pops_state.h src/native/pops_cdrom.h src/native/pops_dma.h src/native/pops_gpu.h src/bootstrap.h src/me_startup.h src/me_registration.h src/native/me_worker.h src/native/pops_emit.h src/native/pops_ir.h
 	mkdir -p build
 	@test -f "$(UNICORN_ROOT)/include/unicorn/unicorn.h" || { echo 'Install unicorn==2.1.4 in the local Python environment, or set UNICORN_ROOT'; exit 1; }
 	$(CC) -std=c11 -Wall -Wextra -Werror $(CFLAGS) $(PNG_CFLAGS) $(UNICORN_CFLAGS) $(NATIVE_SRC) $(PNG_LIBS) $(UNICORN_LIBS) $(CD_LIBS) -o $@
 
 test:
 	python3 -m unittest discover -s tests -v
+
+build/test_native_gpu: src/native/runtime.c src/native/pops_gpu.c src/native/pops_gpu.h src/native/pops_state.h src/native/pops_cdrom.h src/native/runtime.h tests/test_native_gpu.c
+	mkdir -p build
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_gpu.c tests/test_native_gpu.c -o $@
+
+.PHONY: test-native-gpu
+test-native-gpu: build/test_native_gpu
+	./build/test_native_gpu
 
 build/test_native_events: src/native/runtime.c src/native/pops_events.c src/native/pops_dma.c src/native/pops_dma.h src/native/runtime.h src/native/pops_state.h src/native/pops_cdrom.h tests/test_native_events.c
 	mkdir -p build

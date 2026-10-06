@@ -10,6 +10,14 @@
 static bool dma_fixture;
 static unsigned scheduled;
 static uint32_t scheduled_event, scheduled_delay, delayed_words, delay_horizon;
+static unsigned ready_calls;
+void rp_pops_graphics_event(rp_context *c, uint32_t callback)
+{
+    assert(dma_fixture && callback == 0x125F0);
+    ++ready_calls;
+    rp_w32(c, RP_GPU_ADDRESS(c, status), rp_u32(c, RP_GPU_ADDRESS(c, status)) | 0x14000000);
+    rp_pops_gpu_submit_pending_list(c);
+}
 void rp_pops_schedule_event(rp_context *c, uint32_t event, uint32_t delay)
 {
     (void)c;
@@ -106,6 +114,104 @@ static void check_vram_copy(rp_context *c)
         assert(!"CPU-after-GE copy was silently accepted");
     }
     assert(strcmp(c->stop_kind, "GPU_copy_CPU_sync_path_not_reconstructed") == 0);
+    dma_fixture = false;
+}
+
+static void check_cpu_upload(rp_context *c)
+{
+    reset_status(c);
+    const uint32_t out = 0x49A00800;
+    rp_w32(c, RP_GPU_ADDRESS(c, list_cursor), out);
+    for (unsigned i = 0; i < 32; ++i)
+        rp_w8(c, RP_GPU_ADDRESS(c, texture_cache[i].group_offset),
+               (uint8_t)(i % 16 == 15 ? 3 : (i % 16) % 3));
+    c->regions[0].bytes[0xD5338 + 40] = 2;
+    dma_fixture = true; scheduled = 0;
+    const uint32_t header[] = {0xA0000000, 0x00030008, 0x00010010};
+    for (unsigned i = 0; i < 3; ++i) rp_pops_gpu_write(c, 0x1810, header[i]);
+    assert(rp_cd_u8(c, RP_GPU_ADDRESS(c, command_mode)) == 9);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, transfer_size)) == header[2]);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)) == out && scheduled == 0);
+    /* Command-looking pixel words must stay pixel data, not become GP0 ops. */
+    for (unsigned i = 0; i < 7; ++i) rp_pops_gpu_write(c, 0x1810, 0xE100ABCD);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)) == out);
+    rp_pops_gpu_write(c, 0x1810, 0xA0001234);
+    const uint32_t direct[] = {0xB2013500, 0xB3000010, 0xEB000000,
+        0xEC000C08, 0xEE00000F, 0x13041B90, 0x0A000008};
+    for (unsigned i = 0; i < 7; ++i) assert(rp_u32(c, out + i * 4) == direct[i]);
+    assert(!rp_cd_u8(c, RP_GPU_ADDRESS(c, command_mode)));
+    assert(!rp_cd_u8(c, RP_GPU_ADDRESS(c, ge_transfer_pending)));
+    assert(rp_u32(c, out + sizeof(direct)) == 0x0F000000);
+    assert(rp_u32(c, out + sizeof(direct) + 4) == 0x0C000000);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)) == out + sizeof(direct) + 4);
+    assert(scheduled == 1 && scheduled_delay == 8);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, packet_words[7])) == 0xA0001234);
+
+    rp_w32(c, RP_GPU_ADDRESS(c, list_cursor), out);
+    const uint32_t odd[] = {0xA0000000, 0x00030008, 0x00020003,
+                            0x22221111, 0x44443333, 0x66665555};
+    for (unsigned i = 0; i < 6; ++i) rp_pops_gpu_write(c, 0x1810, odd[i]);
+    const uint32_t rows[] = {0xB4000000, 0xB5040400, 0xB3000400,
+        0xEE000002, 0xB2013500, 0xEC000C08, 0xEB000000, 0xEA000000,
+        0xEC001008, 0xEB000003, 0xEA000000};
+    for (unsigned i = 0; i < 11; ++i) assert(rp_u32(c, out + i * 4) == rows[i]);
+    assert(scheduled_delay == 3);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)) == out + sizeof(rows) + 4);
+
+    rp_w32(c, RP_GPU_ADDRESS(c, list_cursor), out);
+    rp_pops_gpu_write(c, 0x1810, 0xA0000000);
+    rp_pops_gpu_write(c, 0x1810, 0x00030008);
+    rp_pops_gpu_write(c, 0x1810, 0x00010078); /* Port buffer holds 96 of 120 pixels. */
+    for (unsigned i = 0; i < 48; ++i) rp_pops_gpu_write(c, 0x1810, 0x22221111);
+    assert(scheduled_delay == 48);
+    assert(rp_cd_u8(c, RP_GPU_ADDRESS(c, command_mode)) == 9);
+    assert(rp_cd_u16(c, RP_GPU_ADDRESS(c, transfer_origin[0])) == 104);
+    assert(rp_cd_u16(c, RP_GPU_ADDRESS(c, transfer_size[0])) == 24);
+    assert(!rp_cd_u8(c, RP_GPU_ADDRESS(c, ge_transfer_pending)));
+    assert(rp_u32(c, out + 32) == 0x0F000000);
+    const uint32_t continuation = out + 36;
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)) == continuation);
+    for (unsigned i = 0; i < 12; ++i) rp_pops_gpu_write(c, 0x1810, 0x44443333);
+    assert(scheduled_delay == 12 && !rp_cd_u8(c, RP_GPU_ADDRESS(c, command_mode)));
+    assert(rp_u32(c, continuation + 12) == 0xEC000C68);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)) == out + 68);
+
+    /* +0x12624 then closes the pending list exactly where the provider call
+     * sees it, advances the stall by one word and publishes a replacement id. */
+    const uint32_t pending_cursor = rp_u32(c, RP_GPU_ADDRESS(c, list_cursor));
+    const uint32_t old_id = 0x1234;
+    rp_w32(c, RP_GPU_ADDRESS(c, list_id), old_id);
+    rp_w8(c, RP_GPU_ADDRESS(c, ge_transfer_pending), 1);
+    c->next_id = 0x40;
+    rp_pops_gpu_submit_pending_list(c);
+    assert(!rp_cd_u8(c, RP_GPU_ADDRESS(c, ge_transfer_pending)));
+    assert(rp_u32(c, pending_cursor) == 0x0F000000);
+    assert(rp_u32(c, pending_cursor + 4) == 0x0C000000);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)) == pending_cursor + 4);
+    assert(c->ge_stalled_list == pending_cursor + 4);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, list_id)) == 0x41);
+
+    /* DMA block mode uses the same live mode-9 receiver rather than parsing
+     * pixel words as linked-list headers or GP0 commands. */
+    reset_status(c);
+    rp_w32(c, RP_GPU_ADDRESS(c, list_cursor), out);
+    scheduled = 0;
+    const uint32_t dma_header[] = {0xA0000000, 0x00030008, 0x00010010};
+    for (unsigned i = 0; i < 3; ++i) rp_pops_gpu_write(c, 0x1810, dma_header[i]);
+    for (unsigned i = 0; i < 8; ++i) rp_w32(c, 0x09800600 + i * 4, 0xE1000000 | i);
+    assert(rp_pops_gpu_dma_transfer(c, 0x600, 32, 0x01000201) == 32);
+    assert(!rp_cd_u8(c, RP_GPU_ADDRESS(c, command_mode)));
+    assert(rp_cd_u8(c, RP_GPU_ADDRESS(c, ge_transfer_pending)) == 1);
+    assert(scheduled == 1 && scheduled_event == RP_GPU_ADDRESS(c, ready_event));
+    assert(scheduled_delay == 8);
+    assert(c->ge_stalled_list == rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)));
+    assert(rp_u32(c, out) == 0xB2800600);
+    assert(rp_u32(c, out + 4) == 0xB3090010);
+    rp_w32(c, RP_DEVICE_ADDRESS(c, compatibility_flags), 0x10);
+    for (unsigned i = 0; i < 3; ++i) rp_pops_gpu_write(c, 0x1810, dma_header[i]);
+    assert(rp_pops_gpu_dma_transfer(c, 0x600, 32, 0x01000201) == 1);
+    assert(ready_calls == 1 && scheduled_delay == 1);
+    assert((rp_u32(c, RP_GPU_ADDRESS(c, status)) & 0x14000000) == 0x14000000);
     dma_fixture = false;
 }
 
@@ -409,8 +515,9 @@ int main(void)
     assert(strcmp(c->stop_kind, "GPU_primitive_packet_not_reconstructed") == 0);
 
     check_vram_copy(c);
+    check_cpu_upload(c);
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[1].bytes);
     free(c->regions[2].bytes); free(c);
-    puts("GPU: state/fill/DMA, flat polygons, VRAM-copy GE/staging and cache/cost contracts passed; rendering pending.");
+    puts("GPU: state/fill/DMA/polygons/copy and CPU upload header, rows, payload and continuation passed; rendering pending.");
     return 0;
 }

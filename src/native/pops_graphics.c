@@ -202,6 +202,42 @@ static uint32_t graphics_word(rp_context *c, uint32_t cursor, uint32_t word)
     return cursor + 4;
 }
 
+static void finish_refresh_timing(rp_context *c, uint32_t next_frame, bool release_stall)
+{
+    ++c->services;
+    rp_event(c, "headless_adapter", "virtual_vblank_at_requested_frame_no_realtime_wait",
+             next_frame, 0);
+    if (release_stall) {
+        c->ge_stalled_list = 0;
+        ++c->services;
+        rp_event(c, "headless_adapter", "GE_stall_release_captured_not_rendered",
+                 0xE7F06E2B, 0);
+    }
+    rp_w32(c, RP_GPU_ADDRESS(c, frame_counter), next_frame);
+    rp_w32(c, RP_GPU_ADDRESS(c, audio_sample_origin),
+           rp_u32(c, RP_SHARED_ADDRESS(callback_count)));
+    rp_w32(c, RP_GPU_ADDRESS(c, audio_cycle_origin), rp_core_guest_cycles(c));
+    rp_w8(c, RP_GPU_ADDRESS(c, previous_field), 0);
+    const uint8_t idle = *(uint8_t *)rp_memory(c, RP_GPU_ADDRESS(c, display_mode), 1);
+    if (idle < 128) {
+        rp_w8(c, RP_GPU_ADDRESS(c, display_mode), (uint8_t)(idle - 1));
+        if (!idle) {
+            ++c->services;
+            rp_event(c, "headless_adapter", "impose_power_tick_request", 0x1A23C094, 0);
+        }
+    }
+    const uint32_t rate = rp_u32(c, RP_DISPLAY_CONFIG(c, frame_rate_ratio));
+    if ((int32_t)rate > 0) {
+        const uint32_t numerator = (rate >> 16) & 0x7FFF, denominator = rate & 0xFFFF;
+        rp_w32(c, RP_GPU_ADDRESS(c, display_rate_remaining), denominator - numerator);
+        if (rp_u32(c, RP_GPU_ADDRESS(c, earlier_event.prev)))
+            rp_block(c, "display_timer_unlink_not_reconstructed", 0x9668);
+        if (!denominator) rp_block(c, "display_rate_zero_divisor", 0x115B4);
+        schedule_event(c, RP_GPU_ADDRESS(c, earlier_event),
+                       (0x89D00 / denominator) * numerator);
+    }
+}
+
 /* +0x115B4: internal-screen refresh, without an active UI. This
  * constructs the actual GE words but does not render or invent a framebuffer.
  * Device/display services are explicit headless adapters, not PSP timing.
@@ -246,8 +282,14 @@ static void refresh_display(rp_context *c)
     }
     if ((mode & 0x1000) || *(uint8_t *)rp_memory(c, RP_GPU_ADDRESS(c, external_output), 1))
         rp_block(c, "display_24bit_or_external_path_not_reconstructed", 0x115B4);
-    if (initialized && !old_field && !dirty)
-        rp_block(c, "repeat_idle_refresh_not_reconstructed", 0x1252C);
+    if (initialized && !old_field && !dirty) {
+        /* +0x1252C waits until the requested vcount and jumps directly into
+         * the timing tail. The headless harness reaches that vblank without
+         * wall-clock sleeping; no GE list is submitted on this path. */
+        finish_refresh_timing(c, next_frame, false);
+        rp_event(c, "milestone", "repeat_idle_refresh_timing_only", next_frame, 0);
+        return;
+    }
     if (*(uint8_t *)rp_memory(c, RP_GPU_ADDRESS(c, ge_transfer_pending), 1) & 0x80) {
         c->services += 2;
         rp_event(c, "headless_adapter", "previous_GE_list_sync_completed", 0x12504,
@@ -297,32 +339,7 @@ static void refresh_display(rp_context *c)
     out = graphics_word(c, out, 0xD5000000 | x1 | y1 << 10);
     out = graphics_word(c, out, 0x13041B93);
     out = graphics_word(c, out, 0x0A000000);
-    ++c->services;
-    rp_event(c, "headless_adapter", "virtual_vblank_at_requested_frame_no_realtime_wait", next_frame, 0);
-    c->ge_stalled_list = 0;
-    ++c->services;
-    rp_event(c, "headless_adapter", "GE_stall_release_captured_not_rendered", 0xE7F06E2B, 0);
-    rp_w32(c, RP_GPU_ADDRESS(c, frame_counter), next_frame);
-    rp_w32(c, RP_GPU_ADDRESS(c, audio_sample_origin), rp_u32(c, RP_SHARED_ADDRESS(callback_count)));
-    rp_w32(c, RP_GPU_ADDRESS(c, audio_cycle_origin), rp_core_guest_cycles(c));
-    rp_w8(c, RP_GPU_ADDRESS(c, previous_field), 0);
-    const uint8_t idle = *(uint8_t *)rp_memory(c, RP_GPU_ADDRESS(c, display_mode), 1);
-    if (idle < 128) {
-        rp_w8(c, RP_GPU_ADDRESS(c, display_mode), (uint8_t)(idle - 1));
-        if (!idle) {
-            ++c->services;
-            rp_event(c, "headless_adapter", "impose_power_tick_request", 0x1A23C094, 0);
-        }
-    }
-    const uint32_t rate = rp_u32(c, RP_DISPLAY_CONFIG(c, frame_rate_ratio));
-    if ((int32_t)rate > 0) {
-        const uint32_t numerator = (rate >> 16) & 0x7FFF, denominator = rate & 0xFFFF;
-        rp_w32(c, RP_GPU_ADDRESS(c, display_rate_remaining), denominator - numerator);
-        if (rp_u32(c, RP_GPU_ADDRESS(c, earlier_event.prev)))
-            rp_block(c, "display_timer_unlink_not_reconstructed", 0x9668);
-        if (!denominator) rp_block(c, "display_rate_zero_divisor", 0x115B4);
-        schedule_event(c, RP_GPU_ADDRESS(c, earlier_event), (0x89D00 / denominator) * numerator);
-    }
+    finish_refresh_timing(c, next_frame, true);
     rp_event(c, "milestone", status & 0x800000 ? "first_disabled_display_command_sequence" :
              "active_display_refresh_command_sequence_not_rendered", start, (out - start) / 4);
 }
@@ -414,7 +431,7 @@ void rp_pops_graphics_event(rp_context *c, uint32_t callback)
         if (rp_cd_u8(c, RP_GPU_ADDRESS(c, refresh_on_ready)))
             refresh_display(c);
         else if ((int8_t)rp_cd_u8(c, RP_GPU_ADDRESS(c, ge_transfer_pending)) > 0)
-            rp_block(c, "GPU_ready_list_submission_not_reconstructed", 0x12624);
+            rp_pops_gpu_submit_pending_list(c);
         rp_event(c, "milestone", "GPU_ready_event_completed", callback, rp_u32(c, status));
         return;
     }

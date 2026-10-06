@@ -1,5 +1,26 @@
 # RePops progress
 
+## Current: CPU uploads and idle refresh reach mixed port/DMA buffering
+
+`out/upload-port-sync.ASFVDl/result/` passes GP0 A0h data reception, ordinary
+GPU DMA block upload and the idle refresh branch. It stops at +0x12F30 when
+the game mixes a partially filled port buffer with a DMA block: 58,924,869
+generated-code observations, 87,280 transfers, `game_executed: false`.
+
+The port flush at +0x128C8 is now called before reuse of its live pixel
+buffer; GPU-ready uses the same explicit headless provider-fallback adapter.
+No GE renderer or successful hardware synchronization is claimed. GPU,
+display, event/DMA and CD contract tests pass. See `gpu_cpu_upload.md`.
+
+The previous disconnected run `out/idle-refresh.6DKPUc/` actually stopped
+earlier at Unicorn's local execution budget. A fresh run finished without
+changing guest clocks or that executor limit. Caffeinate PID 48162 and its
+power assertions were verified active when resuming.
+
+The optional geometry viewer is saved as `scripts/preview_ge_geometry.py`.
+The first view uses 280 captured GE polygons from frame_counter 117 and is
+explicitly not an emulator framebuffer. See `ge_geometry_preview.md`.
+
 ## Current: repeated display/polygon/DMA work reaches GP0 A0h
 
 `out/gpu-copy-retry.Jaxybd/result/` reaches the CPU-to-VRAM upload command

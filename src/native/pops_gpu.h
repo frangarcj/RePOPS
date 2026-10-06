@@ -10,6 +10,7 @@ typedef struct {
 } rp_gpu_texture_cache_entry;
 typedef struct { uint32_t command, origin, extent; } rp_gpu_fill_packet_layout;
 typedef struct { uint32_t command, source, destination, extent; } rp_gpu_copy_packet_layout;
+typedef struct { uint32_t command, destination, extent; } rp_gpu_upload_packet_layout;
 typedef struct { uint32_t command, positions[4]; } rp_gpu_flat_packet_layout;
 typedef struct { int16_t x, y, z; } rp_gpu_position_layout;
 typedef struct {
@@ -70,6 +71,7 @@ typedef struct {
 uint32_t rp_pops_gpu_read(rp_context *, uint32_t address, uint32_t width);
 void rp_pops_gpu_write(rp_context *, uint32_t address, uint32_t word);
 uint32_t rp_pops_gpu_dma_transfer(rp_context *, uint32_t address, uint32_t bytes, uint32_t control);
+void rp_pops_gpu_submit_pending_list(rp_context *);
 /* Existing headless adapter for bounded state lists, not a POPSMAN body. */
 uint32_t rp_ge_capture_state_list(rp_context *, uint32_t address, int module_relative);
 enum { RP_GPU_DISPLAY_TRANSITION_ADDRESS = 0x49CBD4 };
@@ -78,6 +80,7 @@ _Static_assert(offsetof(rp_core_gpu_layout, data_read_latch) == 0x35BC, "GPU dat
 _Static_assert(sizeof(rp_gpu_texture_cache_entry) == 8, "GPU texture cache stride");
 _Static_assert(sizeof(rp_gpu_fill_packet_layout) == 12, "GPU fill packet bytes");
 _Static_assert(sizeof(rp_gpu_copy_packet_layout) == 16, "GPU copy packet bytes");
+_Static_assert(sizeof(rp_gpu_upload_packet_layout) == 12, "GPU upload header bytes");
 _Static_assert(offsetof(rp_core_gpu_layout, copy_cost_shift) == 0x718, "GPU copy cycle shift");
 _Static_assert(offsetof(rp_core_gpu_layout, copy_destination) == 0x3640, "GPU copy destination alias");
 _Static_assert(sizeof(rp_gpu_flat_packet_layout) == 20, "flat quad packet");

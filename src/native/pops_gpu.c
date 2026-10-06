@@ -1,6 +1,7 @@
 #include "pops_gpu.h"
 #include "pops_cdrom.h"
 #include "pops_dma.h"
+#include <stdlib.h>
 #include <string.h>
 
 #define GPU32(member) rp_u32(c, RP_GPU_ADDRESS(c, member))
@@ -15,6 +16,26 @@ static uint32_t emit_ge_word(rp_context *c, uint32_t cursor, uint32_t word)
     rp_w32(c, cursor, word);
     rp_event(c, "GPU_GE_word", "emitted_not_rendered", cursor, word);
     return cursor + 4;
+}
+
+/* POPS +0x12624/+0x128C8 call POPSMAN's 7014C540 with cursor+4. This
+ * headless adapter models its enqueue/sync fallback, not the MMIO fast path:
+ * FINISH closes the old list, END starts the stalled continuation. Neither
+ * the returned synthetic id nor these writes imply that GE work rendered. */
+void rp_pops_gpu_submit_pending_list(rp_context *c)
+{
+    if ((int8_t)GPU8(ge_transfer_pending) <= 0) return;
+    const uint32_t cursor = GPU32(list_cursor);
+    const uint32_t old_id = GPU32(list_id);
+    SET_GPU8(ge_transfer_pending, 0);
+    (void)emit_ge_word(c, cursor, 0x0F000000);
+    (void)emit_ge_word(c, cursor + 4, 0x0C000000);
+    SET_GPU32(list_cursor, cursor + 4);
+    c->ge_stalled_list = cursor + 4;
+    ++c->services;
+    SET_GPU32(list_id, ++c->next_id);
+    rp_event(c, "headless_adapter", "POPSMAN_7014C540_submit_captured_not_rendered",
+             old_id, GPU32(list_id));
 }
 
 /* +0x15650: drawing area changes also update display-intersection policy. */
@@ -220,6 +241,94 @@ static uint32_t copy_rectangle(rp_context *c, uint32_t packet, uint32_t *cursor)
     return work;
 }
 
+/* +0x157D8..+0x15D50: upload from a live guest buffer, by one GE rectangle
+ * or row transfers. A partial single row retains mode 9 and advances X.
+ * Partial multi-row/masked/wrapped-X uploads require the separate CPU path. */
+static uint32_t upload_pixels(rp_context *c, uint32_t source, uint32_t available,
+                              uint32_t *cursor, uint32_t *consumed, bool *partial)
+{
+    const uint32_t extent = GPU32(transfer_size);
+    uint32_t width = ((extent - 1) & 0x3FF) + 1;
+    const uint32_t height = (((extent >> 16) - 1) & 0x1FF) + 1;
+    const uint32_t x = GPU16(transfer_origin[0]), y = GPU16(transfer_origin[1]);
+    uint32_t words = (width * height + 1) >> 1;
+    *partial = available < words * 4;
+    if (x - GPU16(display_origin[0]) < GPU16(display_size[0]) &&
+        y - GPU16(display_origin[1]) < GPU16(display_size[1])) SET_GPU8(previous_field, 1);
+    const uint32_t source_x = (source & 15) >> 1;
+    if ((*partial && height != 1) || (GPU32(status) & 0x800) ||
+        width + x > 1024 || width + source_x > 1024)
+        rp_block(c, "GPU_upload_CPU_sync_path_not_reconstructed", 0x15D54);
+    SET_GPU8(ge_transfer_pending, 1);
+    if (*partial) {
+        words = available >> 2;
+        SET_GPU16(transfer_size[0], width - words * 2);
+        width = words * 2;
+    }
+    *consumed = words * 4;
+    rp_event(c, "host_adapter", "GPU_upload_cache_writeback_coherent_host", source, *consumed);
+    uint32_t out = *cursor;
+    const uint32_t source_base = 0xB2000000 | (source & 0xFFFFFF);
+    const uint32_t source_high = ((source >> 24) & 15) << 16;
+    const bool rows = *partial || (width & 7) || y + height > 512;
+    if (!rows) {
+        invalidate_rectangle_cache(c, x, y, x + width, y + height, true);
+        out = emit_ge_word(c, out, source_base);
+        out = emit_ge_word(c, out, 0xB3000000 | source_high | width);
+        out = emit_ge_word(c, out, 0xEB000000 | source_x);
+        out = emit_ge_word(c, out, 0xEC000000 | ((y & 511) << 10) | (x & 1023));
+        out = emit_ge_word(c, out, UINT32_C(0xEDFFFBFF) + width + (height << 10));
+        out = emit_ge_word(c, out, 0x13041B90);
+        out = emit_ge_word(c, out, 0x0A000008);
+    } else {
+        out = emit_ge_word(c, out, 0xB4000000);
+        out = emit_ge_word(c, out, 0xB5040400);
+        out = emit_ge_word(c, out, 0xB3000400 | source_high);
+        out = emit_ge_word(c, out, UINT32_C(0xEDFFFFFF) + width);
+        out = emit_ge_word(c, out, source_base);
+        uint32_t base = source_base, source_xy = 0xEB000000 + source_x;
+        uint32_t destination = 0xEC000000 | ((y & 511) << 10) | (x & 1023);
+        for (unsigned row = 0; row < height; ++row) {
+            out = emit_ge_word(c, out, destination);
+            if ((source_xy & 0x3FF) + width >= 1024) {
+                const uint32_t advance = source_xy & 0x3F8;
+                base += advance * 2;
+                out = emit_ge_word(c, out, base);
+                source_xy -= advance;
+            }
+            out = emit_ge_word(c, out, source_xy);
+            out = emit_ge_word(c, out, 0xEA000000);
+            destination = (destination + 0x400) & 0xFF07FFFF;
+            source_xy += width;
+        }
+        const bool update_tile = (rp_u32(c, RP_DEVICE_ADDRESS(c, compatibility_flags)) & 4) &&
+            !(((x + width - 1) ^ x) & ~UINT32_C(63)) &&
+            !(((y + height - 1) ^ y) & ~UINT32_C(255));
+        if (update_tile) {
+            const unsigned entry = ((y >> 8) & 1) * 16 + ((x >> 6) & 15);
+            if (GPU8(texture_cache[entry].cache_flags)) {
+                const uint32_t storage = GPU32(texture_cache[entry].storage_address);
+                out = emit_ge_word(c, out, 0xEB000000 | ((y & 511) << 10) | (x & 1023));
+                out = emit_ge_word(c, out, 0xB5000100 | (((storage >> 24) & 15) << 16));
+                out = emit_ge_word(c, out, 0xB4000000 | (storage & 0xFFFFFF));
+                out = emit_ge_word(c, out, 0xEC000000 | ((y & 255) << 10) | (x & 63));
+                out = emit_ge_word(c, out, UINT32_C(0xEDFFFBFF) + (width & 0x3FF) + (height << 10));
+                out = emit_ge_word(c, out, 0xCB000000);
+                out = emit_ge_word(c, out, 0x13041B90);
+                out = emit_ge_word(c, out, 0x0A0000C8);
+                if (GPU16(texture_cache[entry].group_x_origin)) {
+                    if (!entry) rp_block(c, "GPU_upload_cache_predecessor_domain", 0x15B90);
+                    SET_GPU8(texture_cache[entry - 1].cache_flags, 0);
+                }
+            }
+        } else invalidate_rectangle_cache(c, x, y, x + width, y + height, true);
+    }
+    if (*partial) SET_GPU16(transfer_origin[0], x + width);
+    *cursor = out;
+    rp_event(c, "GPU_upload", rows ? "GE_rows_pending" : "GE_rectangle_pending", source, words);
+    return words;
+}
+
 static int32_t coordinate11(uint32_t packed, unsigned shift)
 { return (int32_t)(((packed >> shift) & 0x7FF) ^ 0x400) - 0x400; }
 static uint32_t triangle_area2(const rp_gpu_position_layout *a,
@@ -233,6 +342,28 @@ static uint32_t triangle_area2(const rp_gpu_position_layout *a,
 /* +0x140A8..+0x14230, then shared +0x13A98: flat untextured primitives.
  * The original GE template jump skips inline vertex data. Z words and the
  * unused fourth vertex of a triangle are deliberately not overwritten. */
+static void trace_ge_polygon(rp_context *c, uint32_t body, unsigned count)
+{
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char *setting = getenv("REPOPS_GE_PREVIEW_TRACE");
+        enabled = setting && strcmp(setting, "1") == 0;
+    }
+    if (!enabled) return;
+    /* Observe the emitted GE record, not the source GP0 packet. This optional
+     * diagnostic never draws or mutates guest state. */
+    rp_event(c, "GE_preview", "polygon_begin", body, count);
+    rp_event(c, "GE_preview", "frame", GPU32(frame_counter), GPU32(display_mode));
+    rp_event(c, "GE_preview", "color_word", body + 4, rp_u32(c, body + 4));
+    rp_event(c, "GE_preview", "drawing_offset", 0, GPU32(drawing_offset));
+    rp_event(c, "GE_preview", "scissor_min", 0, GPU32(draw_area_start));
+    rp_event(c, "GE_preview", "scissor_max", 0, GPU32(draw_area_end));
+    for (unsigned i = 0; i < count; ++i)
+        rp_event(c, "GE_preview", "vertex_xy", i,
+                 rp_u32(c, RP_FIELD_ADDRESS(body, rp_gpu_flat_ge_layout, vertices[i].x)));
+    rp_event(c, "GE_preview", "polygon_end", body, count);
+}
+
 static uint32_t flat_polygon(rp_context *c, uint32_t packet, unsigned count, uint32_t *cursor)
 {
     const uint32_t command = rp_u32(c, RP_FIELD_ADDRESS(packet, rp_gpu_flat_packet_layout, command));
@@ -283,6 +414,7 @@ static uint32_t flat_polygon(rp_context *c, uint32_t packet, unsigned count, uin
     if (GPU8(draw_area_exceeds_display))
         invalidate_rectangle_cache(c, (uint32_t)min_x, (uint32_t)min_y, (uint32_t)max_x, (uint32_t)max_y, true);
     rp_event(c, "milestone", "GPU_flat_polygon_GE_data_prepared_not_rendered", count, work);
+    trace_ge_polygon(c, body, count);
     return work;
 }
 
@@ -331,6 +463,26 @@ static uint32_t consume_packet(rp_context *c, uint32_t source, uint32_t bytes)
             }
             work += copy_rectangle(c, packet, &out);
             offset += sizeof(rp_gpu_copy_packet_layout) - 4;
+        } else if (mode == 5) {
+            if (bytes - offset < sizeof(rp_gpu_upload_packet_layout))
+                rp_block(c, "GPU_upload_truncated_header", 0x154BC);
+            const uint32_t packet = source + offset;
+            const uint32_t destination = rp_u32(c, RP_FIELD_ADDRESS(packet, rp_gpu_upload_packet_layout, destination));
+            const uint32_t extent = rp_u32(c, RP_FIELD_ADDRESS(packet, rp_gpu_upload_packet_layout, extent));
+            if ((rp_u32(c, RP_DEVICE_ADDRESS(c, compatibility_flags)) & 64) &&
+                (word != 0xA0000000 || ((destination | extent) & 0xFE00FC00))) { mode = 0; break; }
+            SET_GPU32(transfer_origin, destination & 0x01FF03FF);
+            SET_GPU32(transfer_size, extent);
+            mode = 9;
+            offset += sizeof(rp_gpu_upload_packet_layout) - 4;
+            rp_event(c, "GPU_upload", "header_waiting_for_pixels", destination, extent);
+            continue;
+        } else if (mode == 9) {
+            uint32_t consumed = 0;
+            bool partial = false;
+            work += upload_pixels(c, source + offset, bytes - offset, &out, &consumed, &partial);
+            offset += consumed - 4;
+            if (partial) break;
         } else if (mode == 7) {
             out = drawing_environment(c, word, out);
         } else if (mode == 1 && !(word & 0x14000000)) {
@@ -356,8 +508,32 @@ uint32_t rp_pops_gpu_dma_transfer(rp_context *c, uint32_t address, uint32_t byte
 {
     rp_function(c, 0x12C74, "pops.GPU_DMA_linked_list_partial");
     if (!(control & 0x400)) {
-        rp_event(c, "GPU_DMA_boundary", "block_transfer_bytes", address, bytes);
-        rp_block(c, "GPU_DMA_block_transfer_not_reconstructed", 0x12E98);
+        if (!(control & 1))
+            rp_block(c, "GPU_DMA_VRAM_to_RAM_not_reconstructed", 0x12F90);
+        if (GPU8(packet_word_count))
+            rp_block(c, "GPU_DMA_block_buffer_prefix_not_reconstructed", 0x12F30);
+        const uint32_t source = UINT32_C(0x09800000) | (address & 0x1FFFFF);
+        SET_GPU32(status, GPU32(status) & ~UINT32_C(0x14000000));
+        const uint32_t work = consume_packet(c, source, bytes);
+        c->ge_stalled_list = GPU32(list_cursor);
+        ++c->services;
+        rp_event(c, "headless_adapter", "POPSMAN_E7F06E2B_DMA_stall_captured_not_rendered",
+                 c->ge_stalled_list, work);
+        uint32_t delay = bytes >> 2;
+        uint32_t result = bytes;
+        if (GPU32(ready_event.prev)) {
+            const uint32_t remaining = GPU32(ready_event.deadline_cycles) - rp_core_guest_cycles(c);
+            rp_pops_remove_event(c, RP_GPU_ADDRESS(c, ready_event));
+            delay += remaining;
+        }
+        if (rp_u32(c, RP_DEVICE_ADDRESS(c, compatibility_flags)) & 0x10) {
+            rp_pops_graphics_event(c, 0x125F0);
+            delay = 1;
+            result = 1;
+        }
+        rp_pops_schedule_event(c, RP_GPU_ADDRESS(c, ready_event), delay);
+        rp_event(c, "GPU_DMA", "block_transfer_consumed", source, bytes);
+        return result;
     }
     uint32_t node = UINT32_C(0x09800000) | (address & 0x1FFFFF);
     uint32_t previous = 1, consumed = 0, budget = 0x869, result = 0;
@@ -565,6 +741,9 @@ void rp_pops_gpu_write(rp_context *c, uint32_t address, uint32_t word)
     }
     if (delay) rp_pops_schedule_event(c, RP_GPU_ADDRESS(c, ready_event), delay);
     else SET_GPU32(status, GPU32(status) | 0x14000000);
+    /* +0x128AC tests the mode saved before consume_packet. Flush a port
+     * upload before its live source buffer can be reused by the next write. */
+    if (mode == 9) rp_pops_gpu_submit_pending_list(c);
     SET_GPU8(packet_extra_words, 0); SET_GPU8(packet_word_count, 0);
 }
 

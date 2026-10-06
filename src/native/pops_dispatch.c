@@ -1,4 +1,5 @@
 #include "runtime.h"
+#include "pops_state.h"
 #include "pops_emit.h"
 #include <string.h>
 
@@ -34,13 +35,13 @@ void rp_pops_default_write(rp_context *c, uint32_t address, uint32_t value, uint
     if (address == UINT32_C(0xFFFE0130)) {
         rp_w32(c, c->gp + 0x1E0, value);
         if (value == 0x804) {
-            rp_w32(c, c->gp + 0x1B0, rp_u32(c, c->gp + 0x1B0) - 0x20);
+            rp_core_set_downcount(c, rp_core_downcount(c) - 0x20);
             rp_pops_invalidate_ram_code(c);
         }
     } else if (address != 0x1F802040 && address != 0x1F802041 &&
                address != 0x1F802030 && address != 0x1F802070 &&
                (address & UINT32_C(0x1FFFFFFF)) + UINT32_C(0xE0400000) < 0x80000) {
-        rp_w32(c, c->gp + 0x1B0, rp_u32(c, c->gp + 0x1B0) - ((1u << (kind & 3)) + 15));
+        rp_core_set_downcount(c, rp_core_downcount(c) - ((1u << (kind & 3)) + 15));
     }
 }
 
@@ -57,11 +58,11 @@ static uint32_t update_interrupt_deadline(rp_context *c)
     const uint32_t status = rp_u32(c, c->gp + 0x130);
     const uint32_t cause = rp_u32(c, c->gp + 0x134);
     const uint32_t pending = status & 1 ? status & cause & 0xFF00 : 0;
-    const uint32_t downcount = rp_u32(c, c->gp + 0x1B0);
+    const uint32_t downcount = rp_core_downcount(c);
     if (pending) {
-        const uint32_t deadline = rp_u32(c, c->gp + 0x1AC);
-        rp_w32(c, c->gp + 0x1B0, 0);
-        rp_w32(c, c->gp + 0x1AC, deadline - downcount);
+        const uint32_t deadline = rp_u32(c, RP_CORE_CLOCK_ADDRESS(c, event_deadline));
+        rp_core_set_downcount(c, 0);
+        rp_w32(c, RP_CORE_CLOCK_ADDRESS(c, event_deadline), deadline - downcount);
     }
     return pending;
 }
@@ -75,9 +76,9 @@ static uint32_t lookup_block(rp_context *c, uint32_t pc)
     if (pc & 3) rp_block(c, "unaligned_PS1_dispatch_target", pc);
     uint32_t block = rp_u32(c, table);
     if (!block) {
-        rp_w32(c, c->gp + 0x1B0, c->run_gpr[25]);
+        rp_core_set_downcount(c, c->run_gpr[25]);
         block = ((pc >> 23) & 63) ? rp_pops_compile_bios_block(c, pc) : rp_pops_compile_ram_block(c, pc);
-        c->run_gpr[25] = rp_u32(c, c->gp + 0x1B0);
+        c->run_gpr[25] = rp_core_downcount(c);
     }
     ++c->compiled_transfers;
     rp_event(c, "execution_adapter", "enter_C_generated_block", pc, block);
@@ -108,6 +109,7 @@ static void native_helper(rp_context *c)
     uint32_t *r = c->run_gpr;
     switch (c->run_pc) {
     case 0x85F4:
+        rp_pops_me_service_due(c);
         r[2] = rp_pops_spu_read_register(c, r[4], r[5]);
         transfer(c, r[31]);
         return;
@@ -172,12 +174,12 @@ static void native_helper(rp_context *c)
             const uint32_t handler = rp_u32(c, c->gp + 0x1004 + index * 8);
             if (handler != 0x9C60 && handler != 0x98C4 && handler != 0x91BC && handler != 0x7F00)
                 rp_block(c, "dynamic_halfword_store_not_reconstructed", address);
-            rp_w32(c, c->gp + 0x1B0, r[25]);
+            rp_core_set_downcount(c, r[25]);
             if (handler == 0x98C4) rp_pops_irq_write(c, address, r[5]);
             else if (handler == 0x91BC) rp_pops_dma_control_write(c, address, r[5], 1);
             else if (handler == 0x7F00) rp_pops_spu_write_register(c, address, r[5], 1);
             else rp_pops_timer_write(c, address, r[5]);
-            r[25] = rp_u32(c, c->gp + 0x1B0);
+            r[25] = rp_core_downcount(c);
         }
         transfer(c, r[31]);
         return;
@@ -242,13 +244,14 @@ static void native_helper(rp_context *c)
                 if (index > 0x1FF) index = 0x1FF;
                 const uint32_t handler = rp_u32(c, c->gp + 0x1000 + index * 8);
                 if ((word_read || half_read) && handler == 0x9850) {
-                    rp_w32(c, c->gp + 0x1B0, r[25]);
+                    rp_core_set_downcount(c, r[25]);
                     r[2] = rp_pops_irq_read(c, address);
-                    r[25] = rp_u32(c, c->gp + 0x1B0);
+                    r[25] = rp_core_downcount(c);
                 } else if (handler == 0x85F4) {
-                    rp_w32(c, c->gp + 0x1B0, r[25]);
+                    rp_core_set_downcount(c, r[25]);
+                    rp_pops_me_service_due(c);
                     r[2] = rp_pops_spu_read_register(c, address, word_read ? 2 : half_read ? 5 : 0);
-                    r[25] = rp_u32(c, c->gp + 0x1B0);
+                    r[25] = rp_core_downcount(c);
                 } else if (handler == 0x8A54) {
                     rp_function(c, 0x8A54, "pops.read_shadow_register");
                     const uint32_t shadow = c->gp + (address & 0xFFF) + 0x2000;
@@ -267,9 +270,9 @@ static void native_helper(rp_context *c)
         } else {
             /* +0x1C68 -> +0x8ADC: no call-site specialization in this path. */
             r[5] = word_read ? 2 : half_read ? 5 : 0;
-            rp_w32(c, c->gp + 0x1B0, r[25]);
+            rp_core_set_downcount(c, r[25]);
             r[2] = rp_pops_constant_read(c, r[4], r[5]);
-            r[25] = rp_u32(c, c->gp + 0x1B0);
+            r[25] = rp_core_downcount(c);
         }
         if (specialized && c->run_pc == entry) {
             const uint32_t patch = r[31] - 8;
@@ -282,10 +285,10 @@ static void native_helper(rp_context *c)
         return;
     }
     case 0x2648:
-        rp_w32(c, c->gp + 0x1B0, r[25]);
+        rp_core_set_downcount(c, r[25]);
         if ((int32_t)r[25] <= 0) {
             r[2] = rp_pops_dispatch_events(c);
-            r[25] = rp_u32(c, c->gp + 0x1B0);
+            r[25] = rp_core_downcount(c);
         }
         r[4] = rp_u32(c, c->gp + 0x1A0);
         transfer(c, lookup_block(c, r[4]));
@@ -310,12 +313,12 @@ static void native_helper(rp_context *c)
             const uint32_t handler = rp_u32(c, c->gp + 0x1004 + index * 8);
             if (handler != 0x98C4 && handler != 0x91BC && handler != 0x9C60 && handler != 0x7F00)
                 rp_block(c, "dynamic_word_store_non_RAM_path", r[4]);
-            rp_w32(c, c->gp + 0x1B0, r[25]);
+            rp_core_set_downcount(c, r[25]);
             if (handler == 0x91BC) rp_pops_dma_control_write(c, r[4], r[5], 2);
             else if (handler == 0x9C60) rp_pops_timer_write(c, r[4], r[5]);
             else if (handler == 0x7F00) rp_pops_spu_write_register(c, r[4], r[5], 2);
             else rp_pops_irq_write(c, r[4], r[5]);
-            r[25] = rp_u32(c, c->gp + 0x1B0);
+            r[25] = rp_core_downcount(c);
         }
         transfer(c, r[31]);
         return;
@@ -340,9 +343,9 @@ static void native_helper(rp_context *c)
             r[25] += 4;
         } else {
             r[5] = 4;
-            rp_w32(c, c->gp + 0x1B0, r[25]);
+            rp_core_set_downcount(c, r[25]);
             r[2] = rp_pops_constant_read(c, address, 4);
-            r[25] = rp_u32(c, c->gp + 0x1B0);
+            r[25] = rp_core_downcount(c);
         }
         transfer(c, r[31]);
         return;
@@ -383,15 +386,15 @@ static void native_helper(rp_context *c)
     case 0x1A68:
         rp_w32(c, c->gp + 0x1A0, r[2]);
         rp_w32(c, c->gp + 0x1B4, r[31]);
-        rp_w32(c, c->gp + 0x1B0, r[25]);
+        rp_core_set_downcount(c, r[25]);
         r[2] = rp_pops_dispatch_events(c);
-        r[25] = rp_u32(c, c->gp + 0x1B0);
+        r[25] = rp_core_downcount(c);
         transfer(c, r[2]);
         return;
     case 0x1A80:
-        rp_w32(c, c->gp + 0x1B0, r[25]);
+        rp_core_set_downcount(c, r[25]);
         r[2] = rp_pops_dispatch_events(c);
-        r[25] = rp_u32(c, c->gp + 0x1B0);
+        r[25] = rp_core_downcount(c);
         transfer(c, lookup_block(c, rp_u32(c, c->gp + 0x1A0)));
         return;
     default:
@@ -407,7 +410,7 @@ void rp_pops_run_core(rp_context *c)
     memset(c->run_fpr, 0, sizeof(c->run_fpr));
     c->run_gpr[28] = c->gp;
     c->run_gpr[29] = 0x09800000;
-    c->run_gpr[25] = rp_u32(c, c->gp + 0x1B0);
+    c->run_gpr[25] = rp_core_downcount(c);
     rp_unicorn_open(c);
     transfer(c, lookup_block(c, rp_u32(c, c->gp + 0x1A0)));
     for (unsigned steps = 0; steps < 500000; ++steps) {

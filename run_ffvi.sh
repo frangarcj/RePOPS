@@ -40,7 +40,7 @@ if [ "${REPOPS_DIAGNOSTIC_SKIP_UI:-0}" = 1 ]; then
     echo 'DIAGNOSTIC: PSP startup UI is bypassed, not reconstructed.'
     set -- --diagnostic-skip-ui
 fi
-"$PYTHON" "$ROOT/scripts/run_native.py" --image "$IMAGE" --pbp "$PBP" --out "$RUN/result" "$@"
+"$PYTHON" "$ROOT/scripts/run_native.py" --image "$IMAGE" --pbp "$PBP" --out "$RUN/result" --timeout "${REPOPS_TIMEOUT:-30}" "$@"
 echo
 echo "Execution milestones:"
 "$PYTHON" - "$RUN/result/trace.jsonl" <<'PY'

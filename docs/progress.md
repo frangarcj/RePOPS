@@ -1,6 +1,32 @@
 # RePops progress
 
-## Active workstream: structure recovery, not new functionality
+## Current: active ME samples and SPU polling progress
+
+Vertical execution has resumed, interleaving each recovered function with the
+types it exposes. New code must use those names in native C, not merely in
+Ghidra. `pops_state.h` now supplies wire layouts and named clock/postmix field
+accesses; the actual ME scheduling code calls `rp_core_guest_cycles(c)`.
+
+The active callback completes its reached idle-CD, disabled-reverb-write and
+fixed-master-volume path. A synthetic test returns packed sample 0x007C01F2;
+the real startup run completes 1,056 active samples, all zero. It does not
+complete the callback's other paths or demonstrate audible FFVI music.
+See `me_idle_postmix.md`; the master and reverb layouts are also in the fresh
+16-root Ghidra archive at `out/postmix-types.1kF9Iy/export/repops_types.gdt`.
+
+The first run exposed ME starvation during SPUSTAT polling. A lazy cooperative
+step at the SPU read boundary now advances the real callback instead of faking
+the status value. `out/postmix-vertical.i4gao4/result/` records a complete run
+through that wait and subsequent initialization: 26,736,885 cache instruction
+observations, 2,615 transfers, next boundary enabled reverb writes +0x5AC.
+`game_executed` remains false. See `me_poll_scheduling.md` for scope and the
+120-second host cap used by this run; earlier 30-second timeouts are not success.
+
+Native SPU, ME-worker, event and Unicorn tests pass. The callback remains one
+partial function: the comparable coverage stays 11.2% closed / 19.8% including
+partials, not a measure of hours or game compatibility.
+
+## Earlier structural workstream
 
 The requested first pass is in `pops_state_layout.md` and
 `../data/state_layout.json`. It distinguishes main scratchpad GP, shared-ME GP,

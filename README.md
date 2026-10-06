@@ -64,13 +64,22 @@ clear, writes SPU registers through C and executes calls/returns in the
 `BFC06EC4` region. It also executes the copied RAM program through POPS's
 second generated-code cache, returning to BIOS helpers and programming the
 interrupt registers. It now passes RAM decompression, timer setup, RAM exception
-vectors and SPU register reads/writes. SPUCNT=C010 reaches the enabled ME callback
-in C, consumes its pending masks and initializes the first voice's release state.
-The current stop is `ME_voice_sample_path_not_reconstructed` at `+0x11CC`,
-before the active callback returns a sample. The run records 9,580,458 generated-
-cache instruction observations and 1,688 entry transfers; fast-helper thunks
-are excluded from that observation count. These are not original-function
-coverage measurements. FFVI has not booted and no active audio is claimed.
+vectors and SPU register reads/writes. The reached active ME callback now processes
+voices and idle postmix and returns packed samples. A cooperative host step
+also lets it progress during SPUSTAT polling. The current completed run stops
+at `ME_enabled_reverb_write_path_not_reconstructed`, `+0x5AC`, after a later
+SPUCNT=C080 write. It records 26,736,885 generated-cache instruction observations,
+2,615 entry transfers and 1,056 active callback samples (all zero in this startup
+path). A separate synthetic fixture produces a nonzero packed sample.
+These are not function-coverage measurements or proof that FFVI booted.
+No rendered game or audible music has been demonstrated.
+
+The longer path can exceed the default 30-second host limit. The completed run
+used `REPOPS_DIAGNOSTIC_SKIP_UI=1 REPOPS_TIMEOUT=120 ./run_ffvi.sh`. The timeout
+setting changes the host cap, not the emulated clock. New native code uses the
+recovered names in `pops_state.h`; older anonymous fields are migrated as their
+functions are revisited. See [idle postmix](docs/me_idle_postmix.md) and
+[ME polling progress](docs/me_poll_scheduling.md).
 
 See [the current Unicorn integration](docs/unicorn_execution.md),
 [the earlier generated-execution experiment](docs/generated_code_execution.md),

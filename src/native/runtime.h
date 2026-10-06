@@ -32,6 +32,7 @@ typedef struct rp_context {
     uint32_t mc_thread_entry, mc_semaphore_count, mc_worker_ready;
     uint32_t me_callback, me_request, me_ack, me_value;
     uint32_t me_stack_hi, me_stack_lo, me_output_words, me_last_output;
+    uint32_t me_last_sample_cycles; /* Cooperative host clock, not firmware state. */
     uint32_t ge_commands[512], ge_command_count, ge_lists_captured;
     uint32_t ge_stalled_list, ge_edram_translation;
     /* Temporary execution adapter for code emitted by the reconstructed C.
@@ -108,6 +109,7 @@ void rp_pops_spu_write_register(rp_context *, uint32_t, uint32_t, uint32_t);
 uint32_t rp_pops_spu_read_register(rp_context *, uint32_t, uint32_t);
 void rp_pops_start_me(rp_context *);
 void rp_pops_me_poll(rp_context *);
+void rp_pops_me_service_due(rp_context *);
 bool rp_pops_spu_inactive_sample(rp_context *, uint32_t *);
 bool rp_pops_spu_sample(rp_context *, uint32_t *);
 void rp_pops_analyze_records(rp_context *, uint32_t);

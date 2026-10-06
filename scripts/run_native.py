@@ -20,7 +20,10 @@ def main():
     ap.add_argument('--diagnostic-skip-ui',action='store_true',
                     help='Explicitly bypass PSP startup UI to investigate core initialization')
     ap.add_argument('--elf',type=Path,default=ROOT/'build/pops_660.prx.dec')
+    ap.add_argument('--timeout',type=float,default=30,
+                    help='Host execution limit in seconds; not guest-time emulation')
     args=ap.parse_args()
+    if not 0 < args.timeout <= 600: ap.error('Timeout must be in (0, 600] seconds')
     if args.out.exists(): ap.error('Refusing existing output directory')
     original=Image(args.elf)
     if hashlib.sha256(original.data).hexdigest()!=SOURCE_SHA256:ap.error('Wrong original POPS hash')
@@ -42,11 +45,12 @@ def main():
     command=[str(ROOT/'build/repops-native'),str(binary.resolve()),str(imports_file.resolve()),str(trace.resolve())]
     if args.pbp is not None:command.append(str(args.pbp.resolve()))
     if args.diagnostic_skip_ui:command.append('--diagnostic-skip-ui')
-    run=subprocess.run(command,cwd=ROOT,capture_output=True,text=True,timeout=30)
+    run=subprocess.run(command,cwd=ROOT,capture_output=True,text=True,timeout=args.timeout)
     (args.out/'stdout.log').write_text(run.stdout+run.stderr)
     events=[json.loads(line) for line in trace.read_text().splitlines()] if trace.exists() else []
     last=events[-1] if events else {'status':'no_result'}
     report={'exit_code':run.returncode,'result':last,'original_sha256':SOURCE_SHA256,
+            'host_timeout_seconds':args.timeout,
             'diagnostic_ui_bypassed':args.diagnostic_skip_ui,
             'image_sha256':manifest['image_sha256'],'native_binary_sha256':hashlib.sha256((ROOT/'build/repops-native').read_bytes()).hexdigest(),
             'scope':'Reconstructed POPS C plus Unicorn MIPS32 execution of the generated cache; original PRX pages are nonexecutable',

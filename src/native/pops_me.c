@@ -1,4 +1,5 @@
 #include "runtime.h"
+#include "pops_state.h"
 #include "../me_registration.h"
 
 /* A nonzero logical identity for POPS offset zero in this native harness.
@@ -75,7 +76,10 @@ static bool sample(void *ctx, uint32_t entry, uint32_t *packed)
     rp_context *c = ctx;
     if (entry != CALLBACK_ID) rp_block(c, "unknown_native_me_callback", entry);
     rp_event(c, "milestone", "me_worker_reached_pops_sample_callback", 0, c->me_output_words);
-    return rp_pops_spu_sample(c, packed);
+    const bool produced = rp_pops_spu_sample(c, packed);
+    if (produced)
+        c->me_last_sample_cycles = rp_core_guest_cycles(c);
+    return produced;
 }
 void rp_pops_me_poll(rp_context *c)
 {
@@ -87,6 +91,17 @@ void rp_pops_me_poll(rp_context *c)
     case RP_ME_PARKED: rp_block(c, "native_me_worker_parked", 0x2F88);
     default: break;
     }
+}
+
+/* Lazy host scheduling at a SPU read boundary. The firmware reader itself
+ * does not run the ME; on PSP that processor advances independently. */
+void rp_pops_me_service_due(rp_context *c)
+{
+    if (!c->me_callback) return;
+    const uint32_t now = rp_core_guest_cycles(c);
+    if (now - c->me_last_sample_cycles < RP_GUEST_SAMPLE_CYCLES) return;
+    rp_event(c, "host_adapter", "ME_step_due_at_SPU_read", now, RP_GUEST_SAMPLE_CYCLES);
+    rp_pops_me_poll(c);
 }
 static void start_worker(void *ctx, uint32_t shifted_k1)
 {

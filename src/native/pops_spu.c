@@ -1,4 +1,5 @@
 #include "runtime.h"
+#include "pops_state.h"
 #include <string.h>
 
 #define SHARED UINT32_C(0x49F40000)
@@ -199,12 +200,164 @@ static int32_t sample_voice(rp_context *c, uint32_t voice, unsigned index, int32
     return value;
 }
 
-/* Active callback through the voice loop. Final CD/reverb/output processing
- * remains a boundary; no packed output is returned by this prefix.
- */
-static void active_sample_prefix(rp_context *c, uint16_t control)
+static int32_t multiply_q15(int32_t a, int32_t b)
 {
-    rp_function(c, 0, "pops.spu_active_sample_prefix");
+    return (int32_t)(uint32_t)((int64_t)a * b) >> 15;
+}
+
+static uint32_t reverb_address(int32_t units)
+{
+    if (units > 0xFFFF) units = 0xFFFF;
+    return RP_SHARED_ADDRESS(sample_ram) + (uint32_t)units * 8;
+}
+
+/* +0x434..+0x54C: parameter writes also rebuild both channel pointer sets. */
+static void refresh_reverb_parameters(rp_context *c)
+{
+    const int32_t base = read_half(c, RP_SHARED_ADDRESS(reverb_base_units));
+    memcpy(rp_memory(c, RP_MIXER_ADDRESS(reverb_parameters.iir_gain), 16),
+           rp_memory(c, RP_SHARED_ADDRESS(reverb_coefficients), 16), 16);
+    rp_w32(c, RP_MIXER_ADDRESS(reverb_parameters.work_area_base), reverb_address(base));
+    for (unsigned i = 0; i < 10; ++i) {
+        rp_w32(c, RP_MIXER_ADDRESS(reverb_channels[0].taps) + i * sizeof(uint32_t),
+               reverb_address(base + read_half(c, RP_SHARED_ADDRESS(reverb_tap_units) + i * 4)));
+        rp_w32(c, RP_MIXER_ADDRESS(reverb_channels[1].taps) + i * sizeof(uint32_t),
+               reverb_address(base + read_half(c, RP_SHARED_ADDRESS(reverb_tap_units) + i * 4 + sizeof(uint16_t))));
+    }
+    for (unsigned channel = 0; channel < 2; ++channel) {
+        const uint32_t state = rp_reverb_channel_address(channel);
+        rp_w32(c, RP_FIELD_ADDRESS(state, rp_reverb_channel_layout, input_gain),
+               (uint32_t)signed_half(read_half(c, RP_SHARED_ADDRESS(reverb_input_gain) + channel * sizeof(int16_t))));
+        for (unsigned stage = 0; stage < 2; ++stage)
+            rp_w32(c, RP_FIELD_ADDRESS(state, rp_reverb_channel_layout, taps[RP_RV_APF1_READ]) + stage * sizeof(uint32_t),
+                   reverb_address(base + read_half(c, RP_SHARED_ADDRESS(reverb_tap_units[8]) + stage * 4 + channel * sizeof(uint16_t))
+                                  - read_half(c, RP_SHARED_ADDRESS(allpass_delay_units) + stage * sizeof(uint16_t))));
+    }
+    if (*(uint8_t *)rp_memory(c, RP_MIXER_ADDRESS(reverb_tail_compatibility), 1))
+        write_half(c, RP_MIXER_ADDRESS(capture_cursor), 0);
+}
+
+/* Reverb-disabled route +0xC84 -> +0x65C. It still reads taps, advances
+ * addresses and filters the old tail; disabling writes is not a reset. */
+static void advance_reverb_tail(rp_context *c, unsigned phase, int32_t *left, int32_t *right)
+{
+    const uint32_t address = rp_reverb_channel_address(phase);
+    const uint32_t taps = RP_FIELD_ADDRESS(address, rp_reverb_channel_layout, taps);
+    const uint32_t history = RP_FIELD_ADDRESS(address, rp_reverb_channel_layout, history);
+    const uint32_t wrap = RP_ME_SHARED_BASE + sizeof(rp_me_shared_layout);
+    const uint32_t base = rp_u32(c, RP_MIXER_ADDRESS(reverb_parameters.work_area_base));
+    const uint32_t irq = rp_u32(c, RP_MIXER_ADDRESS(irq_cursor));
+    rp_reverb_channel_layout channel;
+    channel.input_gain = (int32_t)rp_u32(c, RP_FIELD_ADDRESS(address, rp_reverb_channel_layout, input_gain));
+    for (unsigned i = 0; i < RP_RV_TAP_COUNT; ++i) channel.taps[i] = rp_u32(c, taps + i * sizeof(uint32_t));
+    for (unsigned i = 0; i < 3; ++i) channel.history[i] = (int32_t)rp_u32(c, history + i * sizeof(int32_t));
+    bool irq_seen = irq == 0;
+    for (unsigned i = 0; i < RP_RV_TAP_COUNT; ++i) irq_seen |= irq == channel.taps[i];
+
+    const unsigned combs[] = {RP_RV_COMB0, RP_RV_COMB1, RP_RV_COMB2, RP_RV_COMB3};
+    int64_t sum = 0;
+    for (unsigned i = 0; i < 4; ++i)
+        sum += (int64_t)signed_half(read_half(c, channel.taps[combs[i]])) *
+                       signed_half(read_half(c, RP_MIXER_ADDRESS(reverb_parameters.comb_gain) + i * sizeof(int16_t)));
+    const int32_t first_old = signed_half(read_half(c, channel.taps[RP_RV_APF1_READ]));
+    const int32_t second_old = signed_half(read_half(c, channel.taps[RP_RV_APF2_READ]));
+    const int32_t first_gain = signed_half(read_half(c, RP_MIXER_ADDRESS(reverb_parameters.allpass_gain[0])));
+    const int32_t second_gain = signed_half(read_half(c, RP_MIXER_ADDRESS(reverb_parameters.allpass_gain[1])));
+    const int32_t first = clamp_sample((int32_t)(sum >> 15) - multiply_q15(first_old, first_gain));
+    const int32_t second = clamp_sample(first_old + multiply_q15(first, first_gain)
+                                       - multiply_q15(second_old, second_gain));
+    int32_t signal = clamp_sample(second_old + multiply_q15(second, second_gain));
+    if (!*(uint8_t *)rp_memory(c, RP_MIXER_ADDRESS(reverb_tail_compatibility), 1)) signal = 0;
+
+    for (unsigned i = 0; i < RP_RV_TAP_COUNT; ++i) {
+        uint32_t next = channel.taps[i] + 2;
+        if (next == wrap) next = base;
+        if (i == RP_RV_SAME_WRITE || i == RP_RV_DIFF_WRITE) irq_seen |= irq == next;
+        rp_w32(c, taps + i * sizeof(uint32_t), next);
+    }
+    if (irq_seen) rp_w8(c, RP_MIXER_ADDRESS(irq_latch), 1);
+    const int32_t current = clamp_sample((int32_t)(uint32_t)(
+        (int64_t)(channel.history[1] + channel.history[2]) * 15901 +
+        (int64_t)(channel.history[0] + signal) * 418) >> 15);
+    rp_w32(c, history, (uint32_t)channel.history[1]);
+    rp_w32(c, history + sizeof(int32_t), (uint32_t)channel.history[2]);
+    rp_w32(c, history + 2 * sizeof(int32_t), (uint32_t)signal);
+    const uint32_t other = RP_FIELD_ADDRESS(rp_reverb_channel_address(phase ^ 1), rp_reverb_channel_layout, history);
+    const int32_t a = (int32_t)rp_u32(c, other);
+    const int32_t b = (int32_t)rp_u32(c, other + sizeof(int32_t));
+    const int32_t d = (int32_t)rp_u32(c, other + 2 * sizeof(int32_t));
+    const int32_t interpolated = clamp_sample((int32_t)(uint32_t)(
+        (int64_t)(a + b) * 4839 + (int64_t)d * 22962) >> 15);
+    *left = phase ? interpolated : current;
+    *right = phase ? current : interpolated;
+}
+
+static uint32_t finish_active_mix(rp_context *c, uint16_t control, uint32_t dirty,
+                                  uint32_t left, uint32_t right)
+{
+    if (!(control & 0x4000)) left = right = 0;
+    const int32_t cd_state = (int8_t)*(uint8_t *)rp_memory(c, RP_SHARED_ADDRESS(cd_notification), 1);
+    if (cd_state > 0)
+        rp_block(c, "ME_CD_stream_mix_not_reconstructed", 0x2A0);
+    if (cd_state == -1) {
+        write_half(c, RP_SHARED_ADDRESS(transfer_notification), 0);
+        rp_w32(c, RP_MIXER_ADDRESS(cd_stream_state), 0);
+        rp_w8(c, RP_MIXER_ADDRESS(cd_active), 0);
+        rp_w32(c, RP_MIXER_ADDRESS(cd_block_pointer), 0);
+        rp_w8(c, RP_SHARED_ADDRESS(cd_notification), 0xFE);
+    }
+    const uint32_t cursor = read_half(c, RP_MIXER_ADDRESS(capture_cursor));
+    write_half(c, rp_capture_address(0, cursor), 0);
+    write_half(c, rp_capture_address(1, cursor), 0);
+    const unsigned phase = cursor & 1;
+    if (dirty & 0x80000000) refresh_reverb_parameters(c);
+    if (control & 0x80)
+        rp_block(c, "ME_enabled_reverb_write_path_not_reconstructed", 0x5AC);
+    int32_t wet_left, wet_right;
+    advance_reverb_tail(c, phase, &wet_left, &wet_right);
+    left += (uint32_t)multiply_q15(wet_left, signed_half(read_half(c, RP_SHARED_ADDRESS(reverb_volume[0]))));
+    right += (uint32_t)multiply_q15(wet_right, signed_half(read_half(c, RP_SHARED_ADDRESS(reverb_volume[1]))));
+
+    const uint32_t master = RP_MIXER_ADDRESS(master_volume);
+    const uint32_t volumes = rp_u32(c, RP_SHARED_ADDRESS(master_volume_raw));
+    if (rp_u32(c, RP_FIELD_ADDRESS(master, rp_master_volume_layout, raw_volume_pair)) != volumes) {
+        rp_w32(c, RP_FIELD_ADDRESS(master, rp_master_volume_layout, raw_volume_pair), volumes);
+        if (volumes & 0x80008000)
+            rp_block(c, "ME_master_volume_sweep_setup_not_reconstructed", 0xB48);
+        write_half(c, RP_FIELD_ADDRESS(master, rp_master_volume_layout, left.level), (uint16_t)(volumes << 1));
+        write_half(c, RP_FIELD_ADDRESS(master, rp_master_volume_layout, left.countdown), 0);
+        write_half(c, RP_FIELD_ADDRESS(master, rp_master_volume_layout, right.level), (uint16_t)((volumes >> 16) << 1));
+        write_half(c, RP_FIELD_ADDRESS(master, rp_master_volume_layout, right.countdown), 0);
+    }
+    if (read_half(c, RP_FIELD_ADDRESS(master, rp_master_volume_layout, left.countdown)) || read_half(c, RP_FIELD_ADDRESS(master, rp_master_volume_layout, right.countdown)))
+        rp_block(c, "ME_master_volume_sweep_step_not_reconstructed", 0xADC);
+    const int32_t gain_l = signed_half(read_half(c, RP_FIELD_ADDRESS(master, rp_master_volume_layout, left.level)));
+    const int32_t gain_r = signed_half(read_half(c, RP_FIELD_ADDRESS(master, rp_master_volume_layout, right.level)));
+    const int32_t sample_l = multiply_q15(clamp_sample((int32_t)left), gain_l);
+    const int32_t sample_r = multiply_q15(clamp_sample((int32_t)right), gain_r);
+    rp_w32(c, RP_SHARED_ADDRESS(effective_master_volume), (uint16_t)gain_l | ((uint32_t)(uint16_t)gain_r << 16));
+    uint32_t packed = (uint16_t)sample_l | ((uint32_t)(uint16_t)sample_r << 16);
+    if (!(control & 0x4003)) packed = 0;
+
+    const uint32_t capture = read_half(c, RP_MIXER_ADDRESS(capture_cursor));
+    const uint32_t irq_address = rp_u32(c, RP_MIXER_ADDRESS(irq_cursor));
+    uint8_t irq_latch = *(uint8_t *)rp_memory(c, RP_MIXER_ADDRESS(irq_latch), 1);
+    irq_latch |= ((irq_address - (rp_capture_address(0, capture))) & 0xFFFFF3FF) == 0;
+    const uint32_t next_capture = (capture + 1) & (RP_CAPTURE_SAMPLES - 1);
+    rp_w8(c, RP_MIXER_ADDRESS(irq_latch), irq_latch);
+    write_half(c, RP_MIXER_ADDRESS(capture_cursor), (uint16_t)next_capture);
+    rp_w32(c, RP_SHARED_ADDRESS(end_mask), rp_u32(c, RP_MIXER_ADDRESS(end_mask)));
+    write_half(c, RP_SHARED_ADDRESS(status), (control & 0x3F) | ((irq_latch != 0) << 6) |
+               ((next_capture >> 8) << 11));
+    rp_event(c, "milestone", "ME_active_sample_completed", next_capture, packed);
+    return packed;
+}
+
+/* Reached active path: voices followed by idle CD, disabled-reverb maintenance
+ * and fixed master volume. Other routes retain explicit boundaries. */
+static uint32_t active_sample(rp_context *c, uint16_t control)
+{
+    rp_function(c, 0, "pops.spu_active_sample_partial");
     write_half(c, SHARED + 0x29E, 1);
     rp_w32(c, SHARED + 0x294, rp_u32(c, SHARED + 0x294) + 1);
     const uint32_t dirty = rp_u32(c, SHARED + 0x288);
@@ -343,7 +496,7 @@ static void active_sample_prefix(rp_context *c, uint16_t control)
     }
     rp_event(c, "milestone", "ME_24_voice_loop_complete", left_sum, right_sum);
     rp_event(c, "milestone", "ME_voice_reverb_inputs", reverb_left, reverb_right);
-    rp_block(c, "ME_post_voice_mix_not_reconstructed", 0x288);
+    return finish_active_mix(c, control, dirty, left_sum, right_sum);
 }
 
 bool rp_pops_spu_sample(rp_context *c, uint32_t *packed)
@@ -351,6 +504,6 @@ bool rp_pops_spu_sample(rp_context *c, uint32_t *packed)
     const uint16_t control = read_half(c, SHARED + 0x1AA);
     if (!(control & 0x8000)) return rp_pops_spu_inactive_sample(c, packed);
     if ((rp_u32(c, SHARED + 0x29C) & 0xFFFF) == 0x100) return false;
-    active_sample_prefix(c, control);
-    return false;
+    *packed = active_sample(c, control);
+    return true;
 }

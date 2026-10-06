@@ -21,7 +21,7 @@ build/repops-analyze: src/native/runtime.c src/native/pops_analyze.c src/native/
 	mkdir -p build
 	$(CC) -std=c11 -Wall -Wextra -Werror $(CFLAGS) src/native/runtime.c src/native/pops_analyze.c src/native/pops_compile.c src/native/pops_emit.c src/native/pops_emit_memory.c src/native/analyze_main.c -o $@
 
-build/repops-native: $(NATIVE_SRC) src/native/runtime.h src/bootstrap.h src/me_startup.h src/me_registration.h src/native/me_worker.h src/native/pops_emit.h src/native/pops_ir.h
+build/repops-native: $(NATIVE_SRC) src/native/runtime.h src/native/pops_state.h src/bootstrap.h src/me_startup.h src/me_registration.h src/native/me_worker.h src/native/pops_emit.h src/native/pops_ir.h
 	mkdir -p build
 	@test -f "$(UNICORN_ROOT)/include/unicorn/unicorn.h" || { echo 'Install unicorn==2.1.4 in the local Python environment, or set UNICORN_ROOT'; exit 1; }
 	$(CC) -std=c11 -Wall -Wextra -Werror $(CFLAGS) $(PNG_CFLAGS) $(UNICORN_CFLAGS) $(NATIVE_SRC) $(PNG_LIBS) $(UNICORN_LIBS) -o $@
@@ -66,7 +66,7 @@ build/test_me_worker: src/native/me_worker.c src/native/me_worker.h tests/test_m
 test-native-me: build/test_me_worker
 	./build/test_me_worker
 
-build/test_native_spu: src/native/runtime.c src/native/runtime.h src/native/pops_spu.c tests/test_native_spu.c
+build/test_native_spu: src/native/runtime.c src/native/runtime.h src/native/pops_state.h src/native/pops_spu.c tests/test_native_spu.c
 	mkdir -p build
 	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_spu.c tests/test_native_spu.c -o $@
 

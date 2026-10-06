@@ -5,9 +5,15 @@
   and not merely running the original firmware inside another emulator.
 - JPCSP may supply reference semantics and a comparison oracle. Original PRX
   files are analysis inputs. Measure progress by the native C execution path.
-- Current phase after 1021632: recover and name state structures. The user
-  asked to pause new emulator functionality; do not resume feature expansion
-  without a new instruction. Finish checks for existing changes as needed.
+- Current phase after 5d3c8c1: the user explicitly resumed vertical execution
+  work. Follow the integrated FFVI path and correct issues as they appear,
+  using recovered types rather than waiting for a complete structural map.
+- Interleave function recovery and local type recovery. Earlier anonymous
+  offsets are technical debt to resolve when revisiting that area, not a
+  prerequisite for another exhaustive global layout pass.
+- Use the recovered field names in new native C, not only Ghidra/JSON. Keep
+  wire offsets in layout types/accessors (pops_state.h); new callers must not
+  reintroduce known fields as raw gp/base plus hexadecimal offsets.
 - Preserve earlier hybrid-PRX/isolated-test experiments, but prioritize an
   integrated executable over perfect byte matching or exhaustive leaf tests.
 - Media Engine code is explicitly in scope: recover the POPS callback, the

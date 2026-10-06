@@ -25,7 +25,7 @@ public class ImportStateLayouts extends GhidraScript {
             case "u16": return UnsignedShortDataType.dataType;
             case "i16": return ShortDataType.dataType;
             case "u32": return UnsignedIntegerDataType.dataType;
-            case "i32_fixed_point": return IntegerDataType.dataType;
+            case "i32": case "i32_fixed_point": return IntegerDataType.dataType;
             case "guest_address32": case "guest_code_address32":
                 DataType alias = new TypedefDataType(category, name, UnsignedIntegerDataType.dataType);
                 resolved.put(name, alias);

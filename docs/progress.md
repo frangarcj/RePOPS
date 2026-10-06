@@ -1,5 +1,25 @@
 # RePops progress
 
+## Active workstream: structure recovery, not new functionality
+
+The requested first pass is in `pops_state_layout.md` and
+`../data/state_layout.json`. It distinguishes main scratchpad GP, shared-ME GP,
+the private mixer base and an alternate GP context whose ownership remains open.
+Nine descriptive type layouts cover events, frame phases, timers, I/O pairs,
+shared voice registers, volume/envelope state, mixer voices and compiler records.
+Their field widths/extents were checked; that is not complete behavioral recovery.
+
+The concrete `gp + 0x35F0` field is `frame_phase.event.callback`, inside the
+event at GP+0x35E4. Important unresolved/overlapping cases include the sentinel
+control word, phase-dependent compiler records and alternate-GP lifecycle.
+No mass offset replacement or Ghidra type installation has been performed.
+
+`reverse_coverage.md` records the measured percentage: 60 of 536 historical
+internal inventory entries have complete reconstructed bodies (11.2%); another
+46 are partial (19.8% combined). Twenty additional ledger starts are outside
+that inventory and counted separately. This is not remaining-time or game-boot
+completion. The full ledger still reports 66 complete and 60 partial POPS entries.
+
 ## Current: the active ME callback reaches the end of its voice loop
 
 `out/ffvi_run.ZeJEMV/result/` reaches `ME_post_voice_mix_not_reconstructed`

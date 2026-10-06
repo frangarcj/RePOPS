@@ -5,6 +5,9 @@
   and not merely running the original firmware inside another emulator.
 - JPCSP may supply reference semantics and a comparison oracle. Original PRX
   files are analysis inputs. Measure progress by the native C execution path.
+- Current phase after 1021632: recover and name state structures. The user
+  asked to pause new emulator functionality; do not resume feature expansion
+  without a new instruction. Finish checks for existing changes as needed.
 - Preserve earlier hybrid-PRX/isolated-test experiments, but prioritize an
   integrated executable over perfect byte matching or exhaustive leaf tests.
 - Media Engine code is explicitly in scope: recover the POPS callback, the

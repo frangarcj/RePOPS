@@ -76,6 +76,38 @@ int main(void)
     assert(cursor == cause + 12);
     assert(rp_u32(c, cause) == 0x83850135 && rp_u32(c, cause + 4) == 0x7C050804);
     assert(rp_u32(c, cause + 8) == 0xA3850135);
+    /* Signed-half policy preserves the live source and stores a sign-extended
+     * word, using the original distinct GPR, saved-slot and FPR sequences. */
+    rp_emit_init_registers(c, cursor);
+    uint32_t half_start = cursor;
+    cursor = rp_emit_store_state(c, RP_STATE_STORE_SIGNED_HALF_WORD, 8, 0x11C, cursor);
+    assert(cursor == half_start + 8);
+    assert(rp_u32(c, half_start) == (0x7C000620 | (16u << 16) | (8u << 11)));
+    assert(rp_u32(c, half_start + 4) == 0xAF88011C);
+    assert(rp_emit_lookup_register(c, 8) == 16);
+    assert(*(uint8_t *)rp_memory(c, RP_EMIT_ADDRESS(c, temporary_guest[0]), 1) == 0);
+    rp_emit_init_registers(c, cursor);
+    half_start = cursor;
+    cursor = rp_emit_store_state(c, RP_STATE_STORE_SIGNED_HALF_WORD, 13, 0x11C, cursor);
+    assert(cursor == half_start + 8 && rp_u32(c, half_start) == 0x87880194);
+    assert(rp_u32(c, half_start + 4) == 0xAF88011C);
+    rp_emit_init_registers(c, cursor);
+    half_start = cursor;
+    cursor = rp_emit_store_state(c, RP_STATE_STORE_SIGNED_HALF_WORD, 10, 0x11C, cursor);
+    assert(cursor == half_start + 12 && rp_u32(c, half_start) == 0x4408A000);
+    assert(rp_u32(c, half_start + 4) == (0x7C000620 | (8u << 16) | (8u << 11)));
+    assert(rp_u32(c, half_start + 8) == 0xAF88011C);
+    for (unsigned already_signed = 0; already_signed < 2; ++already_signed) {
+        rp_emit_init_registers(c, cursor);
+        rp_w32(c, RP_EMIT_ADDRESS(c, known_register_mask), 0x80800000);
+        const uint32_t value = already_signed ? UINT32_C(0xFFFF8001) : 0x8001;
+        rp_w32(c, RP_EMIT_ADDRESS(c, known_register_values[8]), value);
+        half_start = cursor;
+        cursor = rp_emit_store_state(c, RP_STATE_STORE_SIGNED_HALF_WORD, 8, 0x11C, cursor);
+        assert(cursor == half_start + (already_signed ? 4 : 8));
+        assert(rp_u32(c, cursor - 4) == (already_signed ? 0xAF90011C : 0xAF88011C));
+        assert(rp_u32(c, RP_EMIT_ADDRESS(c, known_register_values[8])) == value);
+    }
     /* Dynamic SW selects the original helper and retains argument setup in
      * its JAL delay slot. No emulated bus is substituted by the compiler. */
     rp_emit_init_registers(c, cursor);

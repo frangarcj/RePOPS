@@ -35,7 +35,8 @@ static uint32_t saved_offset(uint32_t reg)
 }
 static bool known(rp_context *c, uint32_t reg)
 {
-    return (rp_u32(c, c->gp + 0xB58) & (UINT32_C(0x80000000) >> (reg & 31))) != 0;
+    return (rp_u32(c, RP_EMIT_ADDRESS(c, known_register_mask)) &
+            (UINT32_C(0x80000000) >> (reg & 31))) != 0;
 }
 
 /* Selected setup from +0x5D64..+0x5E44. Surrounding RAM prologue and cache
@@ -44,11 +45,11 @@ static bool known(rp_context *c, uint32_t reg)
 void rp_emit_init_registers(rp_context *c, uint32_t out)
 {
     memset(rp_memory(c, c->gp + 0x740, 0x2C), 0, 0x2C);
-    memcpy(rp_memory(c, c->gp + 0x76C, 12), rp_module_memory(c, 0xD40E8, 12), 12);
-    memcpy(rp_memory(c, c->gp + 0x778, 32), rp_module_memory(c, 0xD40C8, 32), 32);
-    rp_w32(c, c->gp + 0x740, out);
-    rp_w32(c, c->gp + 0xB58, 0x80000000);
-    rp_w32(c, c->gp + 0xB5C, 0);
+    memcpy(rp_memory(c, RP_EMIT_ADDRESS(c, temporary_host), 12), rp_module_memory(c, 0xD40E8, 12), 12);
+    memcpy(rp_memory(c, RP_EMIT_ADDRESS(c, register_location), 32), rp_module_memory(c, 0xD40C8, 32), 32);
+    rp_w32(c, RP_EMIT_ADDRESS(c, block_begin), out);
+    rp_w32(c, RP_EMIT_ADDRESS(c, known_register_mask), 0x80000000);
+    rp_w32(c, RP_EMIT_ADDRESS(c, known_register_values[0]), 0);
 }
 
 /* +0x2950: nonnegative mappings are GPRs; values below -1 identify FPRs. */

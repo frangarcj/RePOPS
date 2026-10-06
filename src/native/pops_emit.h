@@ -2,6 +2,26 @@
 #define REPOPS_POPS_EMIT_H
 #include "pops_ir.h"
 #include "runtime.h"
+#include "pops_state.h"
+
+/* Selected compiler wire state. Saved slots are not a dense 32-GPR array;
+ * the original normalized register encoding selects the backing slot. */
+typedef struct {
+    uint8_t earlier_state[0x180];
+    uint32_t saved_register_slots[8];
+    uint8_t unknown_1a0[0x740 - 0x1A0];
+    uint32_t block_begin;
+    uint8_t unknown_744[0x754 - 0x744];
+    uint8_t temporary_dirty[12], temporary_guest[12], temporary_host[12];
+    int8_t register_location[32];
+    uint8_t unknown_798[0xB58 - 0x798];
+    uint32_t known_register_mask, known_register_values[32];
+} rp_core_emit_layout;
+#define RP_EMIT_ADDRESS(c, member) RP_FIELD_ADDRESS((c)->gp, rp_core_emit_layout, member)
+_Static_assert(offsetof(rp_core_emit_layout, temporary_guest) == 0x760, "emitter temporary owners");
+_Static_assert(offsetof(rp_core_emit_layout, register_location) == 0x778, "emitter register locations");
+_Static_assert(offsetof(rp_core_emit_layout, known_register_mask) == 0xB58, "emitter known mask");
+_Static_assert(offsetof(rp_core_emit_layout, known_register_values) == 0xB5C, "emitter known values");
 
 /* All cursors/words are guest numeric addresses and Allegrex instructions.
  * None of these functions creates callable host machine code.

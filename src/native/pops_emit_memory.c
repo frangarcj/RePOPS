@@ -29,7 +29,8 @@ static uint32_t sign16(uint32_t value)
 }
 static bool known(rp_context *c, uint32_t reg)
 {
-    return (rp_u32(c, c->gp + 0xB58) & (UINT32_C(0x80000000) >> (reg & 31))) != 0;
+    return (rp_u32(c, RP_EMIT_ADDRESS(c, known_register_mask)) &
+            (UINT32_C(0x80000000) >> (reg & 31))) != 0;
 }
 static void invalidate_temporary_names(rp_context *c)
 {
@@ -430,13 +431,30 @@ static uint32_t emit_plain_state(rp_context *c, uint32_t policy, uint32_t guest,
         rp_block(c, "special_state_write_destination_not_reconstructed", offset);
     if (guest & 0x80)
         return emit(c, out, 0xAF800000 | ((guest & 31) << 16) | (offset & 0xFFFF));
-    if (policy > 2) return out;
-    if (policy == 1) {
-        const uint32_t value = rp_u32(c, c->gp + 0xB5C + guest * 4);
-        if (!known(c, guest) || value != sign16(value))
-            rp_block(c, "signed_half_state_policy_not_reconstructed", 0x4930);
+    if (policy > RP_STATE_STORE_HALF) return out;
+    if (policy == RP_STATE_STORE_SIGNED_HALF_WORD) {
+        const uint32_t value = rp_u32(c, RP_EMIT_ADDRESS(c, known_register_values[guest]));
+        if (!known(c, guest) || value != sign16(value)) {
+            /* +0x4954: do not truncate the guest's live GPR/FPR in place.
+             * Reserve a separate temporary, extend there, then store a word. */
+            const uint32_t temp = rp_emit_temp(c, 4, 0);
+            const int32_t mapped = rp_emit_lookup_register(c, guest);
+            if (mapped >= 0) {
+                out = emit(c, out, 0x7C000620 | ((uint32_t)mapped << 16) | (temp << 11));
+            } else if (mapped == -1) {
+                const uint32_t slot = offsetof(rp_core_emit_layout, saved_register_slots) +
+                                      (guest & 0x60) + ((guest & 7) << 2);
+                out = emit(c, out, 0x87800000 | (temp << 16) | slot);
+            } else {
+                out = rp_emit_load_register(c, out, temp, guest);
+                out = emit(c, out, 0x7C000620 | (temp << 16) | (temp << 11));
+            }
+            out = emit(c, out, 0xAF800000 | (temp << 16) | (offset & 0xFFFF));
+            rp_emit_release_temp(c, temp);
+            return out;
+        }
     }
-    if (policy != 2) {
+    if (policy != RP_STATE_STORE_HALF) {
         const int32_t mapped = rp_emit_lookup_register(c, guest);
         if (mapped < -1) {
             const uint32_t previous = rp_u32(c, out - 4), fpr = (0u - (uint32_t)mapped) & 31;
@@ -448,7 +466,7 @@ static uint32_t emit_plain_state(rp_context *c, uint32_t policy, uint32_t guest,
     }
     const uint32_t allocation = rp_emit_allocate(c, out, guest, 0, 2);
     return emit(c, (allocation >> 5) << 2,
-                (policy == 2 ? 0xA7800000 : 0xAF800000) |
+                (policy == RP_STATE_STORE_HALF ? 0xA7800000 : 0xAF800000) |
                 ((allocation & 31) << 16) | (offset & 0xFFFF));
 }
 

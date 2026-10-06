@@ -1,5 +1,16 @@
 # RePops progress
 
+## Current: signed-half state emission reaches ME reconfiguration
+
+`out/signed-state.axjdmp/result/` passes +0x4930 using reconstructed C and
+executes the generated result before reaching `ME_envelope_reconfiguration_not_reconstructed`
+at +0x16E4. It records 39,468,863 observations and 40,333 transfers; no game
+boot or rendered frame is claimed.
+
+The policy now handles GPR, FPR and saved-slot sources without modifying the
+guest source in place. Named compiler fields accompany exact-emission and
+existing emitter/Unicorn smoke checks. See `cpu_signed_state_policy.md`.
+
 ## Current: 640x480 fill and GPU-ready event pass
 
 `out/gpu-fill-ready.6tT86C/result/` emits the original GE fill template for

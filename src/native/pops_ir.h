@@ -67,6 +67,14 @@ typedef enum rp_pops_emit_pseudo {
     RP_EMIT_SIGN_HALF = 0x82
 } rp_pops_emit_pseudo;
 
+/* +0x46A0 policy for ordinary state destinations, after special COP cases. */
+typedef enum rp_pops_state_store_policy {
+    RP_STATE_STORE_WORD = 0,
+    RP_STATE_STORE_SIGNED_HALF_WORD = 1,
+    RP_STATE_STORE_HALF = 2,
+    RP_STATE_STORE_IGNORE = 3
+} rp_pops_state_store_policy;
+
 static inline const char *rp_pops_category_name(unsigned category)
 {
     switch (category) {

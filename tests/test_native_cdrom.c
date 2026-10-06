@@ -7,9 +7,10 @@ void rp_pops_graphics_event(rp_context *c, uint32_t cb) { (void)c; (void)cb; abo
 void rp_pops_initialize_core(rp_context *c) { (void)c; abort(); }
 void rp_pops_invalidate_ram_code(rp_context *c) { (void)c; abort(); }
 void rp_pops_prepare_exception(rp_context *c, uint32_t v) { (void)c; (void)v; abort(); }
-/* Reset/audio pacing are integration dependencies, not exercised by this fixture. */
+/* Audio sync is an observed call boundary here; the integration run uses the ME. */
+static unsigned audio_sync_calls;
 void rp_pops_cd_controller_reset(rp_context *c) { (void)c; abort(); }
-void rp_pops_cd_audio_sync(rp_context *c) { (void)c; abort(); }
+void rp_pops_cd_audio_sync(rp_context *c) { (void)c; ++audio_sync_calls; }
 void rp_pops_audio_pace(rp_context *c) { (void)c; abort(); }
 
 int main(void)
@@ -118,7 +119,43 @@ int main(void)
     rp_w8(c, RP_CD_ADDRESS(c, saved_flag), 0);
     assert(rp_pops_cd_seek_cycles(c, 7000) == 1);
 
+    /* Setmode schedules a drive transition before exposing its command reply. */
+    memset(c->scratchpad, 0, sizeof(c->scratchpad));
+    rp_w32(c, head, head); rp_w32(c, RP_CORE_CLOCK_ADDRESS(c, event_head_prev), head);
+    rp_w32(c, RP_CORE_CLOCK_ADDRESS(c, event_deadline), 0x1000000);
+    rp_core_set_downcount(c, 0x1000000);
+    rp_w8(c, RP_CD_ADDRESS(c, deferred_command), 0xFF);
+    rp_w8(c, RP_CD_ADDRESS(c, mode), 0x20);
+    rp_w8(c, RP_CD_ADDRESS(c, drive_status), 2);
+    rp_w32(c, RP_CD_ADDRESS(c, primary.event.callback), 0xC268);
+    rp_w32(c, RP_CD_ADDRESS(c, secondary.event.callback), 0xC268);
+    rp_w32(c, RP_CD_ADDRESS(c, drive_event.callback), 0xCE00);
+    *(uint8_t *)rp_module_memory(c, 0xD47D4 + 0xE, 1) = 1;
+    rp_pops_cd_write(c, 2, 0x80); rp_pops_cd_write(c, 1, 0xE);
+    assert(rp_cd_u8(c, RP_CD_ADDRESS(c, mode)) == 0x80);
+    assert(rp_cd_u8(c, RP_CD_ADDRESS(c, speed_transition)) == 1);
+    assert(rp_u32(c, RP_CD_ADDRESS(c, drive_event.deadline_cycles)) == 10000);
+    assert(rp_u32(c, RP_CD_ADDRESS(c, primary.event.deadline_cycles)) == 0x4000);
+    assert(rp_cd_u8(c, RP_CD_ADDRESS(c, irq_flags)) == 0);
+    rp_core_set_downcount(c, 0); (void)rp_pops_dispatch_events(c);
+    assert(rp_cd_u8(c, RP_CD_ADDRESS(c, speed_transition)) == 0);
+    /* Publish the reply with a known future event following it. */
+    rp_pops_schedule_event(c, RP_CD_ADDRESS(c, drive_event), 0x100000);
+    rp_core_set_downcount(c, 0); (void)rp_pops_dispatch_events(c);
+    rp_pops_cd_write(c, 0, 1); rp_pops_cd_write(c, 3, 7); rp_pops_cd_write(c, 0, 0);
+
+    const uint32_t read_start = rp_core_guest_cycles(c);
+    rp_w32(c, RP_DEVICE_ADDRESS(c, cd_timing_flags), 0x40);
+    rp_w32(c, RP_CD_ADDRESS(c, current_sector), 4);
+    rp_w32(c, RP_DEVICE_ADDRESS(c, cd_read_request), 0); /* Prefetch already queued. */
+    rp_pops_cd_write(c, 1, 6);
+    assert(audio_sync_calls == 1);
+    assert(rp_u32(c, RP_CD_ADDRESS(c, sector_event.callback)) == 0xC5EC);
+    assert(rp_u32(c, RP_CD_ADDRESS(c, sector_event.deadline_cycles)) == read_start + 0x3B200);
+    assert(rp_cd_u8(c, RP_CD_ADDRESS(c, irq_flags)) == 0);
+    assert(!(rp_cd_u8(c, RP_CD_ADDRESS(c, status_index)) & 0x40));
+
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[1].bytes); free(c->regions[2].bytes); free(c);
-    puts("CD: banks, parameter FIFO, scheduled response, IRQ acknowledgement and data cursor passed.");
+    puts("CD: registers, responses, seek, Setmode transition and deferred ReadN scheduling passed.");
     return 0;
 }

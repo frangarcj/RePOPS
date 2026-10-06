@@ -1,6 +1,19 @@
 # RePops progress
 
-## Current: CD Setloc and SeekL deliver their responses
+## Current: Setmode and ReadN reach the first sector event
+
+`out/cd-readn.LUz1jf/result/` completes Setmode and ReadN and stops at the
+scheduled sector callback +0xC5EC. The command is acknowledged, but no sector
+has been loaded or exposed as ready. It records 38,444,924 generated-cache
+observations and 13,397 transfers; `game_executed` remains false.
+
+Setmode preserves its inline event detach/reinsert behavior, including drive
+speed transitions. ReadN uses the existing timing, seek, response and prefetch
+state. Native CD/event tests cover the speed-event deadline, response timing,
+and deferred sector scheduling. The command body stays partial and coverage
+percentages are unchanged. See `cd_controller.md`.
+
+## Earlier: CD Setloc and SeekL deliver their responses
 
 The native controller now handles banked registers, parameters, delayed
 responses and IRQ acknowledgement. `out/cd-seek.grqSK4/result/` completes

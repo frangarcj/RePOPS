@@ -263,7 +263,7 @@ uint32_t rp_pops_dispatch_events(rp_context *c)
         rp_w32(c, previous, next);
         rp_w32(c, event + 4, 0);
         rp_event(c, "milestone", "guest_event_due", callback, deadline);
-        if (callback == 0xC268 || callback == 0xCE00)
+        if (callback == 0xC268 || callback == 0xCE00 || callback == 0xC5EC)
             rp_pops_cd_event(c, event, callback);
         else
             rp_pops_graphics_event(c, callback);

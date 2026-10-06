@@ -27,8 +27,9 @@ model, not PSP thread wakeup or cache-timing validation.
 `make test-native-cdrom test-native-events test-native-spu test-native-me`
 passes. Tests cover FIFO capacity, delayed Getstat, pending-response IRQ
 chaining, signed byte reads, data cursor clamping, Setloc prefetch requests,
-and zero/long-seek arithmetic. Reset/audio services outside that fixture's
-tested paths are aborting stubs, not silently successful implementations.
+and zero/long-seek arithmetic. The ReadN fixture records the audio-sync call
+as a boundary; the integrated run uses the actual reconstructed ME path.
+Other unexercised reset/pacing dependencies are aborting stubs.
 
 `data/state_layout.json` records the CD layouts for subsequent Ghidra imports;
 this increment checks their extents and native static assertions rather than
@@ -41,3 +42,18 @@ It stops on Setmode 0x0E/0x80, with 38,182,482 generated-cache observations and
 4,883 transfers. The intervening audio wait calls the actual reconstructed ME
 producer for 574 samples in the host adapter; its 13,035-us request is preserved.
 The CD worker's queued block has not been read or decoded by this increment.
+
+## Setmode and ReadN follow-up
+
+Setmode +0xB5EC..+0xB734 handles drive speed transitions and postpones an
+already scheduled sector event. Its inline unlink differs from the general
+remove helper: it does not adjust the core deadline before reinsertion.
+ReadN/ReadS +0xBE48..+0xBFCC schedule the sector callback with the original
+speed/seek delays and preserve outstanding-response rules. Neither path
+fabricates a data-ready bit or marks the worker request completed.
+
+The local fixture checks the fast speed-change delay of 10,000 cycles, the
+separate acknowledgement at 0x4000, and ReadN's deferred callback. Integrated
+`out/cd-readn.LUz1jf/result/` reaches +0xC5EC with 38,444,924 observations and
+13,397 transfers. Retrieving the sector through +0xD5CC and the CD worker is
+the next boundary. No completed sector I/O is claimed yet.

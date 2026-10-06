@@ -11,6 +11,17 @@
 
 static void command(rp_context *c, unsigned opcode);
 
+/* Setmode immediately reinserts these nodes. Unlike the general remove helper,
+ * its inline unlink does not adjust the core deadline/downcount. */
+static void reschedule_mode_event(rp_context *c, uint32_t event, uint32_t delay)
+{
+    const uint32_t next = rp_u32(c, RP_FIELD_ADDRESS(event, rp_guest_event_layout, next));
+    const uint32_t prev = rp_u32(c, RP_FIELD_ADDRESS(event, rp_guest_event_layout, prev));
+    rp_w32(c, RP_FIELD_ADDRESS(next, rp_guest_event_layout, prev), prev);
+    rp_w32(c, RP_FIELD_ADDRESS(prev, rp_guest_event_layout, next), next);
+    rp_pops_schedule_event(c, event, delay);
+}
+
 /* +0xC480: the long-seek term multiplies truncated SQRT.S by 6000.
  * Raw decompiler pointer arithmetic obscures that factor as 1500. */
 uint32_t rp_pops_cd_seek_cycles(rp_context *c, uint32_t sector)
@@ -203,6 +214,64 @@ static void command(rp_context *c, unsigned opcode)
         }
     }
     switch (opcode) {
+    case 0xE: {
+        const uint8_t mode = CD8(parameters[0]);
+        const uint8_t changed = CD8(mode) ^ mode;
+        (void)primary_response(c, 1, 0x4000);
+        SET8(mode, mode);
+        if (!CD32(drive_event.prev) && (!(CD8(drive_status) & 2) || (changed & 0x80))) {
+            uint32_t delay = 0x3073200;
+            if (CD8(drive_status) & 2) {
+                SET8(speed_transition, 1);
+                delay = (rp_u32(c, RP_DEVICE_ADDRESS(c, cd_timing_flags)) & 0x80) ? 0x204CC00 : 0x2710;
+            }
+            rp_pops_schedule_event(c, RP_CD_ADDRESS(c, drive_event), delay);
+            if (CD32(sector_event.prev)) {
+                delay += CD32(sector_event.deadline_cycles) - rp_core_guest_cycles(c);
+                reschedule_mode_event(c, RP_CD_ADDRESS(c, sector_event), delay);
+            }
+        } else if (CD8(speed_transition) == 1 && (changed & 0x80)) {
+            SET8(speed_transition, 2);
+            const uint32_t remaining = CD32(drive_event.deadline_cycles) - rp_core_guest_cycles(c);
+            uint32_t extension = UINT32_C(0x4099800) - remaining * 4;
+            if ((int32_t)extension > 0x204CC00) extension = 0x204CC00;
+            reschedule_mode_event(c, RP_CD_ADDRESS(c, drive_event), remaining + extension);
+        }
+        if (changed & 0x41) {
+            if (mode & 0x41) rp_w32(c, RP_SHARED_ADDRESS(cd_volume_matrix), CD32(volume_matrix));
+            else { rp_pops_audio_pace(c); rp_w32(c, RP_SHARED_ADDRESS(cd_volume_matrix), 0); }
+        }
+        break;
+    }
+    case 6: case 0x1B: {
+        if (CD8(lid_phase) || (!(CD8(drive_status) & 2) && !CD32(drive_event.prev) && !CD8(location_pending))) {
+            SET8(error_flag, 1); SET8(error_code, 0x80);
+        }
+        if (!primary_response(c, 1, 0x4000)) break;
+        if (CD32(sector_event.prev)) {
+            if (!CD8(location_pending) && CD32(sector_event.callback) == 0xC5EC) break;
+            SET32(playing_sector, 0);
+            rp_pops_remove_event(c, RP_CD_ADDRESS(c, sector_event));
+            SET8(drive_status, CD8(drive_status) & 0x17);
+        }
+        uint32_t delay = (CD8(mode) & 0x80) ? 0x3B200 : 0x72400;
+        rp_pops_cd_audio_sync(c);
+        if (CD8(location_pending)) delay += rp_pops_cd_seek_cycles(c, CD32(requested_sector));
+        else if (!(rp_u32(c, RP_DEVICE_ADDRESS(c, cd_timing_flags)) & 0x40)) delay += 0x52B000;
+        if (CD8(drive_status) & 0x40) {
+            const uint32_t remaining = CD32(seek_deadline) - rp_core_guest_cycles(c);
+            if (delay < remaining) {
+                delay = remaining;
+                if (CD32(secondary.event.prev)) rp_pops_remove_event(c, RP_CD_ADDRESS(c, secondary));
+            }
+        } else if (!CD8(location_pending)) SET8(drive_status, CD8(drive_status) | 0x40);
+        SET32(sector_event.callback, 0xC5EC);
+        rp_pops_schedule_event(c, RP_CD_ADDRESS(c, sector_event), delay);
+        request_prefetch(c, CD32(current_sector));
+        SET8(audio_muted, 0);
+        if (CD8(mode) & 0x40) rp_w32(c, RP_SHARED_ADDRESS(cd_volume_matrix), CD32(volume_matrix));
+        break;
+    }
     case 2: {
         if (CD8(lid_phase)) { SET8(error_flag, 1); SET8(error_code, 0x80); }
         else if (CD8(parameters[1]) >= 0x60 || CD8(parameters[2]) >= 0x75 ||

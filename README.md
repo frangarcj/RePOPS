@@ -69,8 +69,9 @@ voices and idle postmix and returns packed samples. A cooperative host step
 also lets it progress during SPUSTAT polling. Enabled reverb now processes its
 ordered RAM writes; signed halfword readers let CPU initialization continue to
 the CD-ROM controller. Its native register/response path now completes Setloc
-and SeekL and stops at the next command, Setmode 0x0E with parameter 0x80.
-It records 38,182,482 generated-cache observations and 4,883 transfers. A CD
+and SeekL, then accepts Setmode and ReadN. It stops at the scheduled sector
+callback +0xC5EC, before a disk block is loaded or delivered. The run records
+38,444,924 generated-cache observations and 13,397 transfers. A CD
 worker read request is queued, not completed. Guarded LH/LHU RAM
 reads remove 54,406 C crossings while preserving the selected device/audio
 event trace. A separate synthetic fixture produces a nonzero packed sample.

@@ -3,6 +3,8 @@
 #include <stdlib.h>
 
 static unsigned callbacks;
+void rp_pops_cd_event(rp_context *c, uint32_t event, uint32_t callback)
+{ (void)c; (void)event; (void)callback; abort(); }
 
 /* One scripted callback isolates the scheduler's unlink and time accounting. */
 void rp_pops_graphics_event(rp_context *c, uint32_t callback)

@@ -1,4 +1,5 @@
 #include "runtime.h"
+#include "pops_cdrom.h"
 #include "pops_emit.h"
 #include "../me_startup.h"
 #include <string.h>
@@ -266,53 +267,65 @@ static void code_cache_reset(rp_context *c)
     /* VWB.Q R403 writes the zero row prepared at +0x1C55C. */
     memset(rp_memory(c, 0x09C00000, 0x280000), 0, 0x280000);
 }
-static void cd_audio_sync(rp_context *c)
+void rp_pops_audio_pace(rp_context *c)
+{
+    rp_function(c, 0x11520, "pops.audio_pacing");
+    const uint32_t elapsed = rp_core_guest_cycles(c) - rp_u32(c, RP_DEVICE_ADDRESS(c, audio_cycle_origin));
+    const uint32_t produced = rp_u32(c, RP_SHARED_ADDRESS(callback_count)) -
+                              rp_u32(c, RP_DEVICE_ADDRESS(c, audio_sample_origin));
+    const uint32_t pending = elapsed - produced * UINT32_C(0x300);
+    if ((int32_t)pending < 0xD3B) return;
+    const uint32_t produced_cycles = produced * UINT32_C(0x300);
+    if ((rp_u32(c, RP_DEVICE_ADDRESS(c, display_mode)) & 0x1000) &&
+        (int32_t)pending < ((int32_t)produced_cycles >> 1)) return;
+    const uint32_t delay = ((pending * UINT32_C(1741)) >> 16) >> ((int32_t)elapsed > 0x84E10);
+    rp_pops_me_delay(c, delay);
+}
+void rp_pops_cd_audio_sync(rp_context *c)
 {
     rp_function(c, 0xD9F4, "pops.cd_audio_sync_prefix");
-    if (*(uint8_t *)rp_memory(c, c->gp + 0x3E46, 1))
+    if (rp_cd_u8(c, RP_DEVICE_ADDRESS(c, cd_audio_read_pending)))
         rp_block(c, "pending_cd_audio_read_not_reconstructed", 0xD9F4);
-    rp_function(c, 0x11520, "pops.audio_pacing_no_delay_path");
-    const uint32_t elapsed = rp_u32(c, c->gp + 0x1AC) - rp_u32(c, c->gp + 0x1B0)
-                             - rp_u32(c, c->gp + 0x360C);
-    const uint32_t produced = rp_u32(c, 0x49F40294) - rp_u32(c, c->gp + 0x3608);
-    const uint32_t pending = elapsed - produced * UINT32_C(0x300);
-    if ((int32_t)pending > 0xD3A)
-        rp_block(c, "audio_pacing_delay_path_not_reconstructed", 0x11520);
-    rp_w8(c, 0x49F40293, 0xFF);
+    rp_pops_audio_pace(c);
+    rp_w8(c, RP_SHARED_ADDRESS(cd_notification), 0xFF);
 }
-static void cd_controller_reset(rp_context *c)
+void rp_pops_cd_controller_reset(rp_context *c)
 {
     rp_function(c, 0x1ADB0, "pops.cd_controller_reset");
-    const uint8_t mode = *(uint8_t *)rp_memory(c, c->gp + 0x3880, 1);
-    const uint8_t saved = *(uint8_t *)rp_memory(c, c->gp + 0x388F, 1);
-    rp_w32(c, c->gp + 0x38B0, 0);
-    if (rp_u32(c, c->gp + 0x384C)) rp_block(c, "active_cd_timer_unlink", 0x9668);
-    rp_w8(c, c->gp + 0x389D, *(uint8_t *)rp_memory(c, c->gp + 0x389D, 1) & 0x17);
-    const uint32_t links[] = {0x3820, 0x3804, 0x383C, 0x385C};
+    const uint8_t mode = rp_cd_u8(c, RP_CD_ADDRESS(c, audio_muted));
+    const uint8_t saved = rp_cd_u8(c, RP_CD_ADDRESS(c, saved_flag));
+    rp_w32(c, RP_CD_ADDRESS(c, playing_sector), 0);
+    if (rp_u32(c, RP_CD_ADDRESS(c, sector_event.prev)))
+        rp_pops_remove_event(c, RP_CD_ADDRESS(c, sector_event));
+    rp_w8(c, RP_CD_ADDRESS(c, drive_status), rp_cd_u8(c, RP_CD_ADDRESS(c, drive_status)) & 0x17);
+    const uint32_t events[] = {RP_CD_ADDRESS(c, secondary), RP_CD_ADDRESS(c, primary),
+                              RP_CD_ADDRESS(c, unknown_event), RP_CD_ADDRESS(c, drive_event)};
     for (unsigned i = 0; i < 4; ++i)
-        if (rp_u32(c, c->gp + links[i])) rp_block(c, "active_cd_timer_unlink", 0x9668);
-    const uint8_t retained = *(uint8_t *)rp_memory(c, c->gp + 0x388D, 1);
-    memset(rp_memory(c, c->gp + 0x3800, 0xB8), 0, 0xB8);
-    rp_w8(c, c->gp + 0x388F, saved);
-    rp_w8(c, c->gp + 0x38BC, *(uint8_t *)rp_memory(c, c->gp + 0x38BC, 1) & 0xDF);
-    rp_w8(c, c->gp + 0x388D, retained);
-    rp_w32(c, c->gp + 0x380C, 0xC268);
-    rp_w32(c, c->gp + 0x3828, 0xC268);
-    rp_w32(c, c->gp + 0x3864, 0xCE00);
-    rp_w8(c, c->gp + 0x389C, 0x20);
-    halfword(c, c->gp + 0x387A, 12);
-    rp_w8(c, c->gp + 0x389D, 2);
-    rp_w8(c, c->gp + 0x3880, mode);
-    halfword(c, c->gp + 0x387C, 0x930);
+        if (rp_u32(c, RP_FIELD_ADDRESS(events[i], rp_guest_event_layout, prev)))
+            rp_pops_remove_event(c, events[i]);
+    const uint8_t retained = rp_cd_u8(c, RP_CD_ADDRESS(c, retained_config));
+    const size_t cleared = offsetof(rp_cdrom_layout, volume_matrix);
+    memset(rp_memory(c, RP_DEVICE_ADDRESS(c, cd), cleared), 0, cleared);
+    rp_w8(c, RP_CD_ADDRESS(c, saved_flag), saved);
+    rp_w8(c, RP_CD_ADDRESS(c, status_index), rp_cd_u8(c, RP_CD_ADDRESS(c, status_index)) & 0xDF);
+    rp_w8(c, RP_CD_ADDRESS(c, retained_config), retained);
+    rp_w32(c, RP_CD_ADDRESS(c, primary.event.callback), 0xC268);
+    rp_w32(c, RP_CD_ADDRESS(c, secondary.event.callback), 0xC268);
+    rp_w32(c, RP_CD_ADDRESS(c, drive_event.callback), 0xCE00);
+    rp_w8(c, RP_CD_ADDRESS(c, mode), 0x20);
+    rp_cd_w16(c, RP_CD_ADDRESS(c, data_cursor), 12);
+    rp_w8(c, RP_CD_ADDRESS(c, drive_status), 2);
+    rp_w8(c, RP_CD_ADDRESS(c, audio_muted), mode);
+    rp_cd_w16(c, RP_CD_ADDRESS(c, data_limit), 0x930);
     struct timespec now;
     if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) rp_block(c, "host_clock_failed", 0x1ADB0);
     const uint32_t micros = (uint32_t)((uint64_t)now.tv_sec * 1000000 + now.tv_nsec / 1000);
     ++c->services;
     rp_event(c, "host_adapter", "system_time_low_monotonic", 0x1ADB0, micros);
-    rp_w32(c, c->gp + 0x38A0, micros);
-    rp_w8(c, c->gp + 0x387E, 0xFF);
-    cd_audio_sync(c);
-    rp_w32(c, 0x49F4028C, rp_u32(c, c->gp + 0x38B8));
+    rp_w32(c, RP_CD_ADDRESS(c, random_state), micros);
+    rp_w8(c, RP_CD_ADDRESS(c, deferred_command), 0xFF);
+    rp_pops_cd_audio_sync(c);
+    rp_w32(c, RP_SHARED_ADDRESS(cd_volume_matrix), rp_u32(c, RP_CD_ADDRESS(c, volume_matrix)));
     rp_pops_install_dma(c, 3, 0xCE18);
     rp_pops_map_io(c, 0x1F801800, 0x10, 0xD088, 0xD1B0);
 }
@@ -415,7 +428,7 @@ void rp_pops_initialize_core(rp_context *c)
     disc_state_reset(c);
     serial_reset(c);
     code_cache_reset(c);
-    cd_controller_reset(c);
+    rp_pops_cd_controller_reset(c);
     gpu_status_reset(c);
     timers_reset(c);
     rp_event(c, "milestone", "initial_device_handler_tables_prepared", 0x11000, 0x1000);

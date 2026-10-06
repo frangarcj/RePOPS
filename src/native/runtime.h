@@ -111,6 +111,7 @@ uint32_t rp_pops_spu_read_register(rp_context *, uint32_t, uint32_t);
 void rp_pops_start_me(rp_context *);
 void rp_pops_me_poll(rp_context *);
 void rp_pops_me_service_due(rp_context *);
+void rp_pops_me_delay(rp_context *, uint32_t);
 bool rp_pops_spu_inactive_sample(rp_context *, uint32_t *);
 bool rp_pops_spu_sample(rp_context *, uint32_t *);
 void rp_pops_analyze_records(rp_context *, uint32_t);

@@ -103,6 +103,22 @@ void rp_pops_me_service_due(rp_context *c)
     rp_event(c, "host_adapter", "ME_step_due_at_SPU_read", now, RP_GUEST_SAMPLE_CYCLES);
     rp_pops_me_poll(c);
 }
+
+/* Headless replacement for a PSP thread delay: guest CPU time is stationary
+ * while the separate ME producer runs. 44.1-kHz pacing is an adapter model,
+ * not a claim about PSP thread wakeup granularity or cache timing. */
+void rp_pops_me_delay(rp_context *c, uint32_t microseconds)
+{
+    ++c->services;
+    const uint32_t samples = (uint32_t)((uint64_t)microseconds * 44100 / 1000000);
+    rp_event(c, "host_adapter", "audio_delay_cooperative_ME", microseconds, samples);
+    if (!c->me_callback) return;
+    const uint32_t start = rp_u32(c, RP_SHARED_ADDRESS(callback_count));
+    for (uint32_t step = 0; rp_u32(c, RP_SHARED_ADDRESS(callback_count)) - start < samples; ++step) {
+        if (step >= samples * 8 + 32) rp_block(c, "audio_delay_ME_not_advancing", 0x11520);
+        rp_pops_me_poll(c);
+    }
+}
 static void start_worker(void *ctx, uint32_t shifted_k1)
 {
     rp_context *c = ctx;

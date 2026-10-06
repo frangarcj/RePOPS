@@ -1,5 +1,6 @@
 #include "runtime.h"
 #include "pops_state.h"
+#include "pops_cdrom.h"
 #include "pops_emit.h"
 #include <string.h>
 
@@ -108,6 +109,14 @@ static void native_helper(rp_context *c)
 {
     uint32_t *r = c->run_gpr;
     switch (c->run_pc) {
+    case 0xD088:
+        r[2] = rp_pops_cd_read(c, r[4], r[5]);
+        transfer(c, r[31]);
+        return;
+    case 0xD1B0:
+        rp_pops_cd_write(c, r[4], r[5]);
+        transfer(c, r[31]);
+        return;
     case 0x85F4:
         rp_pops_me_service_due(c);
         r[2] = rp_pops_spu_read_register(c, r[4], r[5]);
@@ -147,10 +156,18 @@ static void native_helper(rp_context *c)
         return;
     }
     case 0x1DD0:
-        rp_function(c, 0x1DD0, "pops.dynamic_byte_store_RAM_path");
+        rp_function(c, 0x1DD0, "pops.dynamic_byte_store");
         r[2] = (r[4] >> 23) & 63;
         r[6] = 0x4C;
-        if (r[2]) rp_block(c, "dynamic_byte_store_non_RAM_path", 0x1C70);
+        if (r[2]) {
+            const uint32_t handler = rp_device_handler(c, r[4], true);
+            if (handler != 0xD1B0) rp_block(c, "dynamic_byte_store_non_RAM_path", r[4]);
+            rp_core_set_downcount(c, r[25]);
+            rp_pops_cd_write(c, r[4], r[5]);
+            r[25] = rp_core_downcount(c);
+            transfer(c, r[31]);
+            return;
+        }
         specialize_generated_call(c, r[31], RP_FAST_RAM_SB,
                                   "byte_store_RAM_callsite_specialized");
         r[4] = (r[4] & 0x1FFFFF) | 0x09800000;
@@ -253,6 +270,8 @@ static void native_helper(rp_context *c)
                     rp_core_set_downcount(c, r[25]);
                     r[2] = rp_pops_irq_read(c, address);
                     r[25] = rp_core_downcount(c);
+                } else if (handler == 0xD088) {
+                    r[2] = rp_pops_cd_read(c, address, width);
                 } else if (handler == 0x85F4) {
                     rp_core_set_downcount(c, r[25]);
                     rp_pops_me_service_due(c);
@@ -350,7 +369,10 @@ static void native_helper(rp_context *c)
         } else {
             r[5] = 4;
             rp_core_set_downcount(c, r[25]);
-            r[2] = rp_pops_constant_read(c, address, 4);
+            if (rp_device_handler(c, address, false) == 0xD088)
+                r[2] = rp_pops_cd_read(c, address, 4);
+            else
+                r[2] = rp_pops_constant_read(c, address, 4);
             r[25] = rp_core_downcount(c);
         }
         transfer(c, r[31]);

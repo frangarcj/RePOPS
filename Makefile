@@ -11,6 +11,7 @@ UNICORN_LIBS = "$(UNICORN_ROOT)/lib/libunicorn.a" -lpthread -lm
 NATIVE_SRC += src/native/generated_unicorn.c src/native/pops_dispatch.c src/native/pops_events.c
 NATIVE_SRC += src/native/pops_spu_registers.c
 NATIVE_SRC += src/native/pops_compile_ram.c
+NATIVE_SRC += src/native/pops_cdrom.c
 
 .PHONY: all native analyze test test-native-disc test-native-config test-native-me test-native-spu test-native-emit test-native-memory-card test-generated-code test-unicorn-cache clean-help
 all: native
@@ -21,7 +22,7 @@ build/repops-analyze: src/native/runtime.c src/native/pops_analyze.c src/native/
 	mkdir -p build
 	$(CC) -std=c11 -Wall -Wextra -Werror $(CFLAGS) src/native/runtime.c src/native/pops_analyze.c src/native/pops_compile.c src/native/pops_emit.c src/native/pops_emit_memory.c src/native/analyze_main.c -o $@
 
-build/repops-native: $(NATIVE_SRC) src/native/runtime.h src/native/pops_state.h src/bootstrap.h src/me_startup.h src/me_registration.h src/native/me_worker.h src/native/pops_emit.h src/native/pops_ir.h
+build/repops-native: $(NATIVE_SRC) src/native/runtime.h src/native/pops_state.h src/native/pops_cdrom.h src/bootstrap.h src/me_startup.h src/me_registration.h src/native/me_worker.h src/native/pops_emit.h src/native/pops_ir.h
 	mkdir -p build
 	@test -f "$(UNICORN_ROOT)/include/unicorn/unicorn.h" || { echo 'Install unicorn==2.1.4 in the local Python environment, or set UNICORN_ROOT'; exit 1; }
 	$(CC) -std=c11 -Wall -Wextra -Werror $(CFLAGS) $(PNG_CFLAGS) $(UNICORN_CFLAGS) $(NATIVE_SRC) $(PNG_LIBS) $(UNICORN_LIBS) -o $@
@@ -29,13 +30,21 @@ build/repops-native: $(NATIVE_SRC) src/native/runtime.h src/native/pops_state.h 
 test:
 	python3 -m unittest discover -s tests -v
 
-build/test_native_events: src/native/runtime.c src/native/pops_events.c src/native/runtime.h tests/test_native_events.c
+build/test_native_events: src/native/runtime.c src/native/pops_events.c src/native/runtime.h src/native/pops_state.h src/native/pops_cdrom.h tests/test_native_events.c
 	mkdir -p build
 	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_events.c tests/test_native_events.c -o $@
 
 .PHONY: test-native-events
 test-native-events: build/test_native_events
 	./build/test_native_events
+
+build/test_native_cdrom: src/native/runtime.c src/native/pops_cdrom.c src/native/pops_events.c src/native/pops_config.c src/native/pops_disc.c src/native/pops_cdrom.h src/native/pops_state.h tests/test_native_cdrom.c
+	mkdir -p build
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_cdrom.c src/native/pops_events.c src/native/pops_config.c src/native/pops_disc.c tests/test_native_cdrom.c -lm -o $@
+
+.PHONY: test-native-cdrom
+test-native-cdrom: build/test_native_cdrom
+	./build/test_native_cdrom
 
 build/test_spu_registers: src/native/runtime.c src/native/pops_spu_registers.c src/native/runtime.h tests/test_spu_registers.c
 	mkdir -p build

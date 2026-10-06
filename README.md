@@ -68,9 +68,10 @@ vectors and SPU register reads/writes. The reached active ME callback now proces
 voices and idle postmix and returns packed samples. A cooperative host step
 also lets it progress during SPUSTAT polling. Enabled reverb now processes its
 ordered RAM writes; signed halfword readers let CPU initialization continue to
-the CD-ROM port. The current run stops at byte-store boundary `+0x1C70` for
-0x1F801800, before CD writer +0xD1B0 is reconstructed. It records 38,128,915
-generated-cache observations and 3,203 entry transfers. Guarded LH/LHU RAM
+the CD-ROM controller. Its native register/response path now completes Setloc
+and SeekL and stops at the next command, Setmode 0x0E with parameter 0x80.
+It records 38,182,482 generated-cache observations and 4,883 transfers. A CD
+worker read request is queued, not completed. Guarded LH/LHU RAM
 reads remove 54,406 C crossings while preserving the selected device/audio
 event trace. A separate synthetic fixture produces a nonzero packed sample.
 These are not function-coverage measurements or proof that FFVI booted.
@@ -83,7 +84,8 @@ recovered names in `pops_state.h`; older anonymous fields are migrated as their
 functions are revisited. See [idle postmix](docs/me_idle_postmix.md) and
 [ME polling progress](docs/me_poll_scheduling.md),
 [enabled reverb](docs/me_enabled_reverb.md), and
-[signed reads and their guarded execution](docs/cpu_signed_halfword.md).
+[signed reads and their guarded execution](docs/cpu_signed_halfword.md), and
+[the CD register/response path](docs/cd_controller.md).
 
 See [the current Unicorn integration](docs/unicorn_execution.md),
 [the earlier generated-execution experiment](docs/generated_code_execution.md),

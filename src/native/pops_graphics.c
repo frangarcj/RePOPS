@@ -1,4 +1,5 @@
 #include "runtime.h"
+#include "pops_cdrom.h"
 #include <math.h>
 #include <string.h>
 
@@ -180,24 +181,6 @@ static void gpu_control_reset(rp_context *c)
 static void schedule_event(rp_context *c, uint32_t event, uint32_t delay)
 {
     rp_pops_schedule_event(c, event, delay);
-}
-
-static void raise_irq(rp_context *c, uint32_t bits)
-{
-    rp_function(c, 0x96E4, "pops.raise_interrupt_bits");
-    const uint32_t old = rp_u32(c, c->gp + 0x2070);
-    const uint32_t next = old | bits;
-    if (old == next) return;
-    rp_w32(c, c->gp + 0x2070, next);
-    if (!(bits & rp_u32(c, c->gp + 0x2074))) return;
-    const uint32_t cause = rp_u32(c, c->gp + 0x134) | 0x400;
-    rp_w32(c, c->gp + 0x134, cause);
-    const uint32_t status = rp_u32(c, c->gp + 0x130);
-    if ((status & 1) && (cause & status & 0xFF00)) {
-        const uint32_t downcount = rp_u32(c, c->gp + 0x1B0);
-        rp_w32(c, c->gp + 0x1B0, 0);
-        rp_w32(c, c->gp + 0x1AC, rp_u32(c, c->gp + 0x1AC) - downcount);
-    }
 }
 
 /* +0x30C24's idle-UI path. Headless services report no HOME/power events;
@@ -384,7 +367,7 @@ static void begin_frame(rp_context *c)
     if (rounded < 0 || rounded > INT32_MAX) rp_block(c, "frame_delay_domain_not_supported", 0x11410);
     rp_w32(c, c->gp + 0x35F0, 0x1265C);
     schedule_event(c, c->gp + 0x35E4, (uint32_t)rounded);
-    raise_irq(c, 1);
+    rp_pops_raise_irq(c, 1);
     rp_event(c, "milestone", "first_guest_frame_event_scheduled", 0x1265C, (uint32_t)rounded);
     if ((uint32_t)half(c, c->gp + 0x3610) + (uint32_t)half(c, c->gp + 0x3612) * 0x400 ==
             rp_u32(c, c->gp + 0x35C8) || (rp_u32(c, c->gp + 0x6AC) & 0x20000000)) {

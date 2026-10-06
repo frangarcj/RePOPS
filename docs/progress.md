@@ -1,6 +1,28 @@
 # RePops progress
 
-## Current: signed reads reach the CD-ROM write boundary
+## Current: CD Setloc and SeekL deliver their responses
+
+The native controller now handles banked registers, parameters, delayed
+responses and IRQ acknowledgement. `out/cd-seek.grqSK4/result/` completes
+Setloc for sector 4 and SeekL, including three response publications. It stops
+at the next command, Setmode 0x0E with parameter 0x80. The worker request for
+block zero is queued, not claimed as completed disk I/O.
+
+This run records 38,182,482 generated-cache observations and 4,883 transfers.
+The recovered audio delay requests 13,035 microseconds; the explicit host
+adapter executes 574 ME samples rather than skipping the yield. PSP scheduling
+granularity is not reproduced. `game_executed` remains false.
+
+New C code uses the CD/controller/cache layouts in `pops_cdrom.h`. Native
+static assertions and all 18 schema layout extents pass; CD, events, SPU, ME
+and Unicorn smoke tests pass. See `cd_controller.md`.
+
+The ledger has 73 complete and 63 partial POPS bodies. Exact matches against
+the historical 536-entry internal inventory are 65 complete (12.1%) and 48
+partial (21.1% combined). The counts describe modeled bodies at their recorded
+verification scope, not game compatibility, hardware validation or time left.
+
+## Earlier: signed reads reach the CD-ROM write boundary
 
 LH +0x1DE8 and its specialized entrances now share the existing memory routing
 with explicit sign extension and service width. Guarded LH/LHU RAM helpers

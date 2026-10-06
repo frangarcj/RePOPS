@@ -1,4 +1,24 @@
 #include "runtime.h"
+#include "pops_cdrom.h"
+
+/* +0x96E4, shared by video and CD response publication. */
+void rp_pops_raise_irq(rp_context *c, uint32_t bits)
+{
+    rp_function(c, 0x96E4, "pops.raise_interrupt_bits");
+    const uint32_t old = rp_u32(c, RP_DEVICE_ADDRESS(c, irq_status));
+    const uint32_t next = old | bits;
+    if (old == next) return;
+    rp_w32(c, RP_DEVICE_ADDRESS(c, irq_status), next);
+    if (!(bits & rp_u32(c, RP_DEVICE_ADDRESS(c, irq_mask)))) return;
+    const uint32_t cause = rp_u32(c, RP_DEVICE_ADDRESS(c, cpu_cause)) | 0x400;
+    rp_w32(c, RP_DEVICE_ADDRESS(c, cpu_cause), cause);
+    const uint32_t status = rp_u32(c, RP_DEVICE_ADDRESS(c, cpu_status));
+    if ((status & 1) && (cause & status & 0xFF00)) {
+        const uint32_t now = rp_core_guest_cycles(c);
+        rp_core_set_downcount(c, 0);
+        rp_w32(c, RP_CORE_CLOCK_ADDRESS(c, event_deadline), now);
+    }
+}
 
 /* +0x945C, shared by video, timer and DMA event producers. */
 void rp_pops_schedule_event(rp_context *c, uint32_t event, uint32_t delay)
@@ -243,7 +263,10 @@ uint32_t rp_pops_dispatch_events(rp_context *c)
         rp_w32(c, previous, next);
         rp_w32(c, event + 4, 0);
         rp_event(c, "milestone", "guest_event_due", callback, deadline);
-        rp_pops_graphics_event(c, callback);
+        if (callback == 0xC268 || callback == 0xCE00)
+            rp_pops_cd_event(c, event, callback);
+        else
+            rp_pops_graphics_event(c, callback);
         now -= rp_u32(c, c->gp + 0x1B0);
     }
 

@@ -34,3 +34,8 @@ or hardware-equivalence claim follows from copying sample data.
 unsupported GPU packet at +0x133D0 after 356,272,699 instruction observations
 and 2,535,609 transfers. Only immediate writes are observed in that run;
 readback and deferred-copy behavior are currently covered by the fixtures.
+
+The same trace contains 8,945 completed packed-stereo mixer samples, with
+4,978 nonzero values. These are observations from the integrated C run,
+not synthetic mixer inputs or a listening test. The small aggregate is
+saved beside `run.json` as `spu-observations.json` for trace retention.

@@ -4,6 +4,20 @@ Historical native runs retain `result/retained-trace-result.json` instead of
 their full trace once superseded. Keep the latest two traces and the GE-preview
 provenance source; decompilers and focused verification outputs are not pruned.
 
+## Current: GP0 C0h header passes; DMA VRAM readback is next
+
+`out/gpu-readback.7pExuj/result/` admits the three-word VRAM-to-CPU header,
+selects GPUREAD mode 16 and reaches the DMA readback branch +0x12F90. Source
+(512, 256), width 64 and height 256 are captured in the trace. The run records
+356,838,031 generated-instruction observations and 2,540,027 transfers.
+`game_executed` remains false; no rendered framebuffer or returned pixel data
+is claimed. See `gpu_readback.md` for the header and next dependency.
+
+The earlier SPU run also contains 8,945 completed packed stereo samples,
+4,978 nonzero. Its aggregate survives trace retention in
+`out/spu-dma.lmurpi/result/spu-observations.json`. This is integrated mixer
+output, not a listening or hardware-fidelity test.
+
 ## Current: sample DMA executes; the next boundary is a GPU packet
 
 `out/spu-dma.lmurpi/result/` performs 510 transfers to the ME's shared sample

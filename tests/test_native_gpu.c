@@ -376,6 +376,33 @@ static void check_rectangles(rp_context *c)
     dma_fixture = false;
 }
 
+static void check_readback_header(rp_context *c)
+{
+    reset_status(c);
+    c->regions[0].bytes[0xD5338 + 48] = 2;
+    rp_w32(c, RP_GPU_ADDRESS(c, list_cursor), 0x49A00800);
+    rp_w32(c, RP_GPU_ADDRESS(c, transfer_cursor), 0xABCD0123);
+    rp_w32(c, RP_GPU_ADDRESS(c, transfer_read_latch), 0x1234ABCD);
+    const unsigned before = scheduled;
+    rp_pops_gpu_write(c, 0x1F801810, 0xC0000000);
+    rp_pops_gpu_write(c, 0x1F801810, 0xFFFFFC08);
+    assert(rp_cd_u8(c, RP_GPU_ADDRESS(c, read_selector)) == 0);
+    rp_pops_gpu_write(c, 0x1F801810, 0);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, transfer_origin)) == 0x01FF0008);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, transfer_size)) == 0x02000400);
+    assert(rp_cd_u8(c, RP_GPU_ADDRESS(c, read_selector)) == 16);
+    assert(!rp_cd_u8(c, RP_GPU_ADDRESS(c, command_mode)));
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, transfer_cursor)) == 0xABCD0123);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, transfer_read_latch)) == 0x1234ABCD);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)) == 0x49A00800);
+    assert(scheduled == before);
+    if (!setjmp(c->stop)) {
+        (void)rp_pops_gpu_read(c, 0x1F801810, 2);
+        assert(!"Readback returned fabricated framebuffer data");
+    }
+    assert(!strcmp(c->stop_kind, "GPU_VRAM_data_transfer_not_reconstructed"));
+}
+
 int main(void)
 {
     rp_context *c = calloc(1, sizeof(*c));
@@ -679,8 +706,9 @@ int main(void)
     check_cpu_upload(c);
     check_mixed_upload(c);
     check_rectangles(c);
+    check_readback_header(c);
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[1].bytes);
     free(c->regions[2].bytes); free(c);
-    puts("GPU: GE uploads, mixed port/DMA prefixes, CPU pixel order, mask, wrap and odd tail passed; rendering pending.");
+    puts("GPU: uploads, primitives and readback header/state boundary passed; rendering pending.");
     return 0;
 }

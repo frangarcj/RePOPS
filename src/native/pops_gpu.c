@@ -705,6 +705,23 @@ static uint32_t consume_packet(rp_context *c, uint32_t source, uint32_t bytes)
             offset += sizeof(rp_gpu_upload_packet_layout) - 4;
             rp_event(c, "GPU_upload", "header_waiting_for_pixels", destination, extent);
             continue;
+        } else if (mode == 6) {
+            /* +0x15508: prepare GPUREAD state, then return immediately.
+             * No pixel data or GE completion is fabricated by this header. */
+            if (bytes - offset < sizeof(rp_gpu_readback_packet_layout))
+                rp_block(c, "GPU_readback_truncated_header", 0x15508);
+            const uint32_t packet = source + offset;
+            const uint32_t origin = rp_u32(c, RP_FIELD_ADDRESS(packet, rp_gpu_readback_packet_layout, source));
+            const uint32_t extent = rp_u32(c, RP_FIELD_ADDRESS(packet, rp_gpu_readback_packet_layout, extent));
+            const uint32_t width = ((extent - 1) & 0x3FF) + 1;
+            const uint32_t height = (((extent >> 16) - 1) & 0x1FF) + 1;
+            SET_GPU32(transfer_origin, origin & 0x01FF03FF);
+            SET_GPU32(transfer_size, width | (height << 16));
+            SET_GPU8(read_selector, 16);
+            mode = 0;
+            rp_event(c, "GPU_readback", "header_prepared_without_pixels", origin & 0x01FF03FF,
+                     width | (height << 16));
+            break;
         } else if (mode == 9) {
             uint32_t consumed = 0;
             work += upload_pixels(c, source + offset, bytes - offset, &out, &consumed, &mode);
@@ -737,6 +754,8 @@ static uint32_t consume_packet(rp_context *c, uint32_t source, uint32_t bytes)
             work += flat_polygon(c, source + offset, count, &out);
             offset += packet_size - 4;
         } else {
+            rp_event(c, "GPU_boundary", "unsupported_packet_mode_and_word", mode, word);
+            rp_event(c, "GPU_boundary", "unsupported_packet_source_and_bytes", source + offset, bytes - offset);
             rp_block(c, "GPU_primitive_packet_not_reconstructed", 0x133D0);
         }
         mode = 0;

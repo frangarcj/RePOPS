@@ -111,6 +111,10 @@ static void native_helper(rp_context *c)
 {
     uint32_t *r = c->run_gpr;
     switch (c->run_pc) {
+    case 0x127D8:
+        rp_pops_gpu_write(c, r[4], r[5]);
+        transfer(c, r[31]);
+        return;
     case 0x12FBC:
         r[2] = rp_pops_gpu_read(c, r[4], r[5]);
         transfer(c, r[31]);
@@ -345,10 +349,11 @@ static void native_helper(rp_context *c)
         } else {
             const uint32_t handler = rp_device_handler(c, r[4], true);
             if (handler != 0x98C4 && handler != 0x91BC && handler != 0x9C60 &&
-                    handler != 0x7F00 && handler != 0x8AA4 && handler != 0x92A4)
+                    handler != 0x7F00 && handler != 0x8AA4 && handler != 0x92A4 && handler != 0x127D8)
                 rp_block(c, "dynamic_word_store_non_RAM_path", r[4]);
             rp_core_set_downcount(c, r[25]);
-            if (handler == 0x92A4) rp_pops_dma_channel_write(c, r[4], r[5], 2);
+            if (handler == 0x127D8) rp_pops_gpu_write(c, r[4], r[5]);
+            else if (handler == 0x92A4) rp_pops_dma_channel_write(c, r[4], r[5], 2);
             else if (handler == 0x8AA4) rp_pops_shadow_write(c, r[4], r[5], 2);
             else if (handler == 0x91BC) rp_pops_dma_control_write(c, r[4], r[5], 2);
             else if (handler == 0x9C60) rp_pops_timer_write(c, r[4], r[5]);

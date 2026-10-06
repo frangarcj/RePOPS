@@ -1,5 +1,27 @@
 # RePops progress
 
+## Current: GP0 framing and state-list emission; GP1 reset boundary
+
+`out/gp0-state.prJDrA/result/` accepts the first actual GP0 word (0x0004FAA8,
+a no-op) and proceeds to GP1 reset, port 0x1F801814, word zero. The next boundary
+is `GPU_control_write_not_reconstructed` at +0x12988. It records 39,246,445
+generated-cache observations and 39,001 transfers; `game_executed` stays false.
+
+Native tests cover packet assembly, E1..E6 state changes and exact emitted GE
+words, including signed drawing offsets and texture-cache clear. The integrated
+no-op emits no GE words; there is still no rendered framebuffer. New packet and
+GPU-state fields are named in `pops_gpu.h`, including the overlapping buffer
+latch and high-byte collector views. See `gp0_state_packets.md`.
+
+The user explicitly requires preserving POPS's GP0-to-GE boundary. The platform
+must consume the original lists and queue/stall/sync operations, not draw
+directly from PS1 commands. `module_boundaries.md` separates POPS ownership,
+POPSMAN-provided imports, direct sceGe calls and temporary host adapters.
+
+Comparable coverage: 66/536 complete (12.3%) and 118/536 complete or partial
+(22.0%). The full POPS ledger has 75 complete and 71 partial bodies. No time-to-
+completion, game-boot or graphics-compatibility percentage is implied.
+
 ## Current: GPU status reads reach the GP0 writer
 
 `out/gpu-status.gm0dKa/result/` executes two reconstructed GPUSTAT reads and

@@ -1,9 +1,187 @@
 #include "pops_gpu.h"
 #include "pops_cdrom.h"
+#include <string.h>
 
 #define GPU32(member) rp_u32(c, RP_GPU_ADDRESS(c, member))
 #define GPU8(member) rp_cd_u8(c, RP_GPU_ADDRESS(c, member))
 #define GPU16(member) rp_cd_u16(c, RP_GPU_ADDRESS(c, member))
+#define SET_GPU8(member, value) rp_w8(c, RP_GPU_ADDRESS(c, member), (uint8_t)(value))
+#define SET_GPU16(member, value) rp_cd_w16(c, RP_GPU_ADDRESS(c, member), (uint16_t)(value))
+#define SET_GPU32(member, value) rp_w32(c, RP_GPU_ADDRESS(c, member), (uint32_t)(value))
+
+static uint32_t emit_ge_word(rp_context *c, uint32_t cursor, uint32_t word)
+{
+    rp_w32(c, cursor, word);
+    rp_event(c, "GPU_GE_word", "emitted_not_rendered", cursor, word);
+    return cursor + 4;
+}
+
+/* +0x15650: drawing area changes also update display-intersection policy. */
+static void update_draw_area_policy(rp_context *c)
+{
+    const int x0 = (int16_t)GPU16(draw_area_start[0]);
+    const int y0 = (int16_t)GPU16(draw_area_start[1]);
+    const int x1 = (int16_t)GPU16(draw_area_end[0]);
+    const int y1 = (int16_t)GPU16(draw_area_end[1]);
+    const int x = GPU16(display_origin[0]), y = GPU16(display_origin[1]);
+    const int w = GPU16(display_size[0]), h = GPU16(display_size[1]);
+    bool large = w < x1 - x0 || h < y1 - y0;
+    if (rp_u32(c, RP_DEVICE_ADDRESS(c, compatibility_flags)) & 1) large = false;
+    const bool intersects = x <= x1 && x0 < x + w &&
+        ((y <= y1 && y0 < y + h) || (y - 512 <= y1 && y0 < y + h - 512));
+    SET_GPU8(draw_area_exceeds_display, large);
+    SET_GPU8(draw_area_intersects_display, intersects);
+}
+
+/* +0x15554..+0x157C0: GP0 drawing-environment commands, not rasterization. */
+static uint32_t drawing_environment(rp_context *c, uint32_t word, uint32_t out)
+{
+    const unsigned command = (word >> 24) & 31;
+    if (command == 1) {
+        const uint32_t old = GPU16(draw_mode);
+        uint32_t mode = word & 0x7FF;
+        if ((mode ^ old) & 0xC1FF) mode |= 0xC000;
+        mode |= old & 0x2000;
+        SET_GPU16(draw_mode, mode);
+        SET_GPU8(draw_mode_gate, (mode & 0x400) ? 0 : GPU8(display_mode_gate) & 1);
+    } else if (command == 2) {
+        const uint32_t window = word & 0xFFFFF;
+        if (window == GPU32(texture_window)) return out;
+        const uint32_t xm = word | 32, ym = (word >> 5) | 32;
+        const uint32_t width = xm & (0u - xm), height = ym & (0u - ym);
+        SET_GPU32(texture_window, window);
+        SET_GPU8(texture_window_offset[0], (word >> 10) & (0u - width) & 31);
+        SET_GPU8(texture_window_offset[1], (word >> 15) & (0u - height) & 31);
+        SET_GPU8(texture_window_size[0], width);
+        SET_GPU8(texture_window_size[1], height);
+        SET_GPU16(draw_mode, GPU16(draw_mode) | 0x8000);
+    } else if (command == 3 || command == 4) {
+        if (command == 3) {
+            SET_GPU16(draw_area_start[0], word & 0x3FF);
+            SET_GPU16(draw_area_start[1], (word >> 10) & 0x1FF);
+        } else {
+            SET_GPU16(draw_area_end[0], word & 0x3FF);
+            SET_GPU16(draw_area_end[1], (word >> 10) & 0x1FF);
+        }
+        out = emit_ge_word(c, out, (command == 3 ? 0xD4000000u : 0xD5000000u) | (word & 0x7FFFF));
+        update_draw_area_policy(c);
+    } else if (command == 5) {
+        int32_t x = (int32_t)((word & 0x7FF) ^ 0x400) - 0x400;
+        const int32_t y = (int32_t)(((word >> 11) & 0x7FF) ^ 0x400) - 0x400;
+        if ((int16_t)GPU16(draw_area_start[0]) - x >= 1024) x += 2048;
+        out = emit_ge_word(c, out, 0x3A000009);
+        const int32_t positions[] = {x, y};
+        for (unsigned i = 0; i < 2; ++i) {
+            const float position = (float)(positions[i] * 2 + 1);
+            uint32_t bits; memcpy(&bits, &position, sizeof(bits));
+            bits += 0x3B;
+            out = emit_ge_word(c, out, (bits >> 8) | (bits << 24));
+        }
+        SET_GPU16(drawing_offset[0], x); SET_GPU16(drawing_offset[1], y);
+    } else if (command == 6) {
+        SET_GPU32(status, (GPU32(status) & ~UINT32_C(0x1800)) | ((word & 3) << 11));
+        out = emit_ge_word(c, out, 0x13041B91);
+        out = emit_ge_word(c, out, 0x0A000000 | ((word & 3) << 4));
+    }
+    return out;
+}
+
+/* Reached state-only paths of +0x133D0. GE words are retained in guest RAM;
+ * list services remain the existing explicit headless execution adapter. */
+static uint32_t consume_packet(rp_context *c, uint32_t bytes)
+{
+    rp_function(c, 0x133D0, "pops.consume_GPU_packet_partial");
+    uint32_t out = GPU32(list_cursor);
+    if (out > 0x49B7B800)
+        rp_block(c, "GPU_list_capacity_flush_not_reconstructed", 0x15F2C);
+    if ((int8_t)GPU8(ge_transfer_pending) < 0) {
+        SET_GPU8(ge_transfer_pending, 0);
+        c->services += 2;
+        rp_event(c, "headless_adapter", "GE_list_sync_request_captured", GPU32(list_id), 0);
+        c->ge_stalled_list = 0x49A00000;
+        SET_GPU32(list_id, ++c->next_id);
+        rp_event(c, "headless_adapter", "GE_list_queued_at_stall_not_rendered", c->ge_stalled_list, c->next_id);
+    }
+    unsigned mode = GPU8(command_mode);
+    for (uint32_t offset = 0; offset < bytes; offset += 4) {
+        const uint32_t word = rp_u32(c, RP_GPU_ADDRESS(c, packet_words) + offset);
+        if (!mode) mode = word >> 29;
+        rp_event(c, "GPU_packet", "dispatch", mode, word);
+        if (mode == 0) {
+            const unsigned command = (word >> 24) & 31;
+            if (command == 1) {
+                out = emit_ge_word(c, out, 0xB01BC000);
+                out = emit_ge_word(c, out, 0xC4000001);
+                SET_GPU16(draw_mode, GPU16(draw_mode) | 0x8000);
+            } else if (command == 2) {
+                rp_block(c, "GPU_fill_packet_not_reconstructed", 0x134E0);
+            }
+        } else if (mode == 7) {
+            out = drawing_environment(c, word, out);
+        } else {
+            rp_block(c, "GPU_primitive_packet_not_reconstructed", 0x133D0);
+        }
+        mode = 0;
+    }
+    SET_GPU8(command_mode, mode);
+    SET_GPU32(list_cursor, out);
+    return 0;
+}
+
+/* +0x127D8..+0x12988: each command uses the original extra-word table.
+ * A packet becomes ready only after its last word, not on every port write. */
+void rp_pops_gpu_write(rp_context *c, uint32_t address, uint32_t word)
+{
+    rp_function(c, 0x127D8, "pops.gpu_port_write_partial");
+    rp_event(c, "GPU_port_write", (address & 4) ? "GP1" : "GP0", address, word);
+    if (address & 4) {
+        const unsigned op = word >> 24;
+        if (op > 16 || op == 2 || (op >= 9 && op <= 15)) return;
+        if (op == 1) {
+            SET_GPU8(command_mode, 0); SET_GPU8(packet_extra_words, 0);
+            SET_GPU8(packet_word_count, 0);
+            return;
+        }
+        if (op == 4) {
+            SET_GPU32(status, (GPU32(status) & 0x9DFFFFFF) |
+                ((word & 3) << 29) | ((uint32_t)((word & 3) != 0) << 25));
+            return;
+        }
+        rp_block(c, "GPU_control_write_not_reconstructed", 0x12988);
+    }
+    SET_GPU32(status, GPU32(status) & 0xEBFFFFFF);
+    uint32_t extra = GPU8(packet_extra_words);
+    const unsigned mode = GPU8(command_mode);
+    if (!extra) {
+        if (!mode) {
+            extra = *(uint8_t *)rp_module_memory(c, 0xD5338 + (word >> 26), 1);
+            if (word >> 24 == 2) extra = 2;
+        } else if (mode == 9) {
+            uint32_t pixels = (uint32_t)GPU16(transfer_size[0]) * GPU16(transfer_size[1]);
+            if (pixels > 96) pixels = 96;
+            extra = ((pixels + 1) >> 1) - 1;
+        } else if (mode < 9) {
+            extra = (GPU32(transfer_size) >> 28) & 1;
+            extra &= (word & 0xF000F000) != 0x50005000;
+        }
+        SET_GPU8(packet_extra_words, extra);
+    }
+    const unsigned received = (unsigned)GPU8(packet_word_count) + 1;
+    if (received > 48) rp_block(c, "GPU_packet_buffer_domain_not_supported", received);
+    SET_GPU32(packet_words[received - 1], word);
+    if ((int32_t)extra >= (int32_t)received) {
+        SET_GPU8(packet_word_count, received);
+        return;
+    }
+    const uint32_t delay = consume_packet(c, received * 4);
+    if (GPU32(ready_event.prev)) {
+        rp_core_set_downcount(c, rp_u32(c, RP_CORE_CLOCK_ADDRESS(c, event_deadline)) - GPU32(ready_event.deadline_cycles));
+        rp_pops_remove_event(c, RP_GPU_ADDRESS(c, ready_event));
+    }
+    if (delay) rp_pops_schedule_event(c, RP_GPU_ADDRESS(c, ready_event), delay);
+    else SET_GPU32(status, GPU32(status) | 0x14000000);
+    SET_GPU8(packet_extra_words, 0); SET_GPU8(packet_word_count, 0);
+}
 
 /* +0x12FBC..+0x130BC: status reads compose existing state and frame timing.
  * The polling debit and two timestamps are observable firmware behavior;

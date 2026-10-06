@@ -137,17 +137,26 @@ int main(void)
     assert(rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)) == 0x49A00024);
     assert(rp_cd_u8(c, RP_GPU_ADDRESS(c, packet_word_count)) == 0);
 
-    /* Three writes stay buffered; the final word reaches the real boundary. */
+    /* Three writes stay buffered; the last completes a flat triangle. */
     rp_pops_gpu_write(c, 0x1810, 0x200000FF);
     rp_pops_gpu_write(c, 0x1810, 0x00010001);
     rp_pops_gpu_write(c, 0x1810, 0x00020002);
     assert(rp_cd_u8(c, RP_GPU_ADDRESS(c, packet_word_count)) == 3);
     assert((rp_u32(c, RP_GPU_ADDRESS(c, status)) & 0x14000000) == 0);
-    if (setjmp(c->stop) == 0) {
-        rp_pops_gpu_write(c, 0x1810, 0x00030003);
-        assert(!"Unreconstructed triangle claimed complete");
-    }
-    assert(strcmp(c->stop_kind, "GPU_primitive_packet_not_reconstructed") == 0);
+    const uint32_t triangle_body = rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)) + 8;
+    memset(rp_memory(c, triangle_body, sizeof(rp_gpu_flat_ge_layout)), 0xA5, sizeof(rp_gpu_flat_ge_layout));
+    dma_fixture = true; scheduled = 0;
+    rp_pops_gpu_write(c, 0x1810, 0x00030003);
+    dma_fixture = false;
+    assert(scheduled == 1 && scheduled_delay == 30);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)) == triangle_body + sizeof(rp_gpu_flat_ge_layout));
+    assert(rp_u32(c, triangle_body) == 0x14000000);
+    assert(rp_u32(c, triangle_body + 4) == 0x550000FF);
+    assert(rp_u32(c, triangle_body + 8) == UINT32_C(0x51B7F800) - triangle_body);
+    assert(rp_cd_u16(c, RP_FIELD_ADDRESS(triangle_body, rp_gpu_flat_ge_layout, vertices[1].x)) == 2);
+    assert(rp_cd_u16(c, RP_FIELD_ADDRESS(triangle_body, rp_gpu_flat_ge_layout, vertices[2].y)) == 3);
+    assert(rp_cd_u16(c, RP_FIELD_ADDRESS(triangle_body, rp_gpu_flat_ge_layout, vertices[0].z)) == 0xA5A5);
+    scheduled = 0;
     assert(rp_u32(c, RP_GPU_ADDRESS(c, packet_words[3])) == 0x00030003);
     assert((rp_u32(c, RP_GPU_ADDRESS(c, status)) & 0x14000000) == 0);
     rp_pops_gpu_write(c, 0x1814, 0x01000000);
@@ -296,8 +305,58 @@ int main(void)
     assert(rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)) == 0x49A0001C);
     assert(scheduled == before_fill + 1);
 
+    /* A 20x20 quad: 30 + (800 double-area units / 2) / 2 = 230.
+     * Its bounds invalidate a cache group and its selected texture tag. */
+    reset_status(c);
+    const uint32_t quad_start = 0x49A00180, quad_body = quad_start + 8;
+    rp_w32(c, RP_GPU_ADDRESS(c, list_cursor), quad_start);
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, draw_mode), 0x4001);
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, draw_area_end[0]), 300);
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, draw_area_end[1]), 200);
+    rp_w8(c, RP_GPU_ADDRESS(c, draw_area_exceeds_display), 1);
+    rp_w8(c, RP_GPU_ADDRESS(c, draw_area_intersects_display), 1);
+    for (unsigned i = 0; i < 32; ++i) {
+        rp_w8(c, RP_GPU_ADDRESS(c, texture_cache[i].cache_flags), 0xAB);
+        rp_w8(c, RP_GPU_ADDRESS(c, texture_cache[i].group_offset), (uint8_t)(i % 16 == 15 ? 3 : (i % 16) % 3));
+    }
+    c->regions[0].bytes[0xD5338 + 10] = 4;
+    memset(rp_memory(c, quad_body, sizeof(rp_gpu_flat_ge_layout)), 0xA5, sizeof(rp_gpu_flat_ge_layout));
+    dma_fixture = true; scheduled = 0;
+    const uint32_t quad[] = {0x28112233, 0x000A0041, 0x000A0055, 0x001E0041, 0x001E0055};
+    for (unsigned i = 0; i < 5; ++i) rp_pops_gpu_write(c, 0x1810, quad[i]);
+    assert(scheduled == 1 && scheduled_delay == 230);
+    assert(rp_u32(c, quad_start) == 0x13041B90);
+    assert(rp_u32(c, quad_start + 4) == 0x0A000080);
+    assert(rp_u32(c, quad_body + 4) == 0x55112233);
+    assert(rp_u32(c, quad_body + 8) == UINT32_C(0x51B7F900) - quad_body);
+    assert(rp_cd_u16(c, RP_FIELD_ADDRESS(quad_body, rp_gpu_flat_ge_layout, vertices[3].x)) == 85);
+    assert(rp_cd_u16(c, RP_FIELD_ADDRESS(quad_body, rp_gpu_flat_ge_layout, vertices[3].y)) == 30);
+    for (unsigned i = 0; i < 3; ++i) assert(!rp_cd_u8(c, RP_GPU_ADDRESS(c, texture_cache[i].cache_flags)));
+    assert(rp_cd_u8(c, RP_GPU_ADDRESS(c, texture_cache[3].cache_flags)) == 0xAB);
+    assert(rp_cd_u16(c, RP_GPU_ADDRESS(c, draw_mode)) == 0x8001);
+    assert(rp_cd_u8(c, RP_GPU_ADDRESS(c, previous_field)) == 1);
+
+    reset_status(c);
+    rp_w32(c, RP_GPU_ADDRESS(c, list_cursor), 0x49A00200);
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, draw_mode), 0);
+    for (unsigned axis = 0; axis < 2; ++axis) {
+        rp_cd_w16(c, RP_GPU_ADDRESS(c, draw_area_start[axis]), (uint16_t)-20);
+        rp_cd_w16(c, RP_GPU_ADDRESS(c, draw_area_end[axis]), 100);
+    }
+    const uint32_t negative[] = {0x200000FF, 0x07FD07FB, 0x07FD0005, 0x000707FB};
+    for (unsigned i = 0; i < 4; ++i) rp_pops_gpu_write(c, 0x1810, negative[i]);
+    assert(scheduled_delay == 55);
+    assert(rp_cd_u16(c, RP_FIELD_ADDRESS(0x49A00200, rp_gpu_flat_ge_layout, vertices[0].x)) == (uint16_t)-5);
+    assert(rp_cd_u16(c, RP_FIELD_ADDRESS(0x49A00200, rp_gpu_flat_ge_layout, vertices[0].y)) == (uint16_t)-3);
+    dma_fixture = false;
+    if (setjmp(c->stop) == 0) {
+        rp_pops_gpu_write(c, 0x1810, 0x300000FF);
+        assert(!"Gouraud polygon was silently accepted");
+    }
+    assert(strcmp(c->stop_kind, "GPU_primitive_packet_not_reconstructed") == 0);
+
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[1].bytes);
     free(c->regions[2].bytes); free(c);
-    puts("GPU: port state, typed linked DMA, GE words, cycle debit and continuation passed; rendering pending.");
+    puts("GPU: state/fill/DMA, flat polygon GE data, signed vertices, cache and costs passed; rendering pending.");
     return 0;
 }

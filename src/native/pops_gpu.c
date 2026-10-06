@@ -87,6 +87,43 @@ static uint32_t drawing_environment(rp_context *c, uint32_t word, uint32_t out)
     return out;
 }
 
+/* Shared 3+3+3+3+3+1 cache traversal from fill and polygon consumers.
+ * Only polygons mark the selected texture page stale when it overlaps. */
+static void invalidate_rectangle_cache(rp_context *c, uint32_t x, uint32_t y,
+                                        uint32_t right, uint32_t bottom, bool texture)
+{
+    const uint32_t first = (x >> 6) & 15;
+    uint32_t end = ((right + 191) >> 6) & 15;
+    uint32_t begin = first - (uint32_t)(int32_t)(int8_t)GPU8(texture_cache[first].group_offset);
+    const int32_t right_group = (int8_t)GPU8(texture_cache[end].group_offset);
+    if (right_group != 3) end -= (uint32_t)right_group;
+    if (begin && begin == first && begin != end) begin -= 3;
+    if ((int32_t)(right - x) > 960) end = begin;
+    const uint32_t selected = GPU16(draw_mode) & 31;
+    uint32_t bank = (y >> 8) & 1;
+    const uint32_t last_bank = ((bottom + 255) >> 8) & 1;
+    do {
+        uint32_t group = begin;
+        unsigned visited = 0;
+        do {
+            if (group > 15 || ++visited > 6)
+                rp_block(c, "GPU_fill_cache_group_domain", 0x135E8);
+            const uint32_t entry = bank * 16 + group;
+            if (texture && entry <= selected && selected <= entry + 2)
+                SET_GPU16(draw_mode, GPU16(draw_mode) | 0x8000);
+            SET_GPU8(texture_cache[entry].cache_flags, 0);
+            if (group == 15) group = 0;
+            else {
+                if (group > 12) rp_block(c, "GPU_fill_cache_group_domain", 0x135F8);
+                SET_GPU8(texture_cache[entry + 1].cache_flags, 0);
+                SET_GPU8(texture_cache[entry + 2].cache_flags, 0);
+                group += 3;
+            }
+        } while (group != end);
+        bank ^= 1;
+    } while (bank != last_bank);
+}
+
 /* +0x134E0..+0x136C8: temporary fill scissor, cache invalidation and the
  * original GE clear template, followed by restoration of the draw scissor. */
 static uint32_t fill_rectangle(rp_context *c, uint32_t packet, uint32_t *cursor)
@@ -102,34 +139,7 @@ static uint32_t fill_rectangle(rp_context *c, uint32_t packet, uint32_t *cursor)
     const uint32_t bottom = y + height;
     uint32_t out = emit_ge_word(c, *cursor, 0xD4000000 | (y << 10) | x);
     out = emit_ge_word(c, out, 0xD5000000 | ((bottom - 1) << 10) | (x + width - 1));
-
-    const uint32_t first = x >> 6;
-    uint32_t end = ((x + width + 191) >> 6) & 15;
-    uint32_t begin = first - (uint32_t)(int32_t)(int8_t)GPU8(texture_cache[first].group_offset);
-    const int32_t right_group = (int8_t)GPU8(texture_cache[end].group_offset);
-    if (right_group != 3) end -= (uint32_t)right_group;
-    if (begin && begin == first && begin != end) begin -= 3;
-    if (width > 960) end = begin;
-    uint32_t bank = (y >> 8) & 1;
-    const uint32_t last_bank = ((bottom + 255) >> 8) & 1;
-    do {
-        uint32_t group = begin;
-        unsigned visited = 0;
-        do {
-            if (group > 15 || ++visited > 6)
-                rp_block(c, "GPU_fill_cache_group_domain", 0x135E8);
-            const uint32_t entry = bank * 16 + group;
-            SET_GPU8(texture_cache[entry].cache_flags, 0);
-            if (group == 15) group = 0;
-            else {
-                if (group > 12) rp_block(c, "GPU_fill_cache_group_domain", 0x135F8);
-                SET_GPU8(texture_cache[entry + 1].cache_flags, 0);
-                SET_GPU8(texture_cache[entry + 2].cache_flags, 0);
-                group += 3;
-            }
-        } while (group != end);
-        bank ^= 1;
-    } while (bank != last_bank);
+    invalidate_rectangle_cache(c, x, y, x + width, bottom, false);
 
     const bool in_x = x - GPU16(display_origin[0]) < GPU16(display_size[0]);
     if (in_x && (y - GPU16(display_origin[1]) < GPU16(display_size[1]) ||
@@ -150,7 +160,73 @@ static uint32_t fill_rectangle(rp_context *c, uint32_t packet, uint32_t *cursor)
     return cost;
 }
 
-/* Reached state/fill paths of +0x133D0. GE words are retained in guest RAM;
+static int32_t coordinate11(uint32_t packed, unsigned shift)
+{ return (int32_t)(((packed >> shift) & 0x7FF) ^ 0x400) - 0x400; }
+static uint32_t triangle_area2(const rp_gpu_position_layout *a,
+                               const rp_gpu_position_layout *b,
+                               const rp_gpu_position_layout *d)
+{
+    const int32_t area = (b->x - a->x) * (d->y - a->y) - (d->x - a->x) * (b->y - a->y);
+    return (uint32_t)(area < 0 ? -area : area);
+}
+
+/* +0x140A8..+0x14230, then shared +0x13A98: flat untextured primitives.
+ * The original GE template jump skips inline vertex data. Z words and the
+ * unused fourth vertex of a triangle are deliberately not overwritten. */
+static uint32_t flat_polygon(rp_context *c, uint32_t packet, unsigned count, uint32_t *cursor)
+{
+    const uint32_t command = rp_u32(c, RP_FIELD_ADDRESS(packet, rp_gpu_flat_packet_layout, command));
+    rp_gpu_position_layout vertices[4] = {{0}};
+    int32_t min_x = 1024, min_y = 1024, max_x = -1024, max_y = -1024;
+    for (unsigned i = 0; i < count; ++i) {
+        const uint32_t xy = rp_u32(c, RP_FIELD_ADDRESS(packet, rp_gpu_flat_packet_layout, positions[i]));
+        vertices[i].x = (int16_t)coordinate11(xy, 0);
+        vertices[i].y = (int16_t)coordinate11(xy, 16);
+        if (vertices[i].x < min_x) min_x = vertices[i].x;
+        if (vertices[i].x > max_x) max_x = vertices[i].x;
+        if (vertices[i].y < min_y) min_y = vertices[i].y;
+        if (vertices[i].y > max_y) max_y = vertices[i].y;
+    }
+    if (max_x - min_x >= 1024 || 2 * (max_y - min_y) >= 1024)
+        rp_block(c, "GPU_oversized_flat_polygon_not_reconstructed", 0x14234);
+    uint32_t out = *cursor;
+    const uint32_t mode = GPU16(draw_mode);
+    if (mode & 0x4000) {
+        SET_GPU16(draw_mode, mode - 0x4000);
+        out = emit_ge_word(c, out, 0x13041B90);
+        out = emit_ge_word(c, out, 0x0A000080 | (((mode >> 5) & 3) << 4));
+    }
+    const uint32_t body = out;
+    out = emit_ge_word(c, out, 0x14000000);
+    out = emit_ge_word(c, out, 0x55000000 | (command & 0xFFFFFF));
+    (void)emit_ge_word(c, out, (UINT32_C(0x51B7F800) | (((command >> 25) & 15) << 6)) - body);
+    for (unsigned i = 0; i < count; ++i) {
+        rp_cd_w16(c, RP_FIELD_ADDRESS(body, rp_gpu_flat_ge_layout, vertices[i].x), (uint16_t)vertices[i].x);
+        rp_cd_w16(c, RP_FIELD_ADDRESS(body, rp_gpu_flat_ge_layout, vertices[i].y), (uint16_t)vertices[i].y);
+    }
+    *cursor = body + sizeof(rp_gpu_flat_ge_layout);
+
+    uint32_t area = triangle_area2(&vertices[0], &vertices[1], &vertices[2]);
+    if (count == 4) area += triangle_area2(&vertices[3], &vertices[1], &vertices[2]);
+    const int32_t dx = (int16_t)GPU16(drawing_offset[0]), dy = (int16_t)GPU16(drawing_offset[1]);
+    min_x += dx; max_x += dx; min_y += dy; max_y += dy;
+    const int32_t draw_x = (int16_t)GPU16(draw_area_start[0]), draw_y = (int16_t)GPU16(draw_area_start[1]);
+    uint32_t work = 30;
+    if (max_x <= (int16_t)GPU16(draw_area_end[0]) + 1 && max_y <= (int16_t)GPU16(draw_area_end[1]) + 1) {
+        if ((rp_u32(c, RP_DEVICE_ADDRESS(c, compatibility_flags)) & 32) && (min_x < draw_x || min_y < draw_y)) area = 0;
+        uint32_t weighted = area >> 1;
+        if (max_x >= draw_x && max_y >= draw_y && (((command >> 25) & 1) || ((GPU32(status) >> 11) & 2)))
+            weighted += area;
+        work += weighted >> ((GPU8(draw_mode_gate) + 1) & 31);
+    }
+    SET_GPU8(previous_field, GPU8(previous_field) | GPU8(draw_area_intersects_display));
+    if (GPU8(draw_area_exceeds_display))
+        invalidate_rectangle_cache(c, (uint32_t)min_x, (uint32_t)min_y, (uint32_t)max_x, (uint32_t)max_y, true);
+    rp_event(c, "milestone", "GPU_flat_polygon_GE_data_prepared_not_rendered", count, work);
+    return work;
+}
+
+/* Reached state/fill/flat paths of +0x133D0. GE words are retained in guest RAM;
  * list services remain the existing explicit headless execution adapter. */
 static uint32_t consume_packet(rp_context *c, uint32_t source, uint32_t bytes)
 {
@@ -186,6 +262,13 @@ static uint32_t consume_packet(rp_context *c, uint32_t source, uint32_t bytes)
             }
         } else if (mode == 7) {
             out = drawing_environment(c, word, out);
+        } else if (mode == 1 && !(word & 0x14000000)) {
+            const unsigned count = word & 0x08000000 ? 4 : 3;
+            const uint32_t packet_size = (count + 1) * sizeof(uint32_t);
+            if (bytes - offset < packet_size)
+                rp_block(c, "GPU_flat_polygon_truncated_packet", 0x140F0);
+            work += flat_polygon(c, source + offset, count, &out);
+            offset += packet_size - 4;
         } else {
             rp_block(c, "GPU_primitive_packet_not_reconstructed", 0x133D0);
         }

@@ -9,6 +9,12 @@ typedef struct {
     uint16_t group_x_origin;
 } rp_gpu_texture_cache_entry;
 typedef struct { uint32_t command, origin, extent; } rp_gpu_fill_packet_layout;
+typedef struct { uint32_t command, positions[4]; } rp_gpu_flat_packet_layout;
+typedef struct { int16_t x, y, z; } rp_gpu_position_layout;
+typedef struct {
+    uint32_t offset_command, color_command, template_jump;
+    rp_gpu_position_layout vertices[4];
+} rp_gpu_flat_ge_layout;
 
 /* Selected core GPU fields, recovered from +0x12FBC and their producers.
  * This is a wire view: use named addresses, never cast the guest backing. */
@@ -64,6 +70,9 @@ enum { RP_GPU_DISPLAY_TRANSITION_ADDRESS = 0x49CBD4 };
 _Static_assert(offsetof(rp_core_gpu_layout, data_read_latch) == 0x35BC, "GPU data latch");
 _Static_assert(sizeof(rp_gpu_texture_cache_entry) == 8, "GPU texture cache stride");
 _Static_assert(sizeof(rp_gpu_fill_packet_layout) == 12, "GPU fill packet bytes");
+_Static_assert(sizeof(rp_gpu_flat_packet_layout) == 20, "flat quad packet");
+_Static_assert(sizeof(rp_gpu_flat_ge_layout) == 36, "flat GE body");
+_Static_assert(offsetof(rp_gpu_flat_ge_layout, vertices[1].x) == 18, "flat second vertex");
 _Static_assert(offsetof(rp_core_gpu_layout, texture_cache) == 0x3400, "GPU texture cache base");
 _Static_assert(offsetof(rp_core_gpu_layout, dma_cost_scaling) == 0x6E8, "GPU DMA cost scaling");
 _Static_assert(offsetof(rp_core_gpu_layout, packet_words[47]) == 0x35BC, "GPU packet/latch alias");

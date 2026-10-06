@@ -1,5 +1,18 @@
 # RePops progress
 
+## Current: flat quad reaches deferred DMA continuation
+
+`out/gpu-flat.ubRtWo/result/` processes one real flat quadrilateral, emitting
+the original GE record and accounting for 153,630 work units. It advances to
+the deferred DMA callback +0x8CAC: 40,070,894 generated-code observations,
+43,291 transfers, `game_executed: false`.
+
+Triangles and quadrilaterals share the new typed flat-polygon branch in
+`pops_gpu.c`; cache traversal is shared with fill. Exact command/vertex,
+signed-coordinate, work and cache checks pass alongside display and Unicorn
+checks. Textured/Gouraud and oversized splitting remain separate. No GE
+backend or framebuffer rendering was added. See `gpu_flat_polygons.md`.
+
 ## Current: active display lists reach a flat quadrilateral
 
 `out/display-active.G1CfFs/result/` passes active-screen refresh and reaches

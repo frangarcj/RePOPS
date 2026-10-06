@@ -7,6 +7,7 @@
 typedef struct {
     uint8_t earlier_state[0x1AC];
     uint32_t event_deadline, event_downcount;
+    uint32_t event_resume_code, event_head_next, event_head_prev;
 } rp_core_clock_layout;
 
 typedef struct {
@@ -58,7 +59,7 @@ typedef struct {
     int16_t reverb_input_gain[2];
     uint32_t effective_voice_volumes[24];
     uint32_t cd_buffers[8];
-    uint32_t pending_key_on, pending_key_off, dirty_voice_mask, unknown_28c;
+    uint32_t pending_key_on, pending_key_off, dirty_voice_mask, cd_volume_matrix;
     uint16_t transfer_notification;
     uint8_t clear_irq_latch;
     int8_t cd_notification;

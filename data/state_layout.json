@@ -14,6 +14,25 @@
     "alternate_gp": {"address": "0x09FF8000", "cleared_prefix_bytes": "0xB04", "ownership": "distinct_context_subsystem_unresolved", "evidence": ["original:+0x1BF40..+0x1BF48", "original:+0x1C254..+0x1C348", "original:+0x1C5FC..+0x1C600"]}
   },
   "types": {
+    "CdResponseRecord": {
+      "size": "0x1C", "confidence": "confirmed_layout",
+      "fields": [["0x00", "event", "PopsEvent"], ["0x10", "payload", "u8[10]"], ["0x1A", "pending_irq", "i8"], ["0x1B", "length", "u8"]],
+      "evidence": ["original:+0xC268..+0xC480", "src/native/pops_cdrom.h"],
+      "warning": "Publication copies 12 bytes from payload, including the two metadata bytes; pending_irq is cleared before that copy."
+    },
+    "CdControllerState": {
+      "size": "0xC0", "confidence": "confirmed_selected_roles_other_fields_preserved",
+      "fields": [["0x00", "primary", "CdResponseRecord"], ["0x1C", "secondary", "CdResponseRecord"], ["0x38", "unknown_event", "PopsEvent"], ["0x48", "sector_event", "PopsEvent"], ["0x58", "drive_event", "PopsEvent"], ["0x68", "response_fifo", "u8[12]"], ["0x74", "response_length", "u8"], ["0x75", "parameter_count", "u8"], ["0x76", "parameters", "u8[4]"], ["0x7A", "data_cursor", "u16"], ["0x7C", "data_limit", "u16"], ["0x7E", "deferred_command", "i8"], ["0x7F", "current_track", "u8"], ["0x80", "audio_muted", "u8"], ["0x81", "unknown_81", "u8"], ["0x82", "producer_buffer", "u8"], ["0x83", "selected_buffer", "u8"], ["0x84", "error_flag", "u8"], ["0x85", "error_code", "u8"], ["0x86", "command_lock", "u8"], ["0x87", "unknown_87", "u8"], ["0x88", "location_pending", "u8"], ["0x89", "response_cursor", "u8"], ["0x8A", "poll_flag", "u8"], ["0x8B", "lid_phase", "u8"], ["0x8C", "poll_countdown", "u8"], ["0x8D", "retained_config", "u8"], ["0x8E", "unknown_8e", "u8"], ["0x8F", "saved_flag", "u8"], ["0x90", "speed_transition", "u8"], ["0x91", "seek_header_pending", "u8"], ["0x92", "unknown_92", "bytes[2]"], ["0x94", "sector_buffers", "guest_address32[2]"], ["0x9C", "mode", "u8"], ["0x9D", "drive_status", "u8"], ["0x9E", "filter", "u16"], ["0xA0", "random_state", "u32"], ["0xA4", "seek_deadline", "u32"], ["0xA8", "current_sector", "u32"], ["0xAC", "requested_sector", "u32"], ["0xB0", "playing_sector", "u32"], ["0xB4", "header_pointer", "guest_address32"], ["0xB8", "volume_matrix", "u8[4]"], ["0xBC", "status_index", "u8"], ["0xBD", "irq_enable", "u8"], ["0xBE", "irq_flags", "u8"], ["0xBF", "data_request", "u8"]],
+      "instances": [{"base": "core", "offset": "0x3800"}],
+      "evidence": ["original:+0xD088..+0xD41C", "original:+0x1ADB0", "src/native/pops_cdrom.h"],
+      "warning": "Identified field roles do not imply that every CD command, sector worker or audio mode is implemented."
+    },
+    "CdCacheNode": {
+      "size": "0x10", "confidence": "confirmed_layout",
+      "fields": [["0x00", "next", "guest_address32"], ["0x04", "prev", "guest_address32"], ["0x08", "first_sector", "u32"], ["0x0C", "buffer", "guest_address32"]],
+      "instances": [{"base": "core", "offset": "0x3D00", "count": 17, "stride": "0x10"}],
+      "evidence": ["original:+0xD41C", "src/native/pops_boot.c:rp_pops_disc_init", "src/native/pops_cdrom.h"]
+    },
     "MasterVolumeState": {
       "size": "0x18", "confidence": "layout_confirmed_fixed_level_path_implemented",
       "fields": [["0x00", "left_sweep", "VolumeSweep"], ["0x0A", "right_sweep", "VolumeSweep"], ["0x14", "raw_volume_pair", "u32"]],
@@ -32,7 +51,7 @@
     },
     "MeSharedPrefix": {
       "size": "0x2C0", "confidence": "confirmed_selected_fields_gaps_unresolved",
-      "fields": [["0x000", "voices", "SharedVoiceRegisters[24]"], ["0x180", "master_volume_raw", "u16[2]"], ["0x184", "reverb_volume", "i16[2]"], ["0x188", "key_on_register", "u32"], ["0x18C", "key_off_register", "u32"], ["0x190", "pitch_modulation_mask", "u32"], ["0x194", "noise_mask", "u32"], ["0x198", "reverb_mask", "u32"], ["0x19C", "end_mask", "u32"], ["0x1A0", "unknown_1a0", "u16"], ["0x1A2", "reverb_base_units", "u16"], ["0x1A4", "irq_address_units", "u16"], ["0x1A6", "transfer_address_units", "u16"], ["0x1A8", "transfer_data", "u16"], ["0x1AA", "control", "u16"], ["0x1AC", "transfer_control", "u16"], ["0x1AE", "status", "u16"], ["0x1B0", "cd_volume", "i16[2]"], ["0x1B4", "unknown_1b4", "bytes[4]"], ["0x1B8", "effective_master_volume", "u32"], ["0x1BC", "unknown_1bc", "bytes[4]"], ["0x1C0", "allpass_delay_units", "u16[2]"], ["0x1C4", "reverb_coefficients", "i16[8]"], ["0x1D4", "reverb_tap_units", "u16[20]"], ["0x1FC", "reverb_input_gain", "i16[2]"], ["0x200", "effective_voice_volumes", "u32[24]"], ["0x260", "cd_buffers", "guest_address32[8]"], ["0x280", "pending_key_on", "u32"], ["0x284", "pending_key_off", "u32"], ["0x288", "dirty_voice_mask", "u32"], ["0x28C", "unknown_28c", "u32"], ["0x290", "transfer_notification", "u16"], ["0x292", "clear_irq_latch", "u8"], ["0x293", "cd_notification", "i8"], ["0x294", "callback_count", "u32"], ["0x298", "unknown_298", "u32"], ["0x29C", "producer_state", "u16"], ["0x29E", "consumer_state", "u16"], ["0x2A0", "repeat_dirty_mask", "u32"], ["0x2A4", "unknown_2a4", "bytes[28]"]],
+      "fields": [["0x000", "voices", "SharedVoiceRegisters[24]"], ["0x180", "master_volume_raw", "u16[2]"], ["0x184", "reverb_volume", "i16[2]"], ["0x188", "key_on_register", "u32"], ["0x18C", "key_off_register", "u32"], ["0x190", "pitch_modulation_mask", "u32"], ["0x194", "noise_mask", "u32"], ["0x198", "reverb_mask", "u32"], ["0x19C", "end_mask", "u32"], ["0x1A0", "unknown_1a0", "u16"], ["0x1A2", "reverb_base_units", "u16"], ["0x1A4", "irq_address_units", "u16"], ["0x1A6", "transfer_address_units", "u16"], ["0x1A8", "transfer_data", "u16"], ["0x1AA", "control", "u16"], ["0x1AC", "transfer_control", "u16"], ["0x1AE", "status", "u16"], ["0x1B0", "cd_volume", "i16[2]"], ["0x1B4", "unknown_1b4", "bytes[4]"], ["0x1B8", "effective_master_volume", "u32"], ["0x1BC", "unknown_1bc", "bytes[4]"], ["0x1C0", "allpass_delay_units", "u16[2]"], ["0x1C4", "reverb_coefficients", "i16[8]"], ["0x1D4", "reverb_tap_units", "u16[20]"], ["0x1FC", "reverb_input_gain", "i16[2]"], ["0x200", "effective_voice_volumes", "u32[24]"], ["0x260", "cd_buffers", "guest_address32[8]"], ["0x280", "pending_key_on", "u32"], ["0x284", "pending_key_off", "u32"], ["0x288", "dirty_voice_mask", "u32"], ["0x28C", "cd_volume_matrix", "u32"], ["0x290", "transfer_notification", "u16"], ["0x292", "clear_irq_latch", "u8"], ["0x293", "cd_notification", "i8"], ["0x294", "callback_count", "u32"], ["0x298", "unknown_298", "u32"], ["0x29C", "producer_state", "u16"], ["0x29E", "consumer_state", "u16"], ["0x2A0", "repeat_dirty_mask", "u32"], ["0x2A4", "unknown_2a4", "bytes[28]"]],
       "instances": [{"base": "me_shared", "offset": "0x0"}],
       "evidence": ["original:+0x0000..+0x019DF", "src/native/pops_spu.c"],
       "warning": "This is a prefix, not the entire sound-RAM allocation. Fields at +0x29C..+0x29F also have combined word and individual byte protocol accesses."

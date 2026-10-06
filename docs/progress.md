@@ -4,6 +4,15 @@ Historical native runs retain `result/retained-trace-result.json` instead of
 their full trace once superseded. Keep the latest two traces and the GE-preview
 provenance source; decompilers and focused verification outputs are not pruned.
 
+## Current: MDEC quantization input passes; PAL frame correction is next
+
+`out/mdec-input.gBy4ri/result/` prepares the two quantization banks through
+the original DMA input callback +0xF54C. The next boundary is the PAL frame
+correction path +0x125A4: 209,714,268 generated-instruction observations,
+2,477,090 transfers and `game_executed: false`. The factor table's binary32
+layout/constants and compressed-input handoff are tested; the macroblock
+decoder is still a separate unreconstructed dependency. See `mdec_ports.md`.
+
 ## Current: MDEC reset/status pass; DMA input is next
 
 `out/mdec-ports.KvdIhA/result/` executes the original MDEC reset and reads its

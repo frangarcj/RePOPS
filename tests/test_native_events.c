@@ -20,6 +20,8 @@ uint32_t rp_pops_gpu_dma_transfer(rp_context *c, uint32_t a, uint32_t n, uint32_
 }
 uint32_t rp_pops_cd_dma_transfer(rp_context *c, uint32_t a, uint32_t n, uint32_t f)
 { (void)c; (void)a; (void)n; (void)f; abort(); }
+uint32_t rp_pops_mdec_dma_input(rp_context *c, uint32_t a, uint32_t n, uint32_t f)
+{ (void)c; (void)a; (void)n; (void)f; abort(); }
 void rp_pops_cd_event(rp_context *c, uint32_t event, uint32_t callback)
 { (void)c; (void)event; (void)callback; abort(); }
 

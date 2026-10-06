@@ -8,6 +8,8 @@
 void rp_pops_graphics_event(rp_context *c, uint32_t cb) { (void)c; (void)cb; abort(); }
 uint32_t rp_pops_gpu_dma_transfer(rp_context *c, uint32_t a, uint32_t n, uint32_t f)
 { (void)c; (void)a; (void)n; (void)f; abort(); }
+uint32_t rp_pops_mdec_dma_input(rp_context *c, uint32_t a, uint32_t n, uint32_t f)
+{ (void)c; (void)a; (void)n; (void)f; abort(); }
 void rp_pops_initialize_core(rp_context *c) { (void)c; abort(); }
 void rp_pops_invalidate_ram_code(rp_context *c) { (void)c; abort(); }
 void rp_pops_prepare_exception(rp_context *c, uint32_t v) { (void)c; (void)v; abort(); }

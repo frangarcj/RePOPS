@@ -1,4 +1,5 @@
 #include "../src/native/pops_mdec.h"
+#include "../src/native/pops_gpu.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,7 +34,8 @@ int main(void)
     assert(c);
     c->gp = 0x10000; c->trace = tmpfile(); assert(c->trace);
     c->regions[0] = (rp_region){0, 0x100000, calloc(1, 0x100000)};
-    assert(c->regions[0].bytes);
+    c->regions[1] = (rp_region){0x09800000, 0x1000, calloc(1, 0x1000)};
+    assert(c->regions[0].bytes && c->regions[1].bytes);
     if (setjmp(c->stop)) { fprintf(stderr, "%s\n", c->stop_kind); return 1; }
     uint8_t expected[28];
     for (unsigned i = 0; i < sizeof(expected); ++i) expected[i] = (uint8_t)(0x40 + i);
@@ -66,7 +68,41 @@ int main(void)
     assert(rp_u32(c, stream - 4) == 0x12345678);
     assert(rp_u32(c, stream + sizeof(rp_mdec_stream_layout)) == 0x87654321);
     assert(!memcmp(rp_memory(c, RP_MDEC_ADDRESS(c, reset_parameters), 28), expected, 28));
-    fclose(c->trace); free(c->regions[0].bytes); free(c);
-    puts("MDEC ports: command/status, signed count, reset range and pending-event order passed.");
+
+    uint8_t *weights = rp_module_memory(c, 0xD49B8, 128);
+    for (unsigned i = 0; i < 64; ++i) { weights[i * 2] = 1; weights[i * 2 + 1] = 0; }
+    weights[126] = 0xFF; weights[127] = 0xFF;
+    memset(rp_memory(c, 0x09800100, 64), 1, 64);
+    memset(rp_memory(c, 0x09800140, 64), 3, 64);
+    rp_w8(c, 0x0980013F, 255); rp_w8(c, 0x0980017F, 255);
+    rp_pops_mdec_write(c, 0x1F801820, 0x40000001);
+    assert(rp_pops_mdec_dma_input(c, 0x100, 128, 0x01000201) == 128);
+    assert(rp_u32(c, RP_MDEC_ADDRESS(c, quantization_factors[0][0])) == 0x2BE2D0E5);
+    assert(rp_u32(c, RP_MDEC_ADDRESS(c, quantization_factors[0][1])) == 0x2C400000);
+    for (unsigned i = 1; i < 63; ++i) {
+        assert(rp_u32(c, RP_MDEC_ADDRESS(c, quantization_factors[i][0])) == 0x2A62D0E5);
+        assert(rp_u32(c, RP_MDEC_ADDRESS(c, quantization_factors[i][1])) == 0x2AC00000);
+    }
+    assert(rp_u32(c, RP_MDEC_ADDRESS(c, quantization_factors[63][0])) == 0x3661ED32);
+    assert(rp_u32(c, RP_MDEC_ADDRESS(c, quantization_factors[63][1])) == 0x35FEFF01);
+    assert(rp_u32(c, RP_MDEC_ADDRESS(c, stream.command)) == 0x40000001);
+
+    rp_pops_mdec_write(c, 0x1F801820, 0x60000000);
+    assert(rp_pops_mdec_dma_input(c, 0x100, 64, 0) == 64);
+    rp_w32(c, RP_GPU_ADDRESS(c, display_mode), 0x12345678);
+    rp_pops_mdec_write(c, 0x1F801820, 0x20000012);
+    assert(rp_pops_mdec_dma_input(c, 0x80000100, 64, 0) == 0);
+    assert(rp_u32(c, RP_MDEC_ADDRESS(c, stream.remaining_bytes)) == 72);
+    assert(rp_u32(c, RP_MDEC_ADDRESS(c, stream.input_bytes)) == 64);
+    assert(rp_u32(c, RP_MDEC_ADDRESS(c, stream.input_cursor)) == 0x09800100);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, display_mode)) == 0x12345601);
+    rp_w32(c, RP_MDEC_ADDRESS(c, stream.output_bytes), 128);
+    if (!setjmp(c->stop)) {
+        (void)rp_pops_mdec_dma_input(c, 0x100, 64, 0);
+        assert(!"Compressed macroblock was falsely decoded");
+    }
+    assert(!strcmp(c->stop_kind, "MDEC_decoder_body_not_reconstructed"));
+    fclose(c->trace); free(c->regions[0].bytes); free(c->regions[1].bytes); free(c);
+    puts("MDEC: ports, reset ordering, quantization banks and compressed-input handoff passed.");
     return 0;
 }

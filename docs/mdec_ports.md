@@ -22,3 +22,17 @@ Both volatile card slots are selected and receive command 0x52, but neither
 records a completed sector-read transaction in this trace.
 
 No macroblock decoding, GE execution, framebuffer or game boot is claimed.
+
+## DMA input (+0xF54C)
+
+Command 2 prepares 128 binary32 factors, interleaving the two 64-byte input
+banks. It uses the original 64-halfword weight table at module +0xD49B8,
+the special first coefficient shift and the two original floating constants.
+The fixture checks exact result bits in both banks, including nontrivial
+rounding and endpoint coefficients. Command 1 publishes input byte counts
+and the input address; a pending output request still stops at +0xE8F8.
+
+`out/mdec-input.gBy4ri/result/` actually executes the 128-factor setup. It
+then reaches the PAL display correction at +0x125A4, after 209,714,268
+instruction observations and 2,477,090 transfers. The scale-table command
+passes through as in the original input callback. Decoded video is not shown.

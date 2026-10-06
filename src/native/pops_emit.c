@@ -737,12 +737,22 @@ uint32_t rp_emit_record(rp_context *c, rp_pops_category category, uint32_t recor
                 return out;
             }
             if (op == RP_OP_SLL && r[19] == RP_OP_SRL && next_amount >= amount) {
-                rp_event(c, "compiler_boundary", "shift_pair_words",
-                         rp_u32(c, record + 8), rp_u32(c, record + 24));
-                rp_event(c, "compiler_boundary", "shift_pair_regs",
-                         (source << 24) | (dest << 16) | (r[29] << 8) | r[18],
-                         (op << 8) | r[19]);
-                rp_block(c, "shift_pair_peephole_not_reconstructed", 0x6914);
+                uint32_t host_dest, host_source;
+                out = rp_emit_pair(c, out, dest, source, &host_dest, &host_source);
+                out = emit(c, out, 0x7C000000 |
+                           ((host_source & 31) << 21) |
+                           ((host_dest & 31) << 16) |
+                           (((31 - next_amount) & 31) << 11) |
+                           (((next_amount - amount) & 31) << 6));
+                put_half(c, record + 20, RP_CAT_EMPTY);
+                if (was_known) {
+                    value = (uint32_t)(value << amount) >> next_amount;
+                    rp_w32(c, c->gp + 0xB5C + dest * 4, value);
+                    rp_w32(c, c->gp + 0xB58,
+                           rp_u32(c, c->gp + 0xB58) |
+                           (0x80000000u >> (dest & 31)));
+                }
+                return out;
             }
         }
         uint32_t host_dest, host_source;

@@ -4,6 +4,19 @@ Historical native runs retain `result/retained-trace-result.json` instead of
 their full trace once superseded. Keep the latest two traces and the GE-preview
 provenance source; decompilers and focused verification outputs are not pruned.
 
+## Current: sample DMA executes; the next boundary is a GPU packet
+
+`out/spu-dma.lmurpi/result/` performs 510 transfers to the ME's shared sample
+RAM, totaling 930,672 bytes across writes. It reaches an unsupported GPU
+packet in +0x133D0 after 356,272,699 generated-instruction observations and
+2,535,609 compiled transfers. These writes are not proof of audible music.
+
+The SPU DMA reconstruction preserves copied-span versus requested-size
+semantics, cursor wrap, IRQ-latch windows, code-tag clearing for reads and
+the original deferred event. Native contract tests pass; see `spu_dma.md`.
+The compact trace lacks the rejected packet word, so its exact subtype is
+not inferred from this result. `game_executed` remains false.
+
 ## Current: PAL target-vcount selection passes; next callback is +0x8698
 
 `out/display-pal.JO3Se5/result/` passes the original phase-accumulator branch

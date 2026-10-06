@@ -1,6 +1,7 @@
 #include "pops_dma.h"
 #include "pops_gpu.h"
 #include "pops_mdec.h"
+#include "pops_spu_dma.h"
 
 /* +0x9158..+0x91BB and its width table at +0xD45AC. The helper refunds
  * four cycles before reading the shadow, including the default LHU path. */
@@ -115,6 +116,7 @@ static uint32_t transfer_channel(rp_context *c, unsigned channel, uint32_t addre
     case 0x12C74: return rp_pops_gpu_dma_transfer(c, address, bytes, control);
     case 0x9364: return rp_pops_dma_clear_ordering_table(c, address, bytes, control);
     case 0xF54C: return rp_pops_mdec_dma_input(c, address, bytes, control);
+    case 0x8698: return rp_pops_spu_dma_transfer(c, address, bytes, control);
     default: rp_block(c, "DMA_transfer_callback_not_reconstructed", callback);
     }
 }

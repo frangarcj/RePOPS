@@ -4,6 +4,7 @@
 #include "pops_emit.h"
 #include "pops_serial.h"
 #include "pops_mdec.h"
+#include "pops_spu_dma.h"
 #include "../me_startup.h"
 #include <string.h>
 #include <time.h>
@@ -376,7 +377,7 @@ static void sound_reset(rp_context *c)
     spu_state_reset(c);
     memset(rp_memory(c, c->gp + 0x308, 0x78), 0, 0x78);
     rp_w32(c, c->gp + 0x35C, 0x8580);
-    rp_w32(c, c->gp + 0x36C, 0x8898);
+    rp_w32(c, RP_SPU_DMA_ADDRESS(c, deferred_event.callback), 0x8898);
     rp_pops_install_dma(c, 4, 0x8698);
     rp_pops_map_io(c, 0x1F801C00, 0x260, 0x85F4, 0);
     rp_pops_map_io(c, 0x1F801C00, 0x200, 0x85F4, 0x7F00);

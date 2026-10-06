@@ -23,6 +23,27 @@ _Static_assert(offsetof(rp_core_emit_layout, register_location) == 0x778, "emitt
 _Static_assert(offsetof(rp_core_emit_layout, known_register_mask) == 0xB58, "emitter known mask");
 _Static_assert(offsetof(rp_core_emit_layout, known_register_values) == 0xB5C, "emitter known values");
 
+/* Memory/COP analysis view only. Other compiler phases reuse some of these
+ * bytes for emitted-code and patch addresses; never cast guest backing. */
+typedef struct {
+    uint16_t flags;
+    uint8_t destination, opcode;
+    uint16_t category, cost;
+    int16_t displacement;
+    uint8_t unused_payload[2];
+    int8_t base_register;
+    uint8_t source_register, cop_register, auxiliary;
+} rp_cop_memory_record_layout;
+#define RP_COP_RECORD_ADDRESS(record, member) RP_FIELD_ADDRESS(record, rp_cop_memory_record_layout, member)
+enum {
+    RP_COP_WRITE_POLICY_TABLE = 0xD42FC,
+    /* Encoded host registers, not normalized opcodes or emitter selectors. */
+    RP_EMIT_HOST_V0 = 0x82, RP_EMIT_HOST_A1 = 0x85
+};
+_Static_assert(sizeof(rp_cop_memory_record_layout) == 16, "COP memory record stride");
+_Static_assert(offsetof(rp_cop_memory_record_layout, displacement) == 8, "COP displacement");
+_Static_assert(offsetof(rp_cop_memory_record_layout, cop_register) == 14, "COP register selector");
+
 /* All cursors/words are guest numeric addresses and Allegrex instructions.
  * None of these functions creates callable host machine code.
  */

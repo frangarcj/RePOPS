@@ -186,7 +186,42 @@ int main(void)
     assert(rp_u32(c, cursor - 8) == ((18u << 11) | 0x12));
     assert(rp_u32(c, cursor - 4) == (0xAF8001A8 | (18u << 16)));
     assert(*(uint8_t *)rp_memory(c, c->gp + 0x752, 1) == 1);
+    /* COP loads select the memory helper from the destination policy. Even
+     * an ignored COP destination must still perform its memory access. */
+    const unsigned cop_registers[] = {0, 1, 7, 29};
+    const unsigned policies[] = {RP_STATE_STORE_WORD, RP_STATE_STORE_SIGNED_HALF_WORD,
+                                 RP_STATE_STORE_HALF, RP_STATE_STORE_IGNORE};
+    const uint32_t helpers[] = {0x2128, 0x1DE8, 0x267C, 0x2128};
+    for (unsigned i = 0; i < 4; ++i) {
+        rp_emit_init_registers(c, cursor);
+        memset(rp_memory(c, record, sizeof(rp_cop_memory_record_layout)), 0,
+               sizeof(rp_cop_memory_record_layout));
+        rp_w8(c, RP_COP_RECORD_ADDRESS(record, base_register), 8);
+        rp_w8(c, RP_COP_RECORD_ADDRESS(record, cop_register), (uint8_t)cop_registers[i]);
+        rp_w32(c, RP_COP_RECORD_ADDRESS(record, displacement), 0xFFFC);
+        *(uint8_t *)rp_module_memory(c, RP_COP_WRITE_POLICY_TABLE + cop_registers[i], 1) = (uint8_t)policies[i];
+        const uint32_t first = cursor;
+        cursor = rp_emit_record(c, RP_CAT_LOAD_COP_MEMORY, record, cursor, 2);
+        bool helper_found = false, address_found = false;
+        for (uint32_t at = first; at < cursor; at += 4) {
+            helper_found |= rp_u32(c, at) == (0x30000000u + helpers[i]) >> 2;
+            address_found |= rp_u32(c, at) == 0x2604FFFC; /* ADDIU A0,S0,-4 */
+        }
+        assert(helper_found && address_found);
+        if (policies[i] != RP_STATE_STORE_IGNORE)
+            assert(rp_u32(c, cursor - 4) == (0xAF820000 | cop_registers[i] * sizeof(uint32_t)));
+        else assert(rp_u32(c, cursor - 4) != (0xAF820000 | cop_registers[i] * sizeof(uint32_t)));
+    }
+    rp_emit_init_registers(c, cursor);
+    rp_w8(c, RP_COP_RECORD_ADDRESS(record, cop_register), 0);
+    const uint32_t cop_store = cursor;
+    cursor = rp_emit_record(c, RP_CAT_STORE_COP_MEMORY, record, cursor, 2);
+    assert(rp_u32(c, cop_store) == 0x8F850000); /* LW A1,COP slot zero(GP) */
+    bool store_call = false;
+    for (uint32_t at = cop_store; at < cursor; at += 4)
+        store_call |= rp_u32(c, at) == 0x0C000914;
+    assert(store_call);
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[2].bytes); free(c);
-    puts("Emitter smoke: FPR/memory locations, temporary state, constants and debit passed; not exhaustive equivalence.");
+    puts("Emitter smoke: registers, signed state, COP memory widths/ignored destinations and stores passed.");
     return 0;
 }

@@ -787,6 +787,23 @@ uint32_t rp_emit_record(rp_context *c, rp_pops_category category, uint32_t recor
             out = rp_emit_immediate(c, RP_EMIT_SIGN_HALF, r[2], r[2], 0, out);
         return out;
     }
+    if (category == RP_CAT_LOAD_COP_MEMORY || category == RP_CAT_STORE_COP_MEMORY) {
+        const uint32_t cop = *(uint8_t *)rp_memory(c, RP_COP_RECORD_ADDRESS(record, cop_register), 1);
+        const uint32_t base = (uint32_t)(int32_t)*(int8_t *)rp_memory(c,
+                                      RP_COP_RECORD_ADDRESS(record, base_register), 1);
+        const uint32_t displacement = sign16(half(c, RP_COP_RECORD_ADDRESS(record, displacement)));
+        const uint32_t state_offset = cop * sizeof(uint32_t);
+        if (category == RP_CAT_STORE_COP_MEMORY) {
+            out = rp_emit_load_state(c, out, RP_EMIT_HOST_A1, state_offset);
+            return rp_emit_memory(c, RP_OP_SW, RP_EMIT_HOST_A1, base, displacement, out, 0);
+        }
+        const uint8_t policy = *(uint8_t *)rp_module_memory(c, RP_COP_WRITE_POLICY_TABLE + cop, 1);
+        const rp_pops_opcode op = policy == RP_STATE_STORE_SIGNED_HALF_WORD ? RP_OP_LH :
+                                 policy == RP_STATE_STORE_HALF ? RP_OP_LHU : RP_OP_LW;
+        /* Even an ignored COP destination performs the original memory read. */
+        out = rp_emit_memory(c, op, RP_EMIT_HOST_V0, base, displacement, out, 0);
+        return rp_emit_store_state(c, policy, RP_EMIT_HOST_V0, state_offset, out);
+    }
     if (category == RP_CAT_COP0_CONTROL) {
         out = emit(c, out, 0x8F850130);
         out = emit(c, out, 0x00053082);
@@ -819,7 +836,7 @@ uint32_t rp_emit_record(rp_context *c, rp_pops_category category, uint32_t recor
                 return out;
             }
         }
-        const uint8_t policy = *(uint8_t *)rp_module_memory(c, 0xD42FC + r[14], 1);
+        const uint8_t policy = *(uint8_t *)rp_module_memory(c, RP_COP_WRITE_POLICY_TABLE + r[14], 1);
         return rp_emit_store_state(c, policy, r[13], (uint32_t)r[14] * 4, out);
     }
     if (category == RP_CAT_EXIT) {

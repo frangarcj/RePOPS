@@ -1,5 +1,19 @@
 # RePops progress
 
+## Current: COP memory emission reaches the GTE command category
+
+`out/cop-memory.CXKuaJ/result/` compiles the reached COP memory records and
+then stops at `RP_CAT_GTE` (category 18) while compiling the same block.
+The new block has not been published/executed: the diagnostic remains at
+39,470,213 generated-cache observations and 40,357 entry transfers, with
+`game_executed: false`.
+
+Both memory/COP directions reuse the existing memory and state emitters.
+The 16-byte analysis view names the base, signed displacement and COP selector;
+host-register encodings are distinct from opcode/helper selectors. Focused
+checks verify LH/LW/LHU selection, memory reads for ignored destinations and
+the reverse store path. See `cpu_cop_memory.md`.
+
 ## Current: ordering-table DMA completes and reaches a CPU emitter category
 
 `out/otc-dma.RrgP2k/result/` passes callback +0x9364 and completes DMA channel

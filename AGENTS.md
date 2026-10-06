@@ -24,6 +24,11 @@
 - Target the hash recorded in README.md; do not silently mix firmware versions.
 - Keep firmware binaries, reference disassembly, Ghidra databases and bulk
   decompiler output out of Git. Do not publish them implicitly.
+- Keep only the latest two full native execution traces plus the GE-preview
+  provenance source in out. Superseded native trace.jsonl files need only a
+  small retained-trace-result.json; delete the bulk trace rather than keeping
+  every attempt compressed. Do not prune decompilers, Ghidra projects, inputs
+  or focused verification evidence as incidental output cleanup.
 - `out/decompiled/` is raw pseudocode. `src/` contains reviewed reconstruction
   models. A compilable model is not automatically binary-equivalent or a port.
 - Mark names, boundaries, subsystem identities and structures as hypotheses

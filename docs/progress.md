@@ -1,5 +1,9 @@
 # RePops progress
 
+Historical native runs retain `result/retained-trace-result.json` instead of
+their full trace once superseded. Keep the latest two traces and the GE-preview
+provenance source; decompilers and focused verification outputs are not pruned.
+
 ## Current: mixed pixel uploads reach a textured rectangle
 
 `out/mixed-upload.pgEy9j/result/` passes the pending port/DMA combination and

@@ -36,26 +36,49 @@ int main(void)
     assert(!rp_pops_spu_inactive_sample(c, &output));
     assert(memcmp(snapshot, c->regions[2].bytes, c->regions[2].size) == 0);
     free(snapshot);
-    /* The new active prefix consumes control, but stops rather than claiming
-     * that an unreconstructed voice has produced a sample. */
+    /* The active prefix consumes control and processes voices, but still
+     * stops before the final mixer can return a packed sample. */
     rp_w32(c, 0x49F40000, 0x00100020);
     rp_w32(c, 0x49F40004, 0x04000200);
     rp_w32(c, 0x49F40008, 0);
     rp_w32(c, 0x49F40288, 1); rp_w32(c, 0x49F40280, 1);
     rp_w32(c, 0x49F40284, 1); rp_w8(c, 0x09FF1794, 0xFF);
+    rp_w8(c, 0x49F422C2, 0x21); /* Filter 0: the first two nibbles are 1, 2. */
     output = 0xDEADBEEF;
     if (setjmp(c->stop) == 0) {
         (void)rp_pops_spu_sample(c, &output);
         assert(!"Active prefix unexpectedly returned a sample");
     }
-    assert(strcmp(c->stop_kind, "ME_voice_sample_path_not_reconstructed") == 0);
-    assert(c->stop_address == 0x11CC && output == 0xDEADBEEF);
+    assert(strcmp(c->stop_kind, "ME_post_voice_mix_not_reconstructed") == 0);
+    assert(c->stop_address == 0x288 && output == 0xDEADBEEF);
     assert(!rp_u32(c, 0x49F40280) && !rp_u32(c, 0x49F40284));
     assert(rp_u32(c, 0x49F40294) == 3);
     assert(*(uint8_t *)rp_memory(c, 0x09FF0858 + 0x1C, 1) == 24);
-    assert(rp_u32(c, 0x09FF0858 + 0x2C) == 0x400);
+    assert(rp_u32(c, 0x09FF0858 + 0x2C) == 0x402);
+    assert(*(uint8_t *)rp_memory(c, 0x09FF0858 + 0x72, 1) == 0xFF);
+    assert(rp_u32(c, 0x09FF0858 + 0x3A) == 0x20001000);
     assert(*(uint8_t *)rp_memory(c, 0x09FF0858, 1) == 0x40);
+
+    /* A nonzero interpolation fixture also reaches the real voice-1 capture
+     * buffer, rather than testing only zero-filled/reset sample data. */
+    memset(c->regions[2].bytes, 0, c->regions[2].size);
+    rp_w32(c, 0x49F401A8, 0x80000000);
+    rp_w32(c, 0x09FF0000, 0x7FFF);
+    const uint32_t voice = 0x09FF0858 + 0x74;
+    rp_w32(c, voice + 0x24, 0x7FFF0000);
+    rp_w32(c, voice + 0x28, 0xFFFFF000);
+    rp_w32(c, voice + 0x68, 0x03E80000);
+    rp_w32(c, voice, 0x4000);
+    rp_w32(c, voice + 0xA, 0x2000);
+    if (setjmp(c->stop) == 0) {
+        (void)rp_pops_spu_sample(c, &output);
+        assert(!"Post-voice prefix unexpectedly returned a packed sample");
+    }
+    assert(strcmp(c->stop_kind, "ME_post_voice_mix_not_reconstructed") == 0);
+    assert((rp_u32(c, 0x49F40AC0) & 0xFFFF) == 998);
+    assert(rp_u32(c, 0x49F40204) == 0x20004000);
+    assert(output == 0xDEADBEEF);
     fclose(c->trace); free(c->regions[2].bytes); free(c);
-    puts("SPU callback: disabled branch and active control prefix passed; no active sample completed.");
+    puts("SPU: disabled path, release, ADPCM, interpolation and voice capture passed; final mix pending.");
     return 0;
 }

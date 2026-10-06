@@ -1,6 +1,25 @@
 # RePops progress
 
-## Current: RAM initialization reaches the active ME callback
+## Current: the active ME callback reaches the end of its voice loop
+
+`out/ffvi_run.ZeJEMV/result/` reaches `ME_post_voice_mix_not_reconstructed`
+at +0x288. The reconstructed callback processes release envelopes, block
+flags/history, ADPCM decoding, interpolation, fixed volumes and capture writes
+in the original 24-voice order. This invocation's voices are released and their
+contributions are zero. A separate nonzero interpolation fixture produces the
+expected capture value, rather than testing only cleared sample data.
+
+Final CD/reverb/output processing is not reconstructed and no packed active
+sample returns. Other envelope transitions, volume sweeps and ADPCM IRQ-overlap
+paths still stop explicitly. The callback remains one partial original function;
+processing 24 voices does not add 24 completed functions. CPU observations remain
+9,580,458 with 1,688 transfers because this increment is native ME work.
+`make native test-native-spu test-native-me` passes. See `me_voice_loop.md`.
+
+Per the latest instruction, stop expanding functionality after this increment
+and prioritize recovering/naming the state structures.
+
+## Earlier: RAM initialization reaches the active ME callback
 
 88ed77a recovers shift pairs, HI/LO records and exception emission. 81790b0
 connects guarded memory fast paths and IRQ/DMA control, fixing a pending SH/LBU

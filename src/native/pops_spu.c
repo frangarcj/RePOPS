@@ -69,9 +69,138 @@ static int32_t signed_half(uint32_t value)
     return (int32_t)(value & 0x7FFF) - (int32_t)(value & 0x8000);
 }
 
-/* Active callback entry through the first voice's control updates. This is
- * a partial invocation: it stops at the unreconstructed sample path and never
- * reports a produced sample. The disabled callback remains independently usable.
+/* Recovered byte offsets within each 0x74-byte mixer voice. */
+enum {
+    VOICE_STATE = 0x1C, VOICE_EXPONENTIAL = 0x1D, VOICE_THRESHOLD = 0x1E,
+    VOICE_COUNTDOWN = 0x20, VOICE_STEP = 0x22, VOICE_PERIOD = 0x24,
+    VOICE_LEVEL = 0x26, VOICE_POSITION = 0x28, VOICE_BLOCK_ADDRESS = 0x2C,
+    VOICE_MANUAL_LOOP = 0x2E, VOICE_BLOCK_FLAGS = 0x2F, VOICE_PITCH = 0x30,
+    VOICE_REPEAT_ADDRESS = 0x32, VOICE_HISTORY = 0x34, VOICE_SAMPLES = 0x3A,
+    VOICE_STOPPED = 0x72, VOICE_BYTES = 0x74
+};
+
+/* +0x1418..+0x1484, with the terminal release transition +0x16D8.
+ * Other ADSR phase transitions remain explicit boundaries. */
+static void advance_voice_envelope(rp_context *c, uint32_t voice, unsigned index)
+{
+    const int32_t state = (int8_t)*(uint8_t *)rp_memory(c, voice + VOICE_STATE, 1);
+    if ((uint32_t)(state - 1) >= 27) return;
+    const uint32_t remaining = (uint32_t)read_half(c, voice + VOICE_COUNTDOWN) - 1;
+    write_half(c, voice + VOICE_COUNTDOWN, (uint16_t)remaining);
+    if (remaining) return;
+
+    const int32_t old = signed_half(read_half(c, voice + VOICE_LEVEL));
+    const int32_t step = signed_half(read_half(c, voice + VOICE_STEP));
+    const uint32_t exponential = *(uint8_t *)rp_memory(c, voice + VOICE_EXPONENTIAL, 1);
+    int32_t next = exponential ? (old * step) >> 15 : old + step;
+    const int32_t threshold = read_half(c, voice + VOICE_THRESHOLD);
+    int32_t level = next;
+    if (next == threshold || ((old - threshold) ^ (next - threshold)) < 0) {
+        if (next > 0x7FFF) next = 0x7FFF;
+        level = next < 0 ? 0 : next;
+        switch (state) {
+        case 17: case 19: case 24:
+            rp_w8(c, voice + VOICE_STOPPED, 0xFF);
+            /* These transitions converge at +0x1670. */
+            /* fall through */
+        case 16:
+            write_half(c, voice + VOICE_PERIOD, 0);
+            write_half(c, voice + VOICE_STEP, 0);
+            rp_w8(c, voice + VOICE_EXPONENTIAL, 0);
+            break;
+        case 4: case 5: case 8: case 9: case 12: case 18: case 20:
+            rp_event(c, "me_boundary", "envelope_transition_state", voice, (uint32_t)state);
+            rp_block(c, "ME_envelope_phase_transition_not_reconstructed", 0x14C0);
+        default: break;
+        }
+    }
+    write_half(c, voice + VOICE_LEVEL, (uint16_t)level);
+    if (*(uint8_t *)rp_memory(c, voice + VOICE_STOPPED, 1)) next = 0;
+    write_half(c, SHARED + index * 0x10 + 0xC, (uint16_t)next);
+    write_half(c, voice + VOICE_COUNTDOWN, read_half(c, voice + VOICE_PERIOD));
+}
+
+static int32_t clamp_sample(int32_t value)
+{
+    return value < -32768 ? -32768 : value > 32767 ? 32767 : value;
+}
+
+/* +0x1278..+0x139C: retain block flags/history and the original integer
+ * predictor. This fills the voice's sample history, not a host audio buffer. */
+static void decode_voice_block(rp_context *c, uint32_t voice, unsigned index)
+{
+    uint32_t address = read_half(c, voice + VOICE_BLOCK_ADDRESS);
+    const uint32_t flags = *(uint8_t *)rp_memory(c, voice + VOICE_BLOCK_FLAGS, 1);
+    if (flags & 1) {
+        rp_w32(c, MIXER + 0x13E4, rp_u32(c, MIXER + 0x13E4) | (1u << index));
+        address = read_half(c, voice + VOICE_REPEAT_ADDRESS);
+        if (!(flags & 2)) {
+            rp_w8(c, voice + VOICE_STOPPED, 1);
+            write_half(c, SHARED + index * 0x10 + 0xC, 0);
+        }
+    }
+    const uint32_t stream = SHARED + 0x2C0 + (address << 3);
+    if (rp_u32(c, MIXER + 0x1798) - stream < 16)
+        rp_block(c, "ME_ADPCM_IRQ_overlap_not_reconstructed", 0x13A0);
+    const uint8_t *block = rp_memory(c, stream, 16);
+    write_half(c, voice + VOICE_BLOCK_ADDRESS, (uint16_t)(address + 2));
+    if ((block[1] & 6) == 6 && !*(uint8_t *)rp_memory(c, voice + VOICE_MANUAL_LOOP, 1)) {
+        write_half(c, voice + VOICE_REPEAT_ADDRESS, (uint16_t)address);
+        write_half(c, SHARED + index * 0x10 + 0xE, (uint16_t)address);
+    }
+    rp_w8(c, voice + VOICE_BLOCK_FLAGS, block[1] & 7);
+    if ((int8_t)*(uint8_t *)rp_memory(c, voice + VOICE_STOPPED, 1) > 0) return;
+
+    uint32_t filter = block[0] >> 4;
+    if (filter >= 5) filter = 0;
+    const int32_t positive = *(uint8_t *)rp_memory(c, MIXER + 0x846 + filter, 1);
+    const int32_t negative = *(uint8_t *)rp_memory(c, MIXER + 0x84B + filter, 1);
+    int32_t older = signed_half(read_half(c, voice + 0x6E));
+    int32_t recent = signed_half(read_half(c, voice + 0x70));
+    memcpy(rp_memory(c, voice + VOICE_HISTORY, 6), rp_memory(c, voice + 0x6C, 6), 6);
+    const unsigned shift = (block[0] | 16u) & 31;
+    for (unsigned i = 0; i < 28; ++i) {
+        const unsigned nibble = (block[2 + i / 2] >> ((i & 1) * 4)) & 15;
+        const int32_t raw = (int32_t)((uint32_t)nibble << 28) >> shift;
+        const int32_t value = clamp_sample(raw + ((recent * positive - older * negative) >> 6));
+        write_half(c, voice + VOICE_SAMPLES + i * 2, (uint16_t)value);
+        older = recent; recent = value;
+    }
+    rp_event(c, "milestone", "ME_voice_ADPCM_block_decoded", stream, index);
+}
+
+/* +0x11DC..+0x1274: pitch, block refill and four-tap interpolation. */
+static int32_t sample_voice(rp_context *c, uint32_t voice, unsigned index, int32_t previous)
+{
+    int32_t pitch = read_half(c, voice + VOICE_PITCH);
+    if (rp_u32(c, SHARED + 0x190) & (1u << index))
+        pitch = (int32_t)((uint32_t)((int64_t)pitch * ((int64_t)previous + 0x8000))) >> 15;
+    if (pitch > 0x3FFF) pitch = 0x3FFF;
+    uint32_t position = rp_u32(c, voice + VOICE_POSITION) + (uint32_t)pitch;
+    if ((int32_t)position >= 0) {
+        decode_voice_block(c, voice, index);
+        position += UINT32_C(0xFFFE4000);
+    }
+    int32_t value = 0;
+    if (rp_u32(c, SHARED + 0x194) & (1u << index)) {
+        value = signed_half(read_half(c, MIXER + 0x178A));
+    } else if (!*(uint8_t *)rp_memory(c, voice + VOICE_STOPPED, 1)) {
+        const int32_t sample_index = (int32_t)position >> 12;
+        const uint32_t history = voice + 0x6C + (uint32_t)(sample_index * 2);
+        const uint32_t coefficients = MIXER + ((position >> 4) & 0xFF) * 8;
+        uint32_t sum = 0;
+        for (unsigned i = 0; i < 4; ++i)
+            sum += (uint32_t)(signed_half(read_half(c, history + i * 2)) *
+                              signed_half(read_half(c, coefficients + i * 2)));
+        value = (int32_t)sum >> 15;
+    }
+    value = (int32_t)((uint32_t)((int64_t)value * signed_half(read_half(c, voice + VOICE_LEVEL)))) >> 15;
+    rp_w32(c, voice + VOICE_POSITION, position);
+    return value;
+}
+
+/* Active callback through the voice loop. Final CD/reverb/output processing
+ * remains a boundary; no packed output is returned by this prefix.
  */
 static void active_sample_prefix(rp_context *c, uint16_t control)
 {
@@ -118,67 +247,103 @@ static void active_sample_prefix(rp_context *c, uint16_t control)
     write_half(c, MIXER + 0x178C, (uint16_t)count);
     rp_event(c, "milestone", "ME_active_mailbox_consumed", dirty, keyon);
 
-    /* +0x17F0/+0x1774/+0x1708 for voice zero, reached before that voice's
-     * sample/envelope processing. Later voices must not be updated early. */
-    const uint32_t voice = MIXER + 0x858;
-    if (dirty & 1) {
-        write_half(c, voice + 0x30, read_half(c, SHARED + 4));
-        if (repeat & 1) {
-            rp_w8(c, voice + 0x2E, 1);
-            write_half(c, voice + 0x32, read_half(c, SHARED + 0xE) & 0xFFFE);
+    int32_t previous_sample = 0;
+    uint32_t left_sum = 0, right_sum = 0, reverb_left = 0, reverb_right = 0;
+    uint32_t reverb = rp_u32(c, SHARED + 0x198);
+    /* Control and sample processing are interleaved for each voice, as in
+     * +0x1B4..+0x284; never consume all voice controls ahead of their samples. */
+    for (unsigned index = 0; index < 24; ++index) {
+        const uint32_t bit = 1u << index;
+        const uint32_t voice = MIXER + 0x858 + index * VOICE_BYTES;
+        const uint32_t registers = SHARED + index * 0x10;
+        if (dirty & bit) {
+            write_half(c, voice + 0x30, read_half(c, registers + 4));
+            if (repeat & bit) {
+                rp_w8(c, voice + 0x2E, 1);
+                write_half(c, voice + 0x32, read_half(c, registers + 0xE) & 0xFFFE);
+            }
+            rp_w32(c, voice + 0x18, rp_u32(c, registers + 8));
+            const uint32_t volumes = rp_u32(c, registers);
+            if (volumes != rp_u32(c, voice + 0x14)) {
+                rp_w32(c, voice + 0x14, volumes);
+                if (volumes & 0x8000) rp_block(c, "ME_left_volume_sweep_not_reconstructed", 0x18D4);
+                write_half(c, voice, (uint16_t)(volumes << 1));
+                write_half(c, voice + 6, 0);
+                if (volumes & UINT32_C(0x80000000))
+                    rp_block(c, "ME_right_volume_sweep_not_reconstructed", 0x1854);
+                write_half(c, voice + 0xA, (uint16_t)((volumes >> 16) << 1));
+                write_half(c, voice + 0x10, 0);
+            }
         }
-        rp_w32(c, voice + 0x18, rp_u32(c, SHARED + 8));
-        const uint32_t volumes = rp_u32(c, SHARED);
-        if (volumes != rp_u32(c, voice + 0x14)) {
-            rp_w32(c, voice + 0x14, volumes);
-            if (volumes & 0x8000) rp_block(c, "ME_left_volume_sweep_not_reconstructed", 0x18D4);
-            write_half(c, voice, (uint16_t)(volumes << 1));
-            write_half(c, voice + 6, 0);
-            if (volumes & UINT32_C(0x80000000))
-                rp_block(c, "ME_right_volume_sweep_not_reconstructed", 0x1854);
-            write_half(c, voice + 0xA, (uint16_t)((volumes >> 16) << 1));
-            write_half(c, voice + 0x10, 0);
+        int32_t state = (int8_t)*(uint8_t *)rp_memory(c, voice + 0x1C, 1);
+        if (keyon & bit) {
+            write_half(c, registers + 0xC, 0);
+            rp_w32(c, voice + 0x2C, read_half(c, registers + 6) & 0xFFFE);
+            write_half(c, voice + 0x26, 0); rp_w32(c, voice + 0x28, 0);
+            if ((int8_t)*(uint8_t *)rp_memory(c, MIXER + 0x1794, 1) == (int)index) {
+                const int32_t relative = (int8_t)*(uint8_t *)rp_memory(c, MIXER + 0x1795, 1);
+                const uint32_t paired = voice + (uint32_t)(relative * 0x74);
+                rp_w32(c, paired + 0x28, UINT32_C(0xFFFE4000));
+                write_half(c, paired + 0x2C, read_half(c, MIXER + 0x1792));
+                rp_w8(c, MIXER + 0x1797, 0);
+            }
+            rp_w32(c, voice + 0x20, 4);
+            rp_w32(c, voice + 0x70, 0); rp_w32(c, voice + 0x6C, 0);
+            state = 5; rp_w32(c, voice + 0x1C, 5);
         }
-    }
-    int32_t state = (int8_t)*(uint8_t *)rp_memory(c, voice + 0x1C, 1);
-    if (keyon & 1) {
-        write_half(c, SHARED + 0xC, 0);
-        rp_w32(c, voice + 0x2C, read_half(c, SHARED + 6) & 0xFFFE);
-        write_half(c, voice + 0x26, 0); rp_w32(c, voice + 0x28, 0);
-        if (*(uint8_t *)rp_memory(c, MIXER + 0x1794, 1) == 0) {
-            const int32_t relative = (int8_t)*(uint8_t *)rp_memory(c, MIXER + 0x1795, 1);
-            const uint32_t paired = voice + (uint32_t)(relative * 0x74);
-            rp_w32(c, paired + 0x28, UINT32_C(0xFFFE4000));
-            write_half(c, paired + 0x2C, read_half(c, MIXER + 0x1792));
-            rp_w8(c, MIXER + 0x1797, 0);
+        const bool release_started = (keyoff & bit) && state < 24;
+        if (release_started) {
+            const uint32_t adsr2 = read_half(c, voice + 0x1A);
+            const int32_t shift = (int32_t)(adsr2 & 31) - 11;
+            uint32_t step = 0xFFF8, period = 1;
+            rp_w8(c, voice + 0x1C, 24); write_half(c, voice + 0x1E, 0);
+            if (shift > 0) {
+                period = (UINT32_C(1) << shift) & 0xFFFF;
+                if (!period) step = 0;
+            } else {
+                const unsigned rotate = (uint32_t)shift & 31;
+                step = (step >> rotate) | (step << ((32 - rotate) & 31));
+            }
+            write_half(c, voice + 0x24, (uint16_t)period);
+            const uint32_t exponential = step ? (rp_u32(c, voice + 0x18) >> 21) & 1 : 0;
+            if (exponential) step &= 0x7FF8;
+            write_half(c, voice + 0x22, (uint16_t)step);
+            write_half(c, voice + 0x20, (uint16_t)period);
+            rp_w8(c, voice + 0x1D, (uint8_t)exponential);
+            rp_event(c, "milestone", "ME_voice_release_initialized", voice, period);
         }
-        rp_w32(c, voice + 0x20, 4);
-        rp_w32(c, voice + 0x70, 0); rp_w32(c, voice + 0x6C, 0);
-        state = 5; rp_w32(c, voice + 0x1C, 5);
-    }
-    if ((keyoff & 1) && state < 24) {
-        const uint32_t adsr2 = read_half(c, voice + 0x1A);
-        const int32_t shift = (int32_t)(adsr2 & 31) - 11;
-        uint32_t step = 0xFFF8, period = 1;
-        rp_w8(c, voice + 0x1C, 24); write_half(c, voice + 0x1E, 0);
-        if (shift > 0) {
-            period = (UINT32_C(1) << shift) & 0xFFFF;
-            if (!period) step = 0;
+        const int32_t remaining = (int32_t)read_half(c, voice + VOICE_COUNTDOWN) - 1;
+        int32_t sample = 0;
+        if (!release_started && remaining > 0 && state < 6) {
+            write_half(c, voice + VOICE_COUNTDOWN, (uint16_t)remaining);
         } else {
-            const unsigned rotate = (uint32_t)shift & 31;
-            step = (step >> rotate) | (step << ((32 - rotate) & 31));
+            if (!release_started && remaining > 0 && (dirty & bit) && !(keyon & bit))
+                rp_block(c, "ME_envelope_reconfiguration_not_reconstructed", 0x16E4);
+            advance_voice_envelope(c, voice, index);
+            if (index == 0 && (rp_u32(c, SHARED + 0x190) & 1))
+                rp_block(c, "ME_first_voice_pitch_modulation_not_reconstructed", 0x1408);
+            reverb = (reverb >> 1) | (reverb << 31);
+            sample = sample_voice(c, voice, index, previous_sample);
         }
-        write_half(c, voice + 0x24, (uint16_t)period);
-        const uint32_t exponential = step ? (rp_u32(c, voice + 0x18) >> 21) & 1 : 0;
-        if (exponential) step &= 0x7FF8;
-        write_half(c, voice + 0x22, (uint16_t)step);
-        write_half(c, voice + 0x20, (uint16_t)period);
-        rp_w8(c, voice + 0x1D, (uint8_t)exponential);
-        rp_event(c, "milestone", "ME_first_voice_release_initialized", voice, period);
-        rp_block(c, "ME_voice_sample_path_not_reconstructed", 0x11CC);
+        if (read_half(c, voice + 6) || read_half(c, voice + 0x10))
+            rp_block(c, "ME_volume_sweep_step_not_reconstructed", 0x1158);
+        const int32_t left = signed_half(read_half(c, voice));
+        const int32_t right = signed_half(read_half(c, voice + 0xA));
+        if (index == 1 || index == 3) {
+            const uint32_t capture = (index << 8) + read_half(c, MIXER + 0x13E8);
+            write_half(c, SHARED + 0x8C0 + capture * 2, (uint16_t)sample);
+        }
+        const int32_t l = (int32_t)((uint32_t)((int64_t)sample * left)) >> 15;
+        const int32_t r = (int32_t)((uint32_t)((int64_t)sample * right)) >> 15;
+        left_sum += (uint32_t)l; right_sum += (uint32_t)r;
+        if (reverb & 0x80000000) { reverb_left += (uint32_t)l; reverb_right += (uint32_t)r; }
+        rp_w32(c, SHARED + 0x200 + index * 4, (uint16_t)left | ((uint32_t)(uint16_t)right << 16));
+        previous_sample = sample;
+        rp_event(c, "milestone", "ME_voice_sample_accumulated", voice, (uint32_t)sample);
     }
-    rp_event(c, "milestone", "ME_first_voice_control_initialized", voice, (uint32_t)state);
-    rp_block(c, "ME_voice_sample_path_not_reconstructed", 0x1E4);
+    rp_event(c, "milestone", "ME_24_voice_loop_complete", left_sum, right_sum);
+    rp_event(c, "milestone", "ME_voice_reverb_inputs", reverb_left, reverb_right);
+    rp_block(c, "ME_post_voice_mix_not_reconstructed", 0x288);
 }
 
 bool rp_pops_spu_sample(rp_context *c, uint32_t *packed)

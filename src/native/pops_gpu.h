@@ -9,6 +9,7 @@ typedef struct {
     uint16_t group_x_origin;
 } rp_gpu_texture_cache_entry;
 typedef struct { uint32_t command, origin, extent; } rp_gpu_fill_packet_layout;
+typedef struct { uint32_t command, source, destination, extent; } rp_gpu_copy_packet_layout;
 typedef struct { uint32_t command, positions[4]; } rp_gpu_flat_packet_layout;
 typedef struct { int16_t x, y, z; } rp_gpu_position_layout;
 typedef struct {
@@ -23,7 +24,9 @@ typedef struct {
     uint32_t dma_cost_scaling;
     uint8_t unknown_6ec[0x710 - 0x6EC];
     uint32_t data_read_cycle_cost;
-    uint8_t unknown_714[0x3400 - 0x714];
+    uint32_t unknown_714;
+    int32_t copy_cost_shift;
+    uint8_t unknown_71c[0x3400 - 0x71C];
     rp_gpu_texture_cache_entry texture_cache[32];
     union {
         uint32_t packet_words[48];
@@ -42,7 +45,11 @@ typedef struct {
     uint16_t drawing_offset[2];
     uint32_t list_cursor, status;
     uint32_t status_poll_previous_cycles, status_poll_last_cycles;
-    uint16_t transfer_origin[2], transfer_size[2], transfer_cursor[2];
+    union {
+        struct { uint16_t transfer_origin[2], transfer_size[2]; };
+        struct { uint16_t copy_source[2], copy_destination[2]; };
+    };
+    uint16_t transfer_cursor[2];
     uint32_t transfer_read_latch, texture_window;
     uint8_t texture_window_offset[2], texture_window_size[2];
     uint16_t draw_mode;
@@ -70,6 +77,9 @@ enum { RP_GPU_DISPLAY_TRANSITION_ADDRESS = 0x49CBD4 };
 _Static_assert(offsetof(rp_core_gpu_layout, data_read_latch) == 0x35BC, "GPU data latch");
 _Static_assert(sizeof(rp_gpu_texture_cache_entry) == 8, "GPU texture cache stride");
 _Static_assert(sizeof(rp_gpu_fill_packet_layout) == 12, "GPU fill packet bytes");
+_Static_assert(sizeof(rp_gpu_copy_packet_layout) == 16, "GPU copy packet bytes");
+_Static_assert(offsetof(rp_core_gpu_layout, copy_cost_shift) == 0x718, "GPU copy cycle shift");
+_Static_assert(offsetof(rp_core_gpu_layout, copy_destination) == 0x3640, "GPU copy destination alias");
 _Static_assert(sizeof(rp_gpu_flat_packet_layout) == 20, "flat quad packet");
 _Static_assert(sizeof(rp_gpu_flat_ge_layout) == 36, "flat GE body");
 _Static_assert(offsetof(rp_gpu_flat_ge_layout, vertices[1].x) == 18, "flat second vertex");

@@ -1,5 +1,20 @@
 # RePops progress
 
+## Current: repeated display/polygon/DMA work reaches GP0 A0h
+
+`out/gpu-copy-retry.Jaxybd/result/` reaches the CPU-to-VRAM upload command
+0xA0000000 after 55,418,185 generated-code observations and 86,645 transfers.
+It records 32 active-display preparations, 8,680 flat-polygon GE records,
+250 tagged DMA continuations and 31 completion-path transitions. These are
+not rendered frames; `game_executed` remains false.
+
+Mode-4 VRAM-copy dispatch now has typed aliases, original dimensions/costs
+and direct/single-row-staging GE emission. Tests cover those transfer paths;
+the integrated trace instead passes mode 4 without emitting a copy. The
+120-second first attempt stopped earlier under host load; the repeated run
+finishes with a larger host budget and no guest-time shortcut. See
+`gpu_vram_copy.md` for verification boundaries. Upload mode 5 remains next.
+
 ## Current: deferred DMA resumes and reaches GPU command 0x80
 
 `out/dma-resume.C9bwg5/result/` passes callback +0x8CAC and continues the real

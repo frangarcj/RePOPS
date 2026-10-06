@@ -160,6 +160,66 @@ static uint32_t fill_rectangle(rp_context *c, uint32_t packet, uint32_t *cursor)
     return cost;
 }
 
+/* +0x14FFC..+0x152FC: VRAM copy through the original GE transfer template.
+ * The overlapping single-row branch stages through PSP EDRAM at +0xD0000.
+ * Copies requiring CPU access after GE synchronization remain separate. */
+static uint32_t copy_rectangle(rp_context *c, uint32_t packet, uint32_t *cursor)
+{
+    const uint32_t raw_source = rp_u32(c, RP_FIELD_ADDRESS(packet, rp_gpu_copy_packet_layout, source));
+    const uint32_t raw_destination = rp_u32(c, RP_FIELD_ADDRESS(packet, rp_gpu_copy_packet_layout, destination));
+    if (raw_source == raw_destination) return 0;
+    SET_GPU32(copy_source, raw_source & 0x01FF03FF);
+    SET_GPU32(copy_destination, raw_destination & 0x01FF03FF);
+    const uint32_t extent = rp_u32(c, RP_FIELD_ADDRESS(packet, rp_gpu_copy_packet_layout, extent));
+    const uint32_t width = ((extent - 1) & 0x3FF) + 1;
+    const uint32_t height = (((extent >> 16) - 1) & 0x1FF) + 1;
+    const int32_t shift = (int32_t)GPU32(copy_cost_shift);
+    const uint32_t work = shift < 0 ? (width * height) << ((0u - (uint32_t)shift) & 31) :
+                                     (width * height) >> ((uint32_t)shift & 31);
+    const int32_t sx = GPU16(copy_source[0]), sy = GPU16(copy_source[1]);
+    const int32_t dx = GPU16(copy_destination[0]), dy = GPU16(copy_destination[1]);
+    const bool in_x = (uint32_t)dx - GPU16(display_origin[0]) < GPU16(display_size[0]);
+    if (in_x && ((uint32_t)dy - GPU16(display_origin[1]) < GPU16(display_size[1]) ||
+                 (uint32_t)dy + height - 1 - GPU16(display_origin[1]) < GPU16(display_size[1])))
+        SET_GPU8(previous_field, 1);
+    const bool mask = (GPU32(status) & 0x800) != 0;
+    const bool overlap = dx - (int32_t)width < sx && sx < dx + (int32_t)width &&
+                         dy - (int32_t)height < sy && sy < dy + (int32_t)height;
+    const uint32_t right = (uint32_t)(sx > dx ? sx : dx) + width;
+    const uint32_t bottom = (uint32_t)(sy > dy ? sy : dy) + height;
+    const bool fallback = overlap || right > 1024 || bottom * 2 > 1024 || mask;
+    rp_event(c, "GPU_copy_packet", "source_destination", raw_source, raw_destination);
+    rp_event(c, "GPU_copy_packet", "width_height", width, height);
+    if (fallback && (mask || height != 1))
+        rp_block(c, "GPU_copy_CPU_sync_path_not_reconstructed", 0x1537C);
+
+    const uint32_t size_word = UINT32_C(0xEDFFFBFF) + width + (height << 10);
+    uint32_t out = emit_ge_word(c, *cursor, 0xEB000000 | ((uint32_t)sy << 10) | (uint32_t)sx);
+    if (fallback) {
+        SET_GPU16(draw_mode, GPU16(draw_mode) | 0xC000);
+        out = emit_ge_word(c, out, 0xEC0D0000);
+        out = emit_ge_word(c, out, size_word);
+        out = emit_ge_word(c, out, 0x13041B90);
+        out = emit_ge_word(c, out, 0x0A000000);
+        out = emit_ge_word(c, out, 0xEB0D0000);
+    }
+    out = emit_ge_word(c, out, 0xEC000000 | ((uint32_t)dy << 10) | (uint32_t)dx);
+    out = emit_ge_word(c, out, size_word);
+    out = emit_ge_word(c, out, 0x13041B90);
+    out = emit_ge_word(c, out, 0x0A000000);
+    if (width == 1 && height == 1) {
+        const unsigned entry = (((unsigned)dy >> 8) & 1) * 16 + (((unsigned)dx >> 6) & 15);
+        if (GPU8(texture_cache[entry].cache_flags))
+            rp_block(c, "GPU_single_pixel_copy_cache_update_not_reconstructed", 0x15284);
+    } else {
+        invalidate_rectangle_cache(c, (uint32_t)dx, (uint32_t)dy,
+                                   (uint32_t)dx + width, (uint32_t)dy + height, true);
+    }
+    *cursor = out;
+    rp_event(c, "milestone", "GPU_VRAM_copy_GE_prepared_not_executed", fallback, work);
+    return work;
+}
+
 static int32_t coordinate11(uint32_t packed, unsigned shift)
 { return (int32_t)(((packed >> shift) & 0x7FF) ^ 0x400) - 0x400; }
 static uint32_t triangle_area2(const rp_gpu_position_layout *a,
@@ -260,6 +320,17 @@ static uint32_t consume_packet(rp_context *c, uint32_t source, uint32_t bytes)
                 work += fill_rectangle(c, source + offset, &out);
                 offset += sizeof(rp_gpu_fill_packet_layout) - 4;
             }
+        } else if (mode == 4) {
+            if (bytes - offset < sizeof(rp_gpu_copy_packet_layout))
+                rp_block(c, "GPU_copy_truncated_packet", 0x14FFC);
+            const uint32_t packet = source + offset;
+            if (rp_u32(c, RP_DEVICE_ADDRESS(c, compatibility_flags)) & 64) {
+                const uint32_t xy = rp_u32(c, RP_FIELD_ADDRESS(packet, rp_gpu_copy_packet_layout, source)) |
+                                    rp_u32(c, RP_FIELD_ADDRESS(packet, rp_gpu_copy_packet_layout, destination));
+                if (word != 0x80000000 || (xy & 0xFE00FC00)) { mode = 0; break; }
+            }
+            work += copy_rectangle(c, packet, &out);
+            offset += sizeof(rp_gpu_copy_packet_layout) - 4;
         } else if (mode == 7) {
             out = drawing_environment(c, word, out);
         } else if (mode == 1 && !(word & 0x14000000)) {

@@ -29,6 +29,13 @@
 - Mark names, boundaries, subsystem identities and structures as hypotheses
   unless supported by concrete instructions, callers, imports or runtime data.
 - An import library name is not the same thing as its provider PRX module.
+- Preserve the graphics boundary: reconstructed POPS translates GP0/GP1 into
+  original GE lists. A platform backend consumes those lists and the queue,
+  stall and synchronization operations; do not replace GP0 with direct host
+  drawing. Keep POPSMAN-provided services distinct from direct sceGe imports.
+- Identify native POPS code, reconstructed POPSMAN providers and host adapters
+  separately. A captured GE operation is not execution of its POPSMAN body or
+  proof that the list was rendered. See docs/module_boundaries.md.
 - Use the Allegrex Ghidra extension and inspect relocation results. Capstone's
   generic MIPS decoder does not fully model Allegrex/VFPU.
 - Do not overwrite existing Ghidra projects or export directories. Prefer

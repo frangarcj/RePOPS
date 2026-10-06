@@ -44,6 +44,9 @@ typedef struct {
 #define RP_GPU_ADDRESS(c, member) RP_FIELD_ADDRESS((c)->gp, rp_core_gpu_layout, member)
 uint32_t rp_pops_gpu_read(rp_context *, uint32_t address, uint32_t width);
 void rp_pops_gpu_write(rp_context *, uint32_t address, uint32_t word);
+/* Existing headless adapter for bounded state lists, not a POPSMAN body. */
+uint32_t rp_ge_capture_state_list(rp_context *, uint32_t address, int module_relative);
+enum { RP_GPU_DISPLAY_TRANSITION_ADDRESS = 0x49CBD4 };
 
 _Static_assert(offsetof(rp_core_gpu_layout, data_read_latch) == 0x35BC, "GPU data latch");
 _Static_assert(offsetof(rp_core_gpu_layout, packet_words[47]) == 0x35BC, "GPU packet/latch alias");

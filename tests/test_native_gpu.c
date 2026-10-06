@@ -11,6 +11,24 @@ void rp_pops_schedule_event(rp_context *c, uint32_t event, uint32_t delay)
 void rp_pops_remove_event(rp_context *c, uint32_t event)
 { (void)c; (void)event; abort(); }
 
+/* The fixture checks calls to the capture adapter; it does not render the
+ * two firmware templates. Their actual bytes are used by the integrated run. */
+static unsigned captured_templates;
+static uint32_t expected_closed_list;
+uint32_t rp_ge_capture_state_list(rp_context *c, uint32_t address, int module_relative)
+{
+    const unsigned which = captured_templates++ & 1;
+    assert(address == (which ? 0x041B9300 : 0xD5008));
+    assert(module_relative == (which ? 0 : 1));
+    if (expected_closed_list) {
+        assert(c->ge_stalled_list == 0);
+        assert(rp_u32(c, expected_closed_list) == 0x0F000000);
+        assert(rp_u32(c, expected_closed_list + 4) == 0x0C000000);
+    }
+    ++c->ge_lists_captured; ++c->services;
+    return ++c->next_id;
+}
+
 static void reset_status(rp_context *c)
 {
     memset(c->scratchpad, 0, sizeof(c->scratchpad));
@@ -60,13 +78,14 @@ int main(void)
     /* An unimplemented GPUREAD transfer must not return an invented word. */
     reset_status(c);
     rp_w32(c, RP_GPU_ADDRESS(c, data_read_cycle_cost), 7);
+    rp_w8(c, RP_GPU_ADDRESS(c, read_selector), 16);
     if (setjmp(c->stop) == 0) {
         (void)rp_pops_gpu_read(c, 0x1810, 2);
         assert(!"Unimplemented GPU data path returned");
     }
-    assert(strcmp(c->stop_kind, "GPU_data_read_not_reconstructed") == 0);
+    assert(strcmp(c->stop_kind, "GPU_VRAM_data_transfer_not_reconstructed") == 0);
     assert(c->stop_address == 0x130BC && rp_core_downcount(c) == 4993);
-    c->regions[0] = (rp_region){0, 0xD5400, calloc(1, 0xD5400)};
+    c->regions[0] = (rp_region){0, 0x4AE730, calloc(1, 0x4AE730)};
     c->regions[1] = (rp_region){0x09A00000, 0x1000, calloc(1, 0x1000)};
     assert(c->regions[0].bytes && c->regions[1].bytes);
     c->regions[0].bytes[0xD5338 + 8] = 3; /* Four-word flat triangle. */
@@ -118,7 +137,79 @@ int main(void)
     assert((rp_u32(c, RP_GPU_ADDRESS(c, status)) & 0x14000000) == 0);
     rp_pops_gpu_write(c, 0x1814, 0x01000000);
     assert(rp_cd_u8(c, RP_GPU_ADDRESS(c, packet_word_count)) == 0);
+    /* Reset with an existing list preserves its two terminator words before
+     * the template queues, and leaves a newly stalled list after draw-sync. */
+    reset_status(c);
+    expected_closed_list = 0x49A00080;
+    rp_w32(c, RP_GPU_ADDRESS(c, list_id), 77);
+    rp_w32(c, RP_GPU_ADDRESS(c, list_cursor), expected_closed_list);
+    rp_w32(c, RP_GPU_DISPLAY_TRANSITION_ADDRESS, 1);
+    rp_w32(c, RP_GPU_ADDRESS(c, display_mode), 0xA5B6C7D8);
+    rp_w8(c, RP_GPU_ADDRESS(c, packet_word_count), 11);
+    rp_w8(c, RP_GPU_ADDRESS(c, command_mode), 9);
+    rp_w8(c, RP_GPU_ADDRESS(c, ge_transfer_pending), 0xFF);
+    rp_w32(c, RP_GPU_ADDRESS(c, texture_window), 0x45678);
+    c->next_id = 100;
+    const unsigned old_services = c->services;
+    if (setjmp(c->stop) != 0) {
+        fprintf(stderr, "Unexpected GP1 boundary: %s\n", c->stop_kind);
+        abort();
+    }
+    rp_pops_gpu_write(c, 0x1F801814, 0);
+    assert(captured_templates == 2 && c->ge_lists_captured == 2);
+    assert(c->services == old_services + 5);
+    assert(rp_u32(c, RP_GPU_DISPLAY_TRANSITION_ADDRESS) == 2);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, list_id)) == 103);
+    assert(c->ge_stalled_list == 0x49A00000);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)) == 0x49A00000);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, status)) == 0x1C800000);
+    assert(rp_cd_u16(c, RP_GPU_ADDRESS(c, draw_mode)) == 0xC000);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, horizontal_range)) == 0x0C000200);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, vertical_range)) == 0x01000010);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, display_mode)) == 0x00B600D8);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, texture_window)) == 0x45678);
+    assert(!rp_cd_u8(c, RP_GPU_ADDRESS(c, packet_word_count)));
+    assert(!rp_cd_u8(c, RP_GPU_ADDRESS(c, command_mode)));
+    assert(!rp_cd_u8(c, RP_GPU_ADDRESS(c, ge_transfer_pending)));
+
+    rp_pops_gpu_write(c, 0x1814, 0x03000000);
+    assert(!(rp_u32(c, RP_GPU_ADDRESS(c, status)) & 0x800000));
+    assert(rp_cd_u8(c, RP_GPU_ADDRESS(c, previous_field)) == 2);
+    rp_pops_gpu_write(c, 0x1814, 0x060A0020);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, horizontal_range)) == 0x00A00020);
+    rp_w8(c, RP_GPU_ADDRESS(c, display_dirty), 0);
+    rp_pops_gpu_write(c, 0x1814, 0x060A0020);
+    assert(!rp_cd_u8(c, RP_GPU_ADDRESS(c, display_dirty)));
+    rp_pops_gpu_write(c, 0x1814, 0x07040010);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, vertical_range)) == 0x01000010);
+    rp_pops_gpu_write(c, 0x1814, 0x08000028);
+    assert(rp_cd_u8(c, RP_GPU_ADDRESS(c, display_mode_bytes[1])) == 0x28);
+    assert(rp_cd_u8(c, RP_GPU_ADDRESS(c, display_dirty)) == 2);
+    rp_pops_gpu_write(c, 0x1814, 0x10000017);
+    assert(rp_cd_u8(c, RP_GPU_ADDRESS(c, read_selector)) == 7);
+    rp_w32(c, RP_GPU_ADDRESS(c, data_read_cycle_cost), 7);
+    const uint32_t before_query = rp_core_downcount(c);
+    assert(rp_pops_gpu_read(c, 0x1810, 2) == 0);
+    assert(rp_core_downcount(c) == before_query - 7);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, data_read_latch)) == 0);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, transfer_read_latch)) == 0);
+    const uint32_t queries[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 15};
+    const uint32_t answers[] = {0, 1, 0x45678, 0x00105006, 0x0001000F,
+                                0x003FF7FF, 6, 0, 8, 15};
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, draw_area_start[0]), 6);
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, draw_area_start[1]), 0x414);
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, draw_area_end[0]), 15);
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, draw_area_end[1]), 64);
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, drawing_offset[0]), 0xFFFF);
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, drawing_offset[1]), 0xFFFE);
+    for (unsigned i = 0; i < sizeof(queries) / sizeof(queries[0]); ++i) {
+        rp_pops_gpu_write(c, 0x1814, 0x10000000 | queries[i]);
+        assert(rp_pops_gpu_read(c, 0x1810, 2) == answers[i]);
+        assert(rp_u32(c, RP_GPU_ADDRESS(c, data_read_latch)) == answers[i]);
+        assert(rp_u32(c, RP_GPU_ADDRESS(c, transfer_read_latch)) == answers[i]);
+    }
+
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[1].bytes); free(c);
-    puts("GPU: status, GP0 framing, named draw state and exact state-list words passed; rasterization pending.");
+    puts("GPU: status, GP0 state words, GP1 reset/list ordering and display controls passed; rasterization pending.");
     return 0;
 }

@@ -1,5 +1,6 @@
 #include "runtime.h"
 #include "pops_cdrom.h"
+#include "pops_gpu.h"
 #include <math.h>
 #include <string.h>
 
@@ -32,7 +33,7 @@ static void copy_template_table(rp_context *c, uint32_t destination,
  * Capturing these lists is not GPU execution. Drawing/transfer/control-flow
  * commands are refused rather than silently treated as completed rendering.
  */
-static uint32_t capture_init_list(rp_context *c, uint32_t address, int module_relative)
+uint32_t rp_ge_capture_state_list(rp_context *c, uint32_t address, int module_relative)
 {
     const uint32_t start = c->ge_command_count;
     for (unsigned words = 0; words < 512; ++words) {
@@ -145,37 +146,6 @@ static void graphics_tables(rp_context *c)
     rp_pops_config_postprocess(c);
     rp_event(c, "headless_adapter", "graphics_cache_flush_elided", 0x1B9C4, 0);
     rp_event(c, "milestone", "graphics_tables_and_command_templates_prepared", 0x041B9000, 0);
-}
-
-/* +0x127D8, control-port command zero only. No GP0 primitive decoder yet. */
-static void gpu_control_reset(rp_context *c)
-{
-    rp_function(c, 0x127D8, "pops.gpu_control_reset_path");
-    if (rp_u32(c, 0x49CBD4) == 1) rp_w32(c, 0x49CBD4, 2);
-    rp_w8(c, c->gp + 0x3658, 0);
-    if (rp_u32(c, c->gp + 0x35CC)) rp_block(c, "existing_GE_list_reset_not_reconstructed", 0x127D8);
-    (void)capture_init_list(c, 0xD5008, 1);
-    (void)capture_init_list(c, 0x041B9300, 0);
-    rp_w32(c, c->gp + 0x3630, 0x1C800000);
-    put_half(c, c->gp + 0x3654, 0xC000);
-    put_half(c, c->gp + 0x3614, 0x200); put_half(c, c->gp + 0x3616, 0xC00);
-    put_half(c, c->gp + 0x3618, 0x10); put_half(c, c->gp + 0x361A, 0x100);
-    rp_w8(c, c->gp + 0x365F, 2);
-    rp_w32(c, c->gp + 0x362C, 0x49A00000);
-    rp_w8(c, c->gp + 0x365E, 0xFF); rp_w8(c, c->gp + 0x3656, 0xFF);
-    rp_w8(c, c->gp + 0x365D, 0xFF); rp_w8(c, c->gp + 0x3653, 0x20);
-    rp_w8(c, c->gp + 0x3669, 0);
-    for (unsigned i = 0; i < 6; ++i) put_half(c, c->gp + 0x3620 + i * 2, 0);
-    put_half(c, c->gp + 0x3612, 0); put_half(c, c->gp + 0x3610, 0);
-    rp_w8(c, c->gp + 0x3652, 0x20); rp_w8(c, c->gp + 0x3650, 0);
-    rp_w8(c, c->gp + 0x3651, 0);
-    ++c->services;
-    rp_event(c, "headless_adapter", "GE_sync_captured_state_lists_only", 0, c->ge_lists_captured);
-    c->ge_stalled_list = 0x49A00000;
-    rp_w32(c, c->gp + 0x35CC, ++c->next_id);
-    ++c->services;
-    rp_event(c, "headless_adapter", "GE_empty_list_queued_at_stall", c->ge_stalled_list, c->next_id);
-    rp_w8(c, c->gp + 0x3657, 0); rp_w8(c, c->gp + 0x366B, 0); rp_w8(c, c->gp + 0x366C, 0);
 }
 
 static void schedule_event(rp_context *c, uint32_t event, uint32_t delay)
@@ -448,7 +418,7 @@ void rp_pops_graphics_initialize(rp_context *c)
     rp_w32(c, c->gp + 0x35DC, 0x12710);
     rp_w32(c, c->gp + 0x3604, 0x125F0);
     rp_w8(c, c->gp + 0x3662, 0);
-    gpu_control_reset(c);
+    rp_pops_gpu_write(c, 0x1F801814, 0);
     const uint32_t output = rp_u32(c, c->gp + 0x362C);
     static const uint32_t commands[] = {0xD4000000,0xD507FFFF,0x55000000,0x13041B90,0x0A000040};
     for (unsigned i = 0; i < 5; ++i) rp_w32(c, output + i * 4, commands[i]);

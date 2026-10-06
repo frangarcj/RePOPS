@@ -128,6 +128,51 @@ static uint32_t consume_packet(rp_context *c, uint32_t bytes)
     return 0;
 }
 
+/* +0x129B4..+0x12AB8, including the old-list branch +0x12ABC.
+ * The reset uses direct sceGe imports, not POPSMAN's 7014C540 helper.
+ * Enqueue/sync remain explicit headless services; no pixels are fabricated. */
+static void reset_control(rp_context *c)
+{
+    if (rp_u32(c, RP_GPU_DISPLAY_TRANSITION_ADDRESS) == 1)
+        rp_w32(c, RP_GPU_DISPLAY_TRANSITION_ADDRESS, 2);
+    SET_GPU8(ge_transfer_pending, 0);
+    const uint32_t old_list = GPU32(list_id);
+    if (old_list) {
+        const uint32_t cursor = GPU32(list_cursor);
+        /* Preserve store order: END is published before FINISH and stall. */
+        (void)emit_ge_word(c, cursor + 4, 0x0C000000);
+        (void)emit_ge_word(c, cursor, 0x0F000000);
+        c->ge_stalled_list = 0;
+        ++c->services;
+        rp_event(c, "headless_adapter", "sceGeListUpdateStallAddr_request_not_rendered", old_list, 0);
+    }
+    (void)rp_ge_capture_state_list(c, 0xD5008, 1);
+    (void)rp_ge_capture_state_list(c, 0x041B9300, 0);
+    SET_GPU32(status, 0x1C800000);
+    SET_GPU16(draw_mode, 0xC000);
+    SET_GPU16(horizontal_range[0], 0x200); SET_GPU16(horizontal_range[1], 0xC00);
+    SET_GPU16(vertical_range[0], 0x10); SET_GPU16(vertical_range[1], 0x100);
+    SET_GPU8(display_dirty, 2);
+    SET_GPU32(list_cursor, 0x49A00000);
+    SET_GPU8(interlaced, 0xFF); SET_GPU8(unknown_3656, 0xFF);
+    SET_GPU8(display_mode_gate, 0xFF); SET_GPU8(texture_window_size[1], 0x20);
+    SET_GPU8(display_mode_bytes[1], 0);
+    for (unsigned i = 0; i < 2; ++i) {
+        SET_GPU16(draw_area_start[i], 0); SET_GPU16(draw_area_end[i], 0);
+        SET_GPU16(drawing_offset[i], 0); SET_GPU16(display_origin[i], 0);
+    }
+    SET_GPU8(texture_window_size[0], 0x20);
+    SET_GPU8(texture_window_offset[0], 0); SET_GPU8(texture_window_offset[1], 0);
+    ++c->services;
+    rp_event(c, "headless_adapter", "sceGeDrawSync_request_not_rendered", 0, c->ge_lists_captured);
+    c->ge_stalled_list = 0x49A00000;
+    SET_GPU32(list_id, ++c->next_id);
+    ++c->services;
+    rp_event(c, "headless_adapter", "sceGeListEnQueue_empty_at_stall", c->ge_stalled_list, c->next_id);
+    SET_GPU8(command_mode, 0); SET_GPU8(packet_extra_words, 0); SET_GPU8(packet_word_count, 0);
+    rp_event(c, "milestone", "GP1_reset_state_and_queue_sequence_returned", old_list, GPU32(list_id));
+}
+
 /* +0x127D8..+0x12988: each command uses the original extra-word table.
  * A packet becomes ready only after its last word, not on every port write. */
 void rp_pops_gpu_write(rp_context *c, uint32_t address, uint32_t word)
@@ -137,6 +182,7 @@ void rp_pops_gpu_write(rp_context *c, uint32_t address, uint32_t word)
     if (address & 4) {
         const unsigned op = word >> 24;
         if (op > 16 || op == 2 || (op >= 9 && op <= 15)) return;
+        if (op == 0) { reset_control(c); return; }
         if (op == 1) {
             SET_GPU8(command_mode, 0); SET_GPU8(packet_extra_words, 0);
             SET_GPU8(packet_word_count, 0);
@@ -147,6 +193,45 @@ void rp_pops_gpu_write(rp_context *c, uint32_t address, uint32_t word)
                 ((word & 3) << 29) | ((uint32_t)((word & 3) != 0) << 25));
             return;
         }
+        if (op == 3) {
+            const uint32_t old = GPU32(status);
+            if (((old >> 23) & 1) != (word & 1)) {
+                SET_GPU32(status, (old & ~UINT32_C(0x800000)) | ((word & 1) << 23));
+                SET_GPU8(previous_field, 2);
+            }
+            if (rp_u32(c, RP_GPU_DISPLAY_TRANSITION_ADDRESS) == 1)
+                rp_w32(c, RP_GPU_DISPLAY_TRANSITION_ADDRESS, 2);
+            return;
+        }
+        if (op == 5) {
+            const uint32_t x = word & 0x3FF, y = (word >> 10) & 0x1FF;
+            if (GPU16(display_origin[0]) == x && GPU16(display_origin[1]) == y) return;
+            const int x0 = (int16_t)GPU16(draw_area_start[0]), y0 = (int16_t)GPU16(draw_area_start[1]);
+            const int x1 = (int16_t)GPU16(draw_area_end[0]), y1 = (int16_t)GPU16(draw_area_end[1]);
+            const int dx = (int)x, dy = (int)y;
+            const int w = GPU16(display_size[0]), h = GPU16(display_size[1]);
+            SET_GPU8(draw_area_intersects_display, dx <= x1 && x0 < dx + w &&
+                     ((dy <= y1 && y0 < dy + h) || (dy - 512 <= y1 && y0 < dy + h - 512)));
+            SET_GPU8(previous_field, 2);
+            SET_GPU16(display_origin[0], x); SET_GPU16(display_origin[1], y);
+            return;
+        }
+        if (op == 6 || op == 7) {
+            const uint32_t begin = word & (op == 6 ? 0xFFF : 0x3FF);
+            const uint32_t end = op == 6 ? (word >> 12) & 0xFFF : (word >> 10) & 0x3FF;
+            const uint32_t field = op == 6 ? RP_GPU_ADDRESS(c, horizontal_range) : RP_GPU_ADDRESS(c, vertical_range);
+            const bool changed = rp_cd_u16(c, field) != begin || rp_cd_u16(c, field + 2) != end;
+            rp_cd_w16(c, field, (uint16_t)begin); rp_cd_w16(c, field + 2, (uint16_t)end);
+            if (changed) SET_GPU8(display_dirty, 2);
+            return;
+        }
+        if (op == 8) {
+            const uint32_t changed = (GPU8(display_mode_bytes[1]) ^ word) & 0x5F;
+            SET_GPU8(display_mode_bytes[1], word);
+            if (changed) SET_GPU8(display_dirty, 2);
+            return;
+        }
+        if (op == 16) { SET_GPU8(read_selector, word & 15); return; }
         rp_block(c, "GPU_control_write_not_reconstructed", 0x12988);
     }
     SET_GPU32(status, GPU32(status) & 0xEBFFFFFF);
@@ -183,6 +268,39 @@ void rp_pops_gpu_write(rp_context *c, uint32_t address, uint32_t word)
     SET_GPU8(packet_extra_words, 0); SET_GPU8(packet_word_count, 0);
 }
 
+/* +0x130BC: the scalar query branch, selected by GP1(10h). The original
+ * query table returns zero for selector 7; do not substitute another GPU's ID.
+ * Selectors 16/17 are transfer modes set elsewhere, not masked GP1 queries. */
+static uint32_t read_data_query(rp_context *c)
+{
+    rp_function(c, 0x130BC, "pops.gpu_data_query_partial");
+    const uint32_t selector = GPU8(read_selector);
+    uint32_t result = selector;
+    switch (selector) {
+    case 2: result = GPU32(texture_window); break;
+    case 3:
+        result = (uint32_t)(int32_t)(int16_t)GPU16(draw_area_start[0]) |
+                 ((uint32_t)(int32_t)(int16_t)GPU16(draw_area_start[1]) << 10);
+        break;
+    case 4:
+        result = (uint32_t)(int32_t)(int16_t)GPU16(draw_area_end[0]) |
+                 ((uint32_t)(int32_t)(int16_t)GPU16(draw_area_end[1]) << 10);
+        break;
+    case 5:
+        result = (GPU16(drawing_offset[0]) & 0x7FF) |
+                 ((uint32_t)(GPU16(drawing_offset[1]) & 0x7FF) << 11);
+        break;
+    case 7: result = 0; break;
+    case 16: case 17:
+        rp_block(c, "GPU_VRAM_data_transfer_not_reconstructed", 0x130BC);
+    default: break;
+    }
+    SET_GPU32(data_read_latch, result);
+    SET_GPU32(transfer_read_latch, result);
+    rp_event(c, "GPU_register_read", "data_query_and_latches", selector, result);
+    return result;
+}
+
 /* +0x12FBC..+0x130BC: status reads compose existing state and frame timing.
  * The polling debit and two timestamps are observable firmware behavior;
  * no GPU-ready bit or frame completion is supplied by the host. */
@@ -192,7 +310,7 @@ uint32_t rp_pops_gpu_read(rp_context *c, uint32_t address, uint32_t width)
     rp_function(c, 0x12FBC, "pops.gpu_register_read_partial");
     if (!(address & 4)) {
         rp_core_set_downcount(c, rp_core_downcount(c) - GPU32(data_read_cycle_cost));
-        rp_block(c, "GPU_data_read_not_reconstructed", 0x130BC);
+        return read_data_query(c);
     }
 
     uint32_t remaining = rp_core_downcount(c) - 1;

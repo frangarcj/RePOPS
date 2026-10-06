@@ -1,5 +1,19 @@
 # RePops progress
 
+## Current: GP1 reset and GPU queries reach timer reads
+
+`out/gpu-query.GeOu9d/result/` passes the existing-list reset and two GPU
+queries (selector 7 returns zero in this firmware). It reaches the PS1 timer
+read at 0x1F801110: 39,303,174 generated-cache observations and 39,015 entry
+transfers. The report still records `game_executed: false`.
+
+The shared startup/GP1 reset now lives in `pops_gpu.c` with named fields. It
+publishes END then FINISH, releases the previous list's stall, queues the two
+state templates, requests draw-sync and opens an empty stalled list. These
+are direct sceGe calls; the headless capture adapter is not POPSMAN or a GE
+renderer. GP1 display controls and scalar GPUREAD queries are also recovered;
+VRAM transfer modes 16/17 remain explicit boundaries. See `gp1_reset_queries.md`.
+
 ## Current: GP0 framing and state-list emission; GP1 reset boundary
 
 `out/gp0-state.prJDrA/result/` accepts the first actual GP0 word (0x0004FAA8,

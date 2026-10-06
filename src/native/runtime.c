@@ -4,6 +4,21 @@
 
 void rp_event(rp_context *c, const char *kind, const char *name, uint32_t address, uint32_t value)
 {
+    if (c->trace_compact &&
+        (!strcmp(kind, "native_c_function") ||
+         !strcmp(kind, "native_helper_boundary") ||
+         (!strcmp(kind, "execution_adapter") && !strcmp(name, "enter_C_generated_block")) ||
+         !strcmp(kind, "GPU_DMA_packet") ||
+         !strcmp(kind, "spu_register_write") ||
+         !strcmp(kind, "GPU_GE_word") ||
+         !strcmp(kind, "GPU_register_read") ||
+         !strcmp(kind, "GPU_packet") ||
+         !strcmp(kind, "DMA_register_read") ||
+         !strcmp(kind, "DMA_register_write") ||
+         !strcmp(kind, "timer_read") ||
+         !strcmp(kind, "compiler_profile") ||
+         !strcmp(kind, "GPU_port_write")))
+        return;
     /* Names are source-controlled identifiers, never arbitrary path contents. */
     fprintf(c->trace, "{\"kind\":\"%s\",\"name\":\"%s\",\"address\":%u,\"value\":%u}\n",
             kind, name, address, value);

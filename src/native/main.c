@@ -60,7 +60,12 @@ int main(int argc, char **argv)
     }
     c->gp=0x10000; c->heap_next=0x1000000; c->next_id=1;
     c->diagnostic_skip_ui=skip_ui;
+    {
+        const char *compact = getenv("REPOPS_TRACE_COMPACT");
+        c->trace_compact = compact && compact[0] == '1';
+    }
     c->disc_path=argc==5?argv[4]:NULL;
+    rp_event(c,"metadata","compact_trace_enabled",0,(uint32_t)c->trace_compact);
     if (setjmp(c->stop)==0) {
         load_data(c,argv[1],argv[2]);
         rp_pops_module_start(c);

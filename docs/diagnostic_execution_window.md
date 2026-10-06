@@ -38,3 +38,9 @@ interrupt/DMA controller or an additional reconstructed body.
 Integrated results are recorded in progress.md. Event and generated-cache
 contract tests pass; hardware equivalence and complete emulator execution
 are not claimed.
+
+`REPOPS_TRACE_COMPACT=1` omits high-volume instruction/helper and register
+records for long reverse runs. It does not alter execution or counters.
+Blockers, milestones, serial/CD state and execution configuration remain in
+the trace; the original full trace is still the default. This is not suitable
+as a replacement for a complete GE command capture.

@@ -52,7 +52,7 @@ typedef struct rp_context {
     rp_me_worker me_worker;
     uint32_t vfpu_s330_bits;
     float vfpu_reset_rows[4][4];
-    int diagnostic_skip_ui, vfpu_zero_ready;
+    int diagnostic_skip_ui, trace_compact, vfpu_zero_ready;
     uint64_t disc_bytes;
     rp_disc_header_state disc_header;
     uint32_t functions, services, imports, last_function;

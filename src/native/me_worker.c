@@ -4,7 +4,7 @@
 #define OUTPUT UINT32_C(0xBE000000)
 #define REQUEST UINT32_C(0xBFC007F8)
 #define ACK UINT32_C(0xBFC007F0)
-#define TRANSFER UINT32_C(0xBC200000)
+#define CPU_BUS_FREQUENCY UINT32_C(0xBC200000)
 
 static int32_t signed_half(uint32_t word)
 {
@@ -91,10 +91,10 @@ rp_me_step_result rp_me_worker_step(rp_me_worker *w, const rp_me_bus *b)
          * wake boundary, not Capstone MIPS32's apparent MADD instruction.
          * Interrupt delivery/timing is not reproduced by this state machine.
          */
-        b->write32(ctx, TRANSFER + 4, 0x10004);
-        b->write32(ctx, TRANSFER, 0x101FF);
-        b->write32(ctx, TRANSFER, 0);
-        b->write32(ctx, TRANSFER + 4, 0);
+        b->write32(ctx, CPU_BUS_FREQUENCY + 4, 0x10004);
+        b->write32(ctx, CPU_BUS_FREQUENCY, 0x101FF);
+        b->write32(ctx, CPU_BUS_FREQUENCY, 0);
+        b->write32(ctx, CPU_BUS_FREQUENCY + 4, 0);
         value = b->read32(ctx, OUTPUT + 0x28);
         if (value & 2) {
             if (!b->read32(ctx, REQUEST)) {
@@ -122,7 +122,7 @@ rp_me_step_result rp_me_worker_step(rp_me_worker *w, const rp_me_bus *b)
             w->packed = value | (value << 16);
             w->phase = RP_ME_PUMP;
         } else {
-            b->write32(ctx, TRANSFER, 0x10002);
+            b->write32(ctx, CPU_BUS_FREQUENCY, 0x10002);
             b->service(ctx, RP_ME_DCACHE_WRITEBACK_INVALIDATE, 0);
             w->phase = RP_ME_DRAIN;
         }
@@ -139,7 +139,7 @@ rp_me_step_result rp_me_worker_step(rp_me_worker *w, const rp_me_bus *b)
         control = b->read32(ctx, REQUEST);
         b->write32(ctx, ACK, control);
         if (!(control & 1)) {
-            b->write32(ctx, TRANSFER, 0);
+            b->write32(ctx, CPU_BUS_FREQUENCY, 0);
             if (control) {
                 b->service(ctx, RP_ME_DDR_FLUSH, 8);
                 w->phase = RP_ME_STOPPED;

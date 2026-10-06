@@ -2,7 +2,7 @@
   "schema_version": 1,
   "target": "pops_660",
   "input_sha256": "6a4aea3f731336916db97194c1a27983c18297c2dfcb1a1a328fd4ff8b09c8e0",
-  "status": "descriptive_first_pass_not_applied_to_runtime_or_Ghidra",
+  "status": "recovered_layout_schema_imported_as_Ghidra_types_not_applied_to_runtime_memory",
   "names": "recovered_descriptive_names_not_original_source_identifiers",
   "endianness": "little",
   "address_width_bits": 32,
@@ -11,9 +11,16 @@
     "core": {"address": "0x00010000", "size": "0x4000", "storage": "scratchpad", "evidence": ["src/native/runtime.c:rp_memory", "original:+0x1BFB0"]},
     "me_shared": {"address": "0x49F40000", "alias": "0x09F40000", "register": "gp", "evidence": ["original:+0x000C", "original:+0x0018"]},
     "me_mixer": {"address": "0x09FF0000", "register": "ra_inside_callback", "evidence": ["original:+0x0010", "src/native/pops_spu.c"]},
-    "alternate_gp": {"address": "0x09FF8000", "ownership": "unresolved", "evidence": ["original:+0x1BF40..+0x1BF44", "original:+0x1C5FC..+0x1C600"]}
+    "alternate_gp": {"address": "0x09FF8000", "cleared_prefix_bytes": "0xB04", "ownership": "distinct_context_subsystem_unresolved", "evidence": ["original:+0x1BF40..+0x1BF48", "original:+0x1C254..+0x1C348", "original:+0x1C5FC..+0x1C600"]}
   },
   "types": {
+    "AlternateGpPrefix": {
+      "size": "0xB04", "confidence": "cleared_prefix_and_selected_fields_only",
+      "fields": [["0x000", "unknown_000", "bytes[380]"], ["0x17C", "nibble_byte_masks", "u32[16]"], ["0x1BC", "unknown_1bc", "bytes[2320]"], ["0xACC", "list_link0", "guest_address32"], ["0xAD0", "list_link1", "guest_address32"], ["0xAD4", "unknown_ad4", "bytes[48]"]],
+      "instances": [{"base": "alternate_gp", "offset": "0x0"}],
+      "evidence": ["original:+0x1C258..+0x1C278", "original:+0x1C2CC..+0x1C348"],
+      "warning": "Raw decompiler output assumes GP=0x10000, but the caller at +0x1BF40 sets 0x09FF8000. Full context extent and subsystem identity remain unresolved."
+    },
     "PopsEvent": {
       "size": "0x10", "confidence": "confirmed_layout",
       "fields": [["0x00", "next", "guest_address32"], ["0x04", "prev", "guest_address32"], ["0x08", "deadline_cycles", "u32"], ["0x0C", "callback", "guest_code_address32"]],

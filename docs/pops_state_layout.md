@@ -16,11 +16,25 @@ field definitions are in `data/state_layout.json`.
 | Main CPU/core | `gp = 0x00010000` | Scratchpad state. `runtime.c:rp_memory` maps 0x10000..0x13FFF to separate storage. The same numeric module offsets refer to different bytes and require `rp_module_memory`. |
 | ME shared producer state | `gp = 0x49F40000` | Callback +0x000C loads this base. Its cached/physical alias is 0x09F40000, loaded into `fp` at +0x0018. They are one backing store, not two independent structs. |
 | ME mixer-private state | `ra = 0x09FF0000` | Callback +0x0010 repurposes RA as a data base; the caller's RA was saved on the stack. Voices begin at base+0x858. |
-| Alternate GP context | `gp = 0x09FF8000` | Observed at +0x1BF40/+0x1BF44 and +0x1C5FC/+0x1C600, followed by restoration to 0x10000. Ownership/lifecycle needs more reverse; do not label it a core-state mirror without tracing the copies. |
+| Alternate GP context | `gp = 0x09FF8000` | Caller +0x1BF40/+0x1BF44 sets this base before +0x1C254 initializes its distinct prefix. Own list links and mask table are confirmed below. Subsystem ownership and full extent remain unresolved. |
 | Temporary register use | varies | E.g. +0xE054 sets GP to -1. A GP-based load must be classified by incoming register state, not by register name alone. |
 
 The source-level hypothesis is several state blocks/substructures and selected
 register-base optimizations, not a proven monolithic Sony `PopsState` class.
+
+### Alternate context: a concrete decompiler attribution error
+
+The raw pseudocode for +0x1C254 displays a clear of absolute address 0x10000.
+The actual instruction at +0x1C258 is `move a0,gp`: the initializer uses its
+incoming GP. The +0x1BF40 caller sets that to 0x09FF8000, not core scratchpad.
+Treating the displayed absolute address as evidence would merge unrelated state.
+
+The initializer clears 0xB04 bytes, self-links pointers at +0xACC/+0xAD0, and
+builds 16 u32 nibble-to-byte masks at +0x17C..+0x1BB. Its callee +0x1C3B8
+writes a byte at +0xFC, where the core context has a saved return word. These
+observations support a separate context, not a demonstrated mirror. The new
+`AlternateGpPrefix` describes only the cleared prefix; +0x1C600..+0x1C610 also
+uses GP+0xB04, so 0xB04 is not claimed as the full allocation size.
 
 ## 2. The concrete example: GP+0x35F0
 
@@ -157,13 +171,23 @@ Likewise the list sentinel at GP+0x1B8 does NOT justify typing the following
 read control halfword at GP+0x1C0 and polling byte at GP+0x1C3. Preserve that
 context/overlap until the empty-list lifecycle is fully recovered.
 
-## 6. How to apply this pass later
+## 6. Ghidra type import and later application
 
-First annotate these types and bases in a new/read-only-derived Ghidra analysis,
-then replace one family of accesses at a time. Keep guest addresses as u32 and
-use the existing little-endian accessors; casting directly to native structs
-would mix host pointer width, alignment and aliasing assumptions. The JSON map
-is descriptive input for that later work, not yet an installed Ghidra type DB.
+`ghidra/ImportStateLayouts.java` imports the ten schema types plus a partial
+16-KiB core view into a new analysis project. The successful export is
+`out/ghidra-state.GMXnwg/export/repops_types.gdt`, with verified field/size
+metadata in `types.json`. Instruction-record phase reuse is represented by
+unions. Core, alternate-GP and ME base warnings are attached to selected code
+entries; no universal GP register value is imposed.
+
+These types are present in the new project's datatype manager, not applied over
+program memory. In particular the script must never reinterpret module code at
+0x10000 as core scratchpad. See `ghidra_state_types.md` for reproducible import
+and the fresh project location. Existing Ghidra projects remain unchanged.
+
+When migrating C later, replace one family of accesses at a time. Keep guest
+addresses as u32 and use the existing little-endian accessors; casting directly
+to native structs would mix host pointer width, alignment and aliasing assumptions.
 
 No runtime refactor or mass offset replacement was performed in this pass.
 Remaining priorities are alternate-GP lifecycle, frame/texture state boundaries,

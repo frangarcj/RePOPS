@@ -5,14 +5,24 @@
 The requested first pass is in `pops_state_layout.md` and
 `../data/state_layout.json`. It distinguishes main scratchpad GP, shared-ME GP,
 the private mixer base and an alternate GP context whose ownership remains open.
-Nine descriptive type layouts cover events, frame phases, timers, I/O pairs,
-shared voice registers, volume/envelope state, mixer voices and compiler records.
+Ten descriptive type layouts cover events, frame phases, timers, I/O pairs,
+shared voice registers, volume/envelope state, mixer voices, compiler records
+and the separately initialized alternate-GP prefix.
 Their field widths/extents were checked; that is not complete behavioral recovery.
 
 The concrete `gp + 0x35F0` field is `frame_phase.event.callback`, inside the
 event at GP+0x35E4. Important unresolved/overlapping cases include the sentinel
 control word, phase-dependent compiler records and alternate-GP lifecycle.
-No mass offset replacement or Ghidra type installation has been performed.
+`ImportStateLayouts.java` has now installed these types plus `CoreStatePartial`
+in a new Ghidra project and exported a reusable GDT archive. Eleven root sizes,
+the nested frame callback and the instruction-record unions were checked.
+No program-memory typing or mass C offset replacement has been performed.
+See `ghidra_state_types.md`; pre-existing projects and emulator source are unchanged.
+
+The alternate initializer +0x1C254 uses incoming GP despite the raw decompiler
+displaying 0x10000. Its caller sets GP=0x09FF8000. A 0xB04-byte cleared prefix,
+distinct list links and a nibble-mask table are now documented without assigning
+an unproven subsystem or assuming that the prefix is the complete allocation.
 
 `reverse_coverage.md` records the measured percentage: 60 of 536 historical
 internal inventory entries have complete reconstructed bodies (11.2%); another

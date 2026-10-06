@@ -113,6 +113,10 @@ static void native_helper(rp_context *c)
 {
     uint32_t *r = c->run_gpr;
     switch (c->run_pc) {
+    case RP_GTE_NCDS_HELPER:
+        rp_pops_gte_ncds(c);
+        transfer(c, r[31]);
+        return;
     case RP_GTE_AVSZ3_HELPER: case RP_GTE_AVSZ4_HELPER:
         rp_pops_gte_avsz(c, c->run_pc == RP_GTE_AVSZ4_HELPER);
         transfer(c, r[31]);

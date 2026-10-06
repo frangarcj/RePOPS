@@ -1,5 +1,18 @@
 # RePops progress
 
+## Current: NCDS passes and reaches active-display refresh
+
+`out/gte-ncds.SrXOEA/result/` executes 560 NCDS/RTPT/NCLIP calls and 279
+AVSZ3 calls. It reaches `active_display_refresh_not_reconstructed` at +0x115B4:
+39,939,594 observations, 41,765 transfers, `game_executed: false`.
+No framebuffer or visible shading is claimed.
+
+NCDS and its light/color/RGB layouts are in `pops_gte.c`/`.h`. The native
+helper preserves the original stage limits, integer conversion and FIFO
+effects. Seven focused color cases plus emitter/Unicorn tests pass; full
+VFPU hardware equivalence remains unproven, so this body stays partial.
+See `gte_normal_color.md` for scope and arithmetic references.
+
 ## Current: projected geometry runs through the scalar VFPU bridge
 
 `out/gte-s330.XYmeKl/result/` executes RTPT, reads its S330 flag bits, computes

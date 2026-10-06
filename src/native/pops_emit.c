@@ -889,6 +889,11 @@ uint32_t rp_emit_record(rp_context *c, rp_pops_category category, uint32_t recor
     if (category == RP_CAT_GTE) {
         const uint32_t command = rp_u32(c, RP_GTE_RECORD_ADDRESS(record, command));
         rp_event(c, "GTE_compile", "original_command", record, command);
+        if ((command & 63) == RP_GTE_NCDS) {
+            /* The VFPU helper leaves the allocator's GPR slots and HI/LO live. */
+            rp_event(c, "GTE_compile", "selected_NCDS_helper", record, RP_GTE_NCDS_HELPER);
+            return rp_emit_jump_delay(c, out, UINT32_C(0x30000000) + RP_GTE_NCDS_HELPER);
+        }
         if ((command & 63) == RP_GTE_AVSZ3 || (command & 63) == RP_GTE_AVSZ4) {
             const uint32_t helper = (command & 63) == RP_GTE_AVSZ3 ?
                 RP_GTE_AVSZ3_HELPER : RP_GTE_AVSZ4_HELPER;

@@ -269,7 +269,21 @@ int main(void)
         assert(*(uint8_t *)rp_memory(c, RP_EMIT_ADDRESS(c, temporary_guest[0]), 1) == 21);
         assert(*(uint8_t *)rp_memory(c, RP_EMIT_ADDRESS(c, temporary_guest[1]), 1) == 22);
     }
+    rp_emit_init_registers(c, cursor);
+    rp_w8(c, RP_EMIT_ADDRESS(c, temporary_guest[0]), 21);
+    rp_w8(c, RP_EMIT_ADDRESS(c, temporary_dirty[0]), 1);
+    rp_w8(c, RP_EMIT_ADDRESS(c, hilo_cached), 3);
+    rp_w8(c, RP_EMIT_ADDRESS(c, hilo_dirty), 3);
+    rp_w32(c, RP_GTE_RECORD_ADDRESS(record, command), 0x4AE80413);
+    const uint32_t ncds = cursor;
+    cursor = rp_emit_record(c, RP_CAT_GTE, record, cursor, 19);
+    assert(cursor == ncds + 8);
+    assert(rp_u32(c, ncds) == (0x30000000u + RP_GTE_NCDS_HELPER) >> 2);
+    assert(*(uint8_t *)rp_memory(c, RP_EMIT_ADDRESS(c, temporary_guest[0]), 1) == 21);
+    assert(*(uint8_t *)rp_memory(c, RP_EMIT_ADDRESS(c, temporary_dirty[0]), 1) == 1);
+    assert(*(uint8_t *)rp_memory(c, RP_EMIT_ADDRESS(c, hilo_cached), 1) == 3);
+    assert(*(uint8_t *)rp_memory(c, RP_EMIT_ADDRESS(c, hilo_dirty), 1) == 3);
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[2].bytes); free(c);
-    puts("Emitter smoke: COP memory, RTPT/NCLIP/AVSZ original calls and selective flush passed.");
+    puts("Emitter smoke: COP memory and GTE calls retain their original selective-flush contracts.");
     return 0;
 }

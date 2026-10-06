@@ -29,7 +29,7 @@ build/repops-native build/repops-analyze build/test_native_emit build/test_unico
 
 build/test_native_gte: src/native/runtime.c src/native/pops_gte.c src/native/pops_gte.h src/native/pops_state.h src/native/runtime.h tests/test_native_gte.c
 	mkdir -p build
-	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_gte.c tests/test_native_gte.c -o $@
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_gte.c tests/test_native_gte.c -lm -o $@
 
 .PHONY: test-native-gte
 test-native-gte: build/test_native_gte

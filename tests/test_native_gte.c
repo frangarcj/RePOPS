@@ -17,6 +17,111 @@ static void identity(rp_context *c)
     rp_w32(c, RP_GTE_RECIPROCAL_ANCHOR - 0x20000, 0x80000000);
 }
 
+static void color_setup(rp_context *c)
+{
+    identity(c);
+    c->vfpu_zero_ready = 1;
+    for (unsigned i = 0; i < 3; ++i) {
+        c->vfpu_reset_rows[i][2] = -8;
+        c->vfpu_reset_rows[i][3] = 32767.0f / 4096.0f;
+        half(c, RP_GTE_ADDRESS(c, light_matrix[i][i]), 4096);
+        half(c, RP_GTE_ADDRESS(c, color_matrix[i][i]), 4096);
+        half(c, RP_GTE_ADDRESS(c, vectors[0].component[i]), (uint16_t)(4096 >> i));
+        rp_w32(c, RP_GTE_ADDRESS(c, color_fifo[i]), (i + 1) * 0x11000001u);
+    }
+    rp_w32(c, RP_GTE_ADDRESS(c, source_color), 0x3C204080);
+    rp_w32(c, RP_GTE_ADDRESS(c, color_fifo_padding), 0xBAD0CAFE);
+    rp_w32(c, RP_GTE_ADDRESS(c, mac[0]), 0xDEAD1234);
+    rp_w32(c, RP_GTE_ADDRESS(c, flags_shadow), 0x55AA1122);
+    c->run_hi = 0xABCDEF01; c->run_lo = 0x76543210;
+    c->run_gpr[8] = 0x12345678; c->run_gpr[31] = 0x09540020;
+}
+
+static void color_checks(rp_context *c)
+{
+    color_setup(c);
+    rp_pops_gte_ncds(c);
+    const int32_t unattenuated[] = {2048,512,128};
+    for (unsigned i = 0; i < 3; ++i) {
+        assert(rp_u32(c, RP_GTE_ADDRESS(c, mac[i + 1])) == (uint32_t)unattenuated[i]);
+        assert(rp_u32(c, RP_GTE_ADDRESS(c, ir[i + 1])) == (uint32_t)unattenuated[i]);
+    }
+    assert(rp_u32(c, RP_GTE_ADDRESS(c, color_fifo[0])) == 0x22000002);
+    assert(rp_u32(c, RP_GTE_ADDRESS(c, color_fifo[1])) == 0x33000003);
+    assert(rp_u32(c, RP_GTE_ADDRESS(c, color_fifo[2])) == 0x3C082080);
+    assert(rp_u32(c, RP_GTE_ADDRESS(c, color_fifo_padding)) == 0xBAD0CAFE);
+    assert(rp_u32(c, RP_GTE_ADDRESS(c, mac[0])) == 0xDEAD1234);
+    assert(rp_u32(c, RP_GTE_ADDRESS(c, flags_shadow)) == 0x55AA1122);
+    assert(c->run_hi == 0xABCDEF01 && c->run_lo == 0x76543210);
+    assert(c->run_gpr[8] == 0x12345678 && c->run_gpr[31] == 0x09540020);
+    assert(c->run_gpr[2] == 128 && c->run_gpr[4] == 0x1E102040);
+    assert(c->run_gpr[5] == 64 && c->run_gpr[6] == 32);
+    assert(c->vfpu_s330_bits == 0);
+
+    color_setup(c);
+    rp_w32(c, RP_GTE_ADDRESS(c, ir[0]), 2048);
+    for (unsigned i = 0; i < 3; ++i)
+        rp_w32(c, RP_GTE_ADDRESS(c, far_color[i]), (i + 1) * 4096);
+    rp_pops_gte_ncds(c);
+    const uint32_t attenuated[] = {3072,4352,6208};
+    for (unsigned i = 0; i < 3; ++i)
+        assert(rp_u32(c, RP_GTE_ADDRESS(c, mac[i + 1])) == attenuated[i]);
+    assert(rp_u32(c, RP_GTE_ADDRESS(c, color_fifo[2])) == 0x3CFFFFC0);
+    assert(c->vfpu_s330_bits == 0x180000);
+
+    /* Non-symmetric matrices expose accidental row/column transposition. */
+    color_setup(c);
+    const int16_t light[3][3] = {{4096,4096,0},{0,4096,4096},{4096,0,4096}};
+    const int16_t color[3][3] = {{0,4096,0},{0,0,4096},{4096,0,0}};
+    for (unsigned r = 0; r < 3; ++r)
+        for (unsigned col = 0; col < 3; ++col) {
+            half(c, RP_GTE_ADDRESS(c, light_matrix[r][col]), (uint16_t)light[r][col]);
+            half(c, RP_GTE_ADDRESS(c, color_matrix[r][col]), (uint16_t)color[r][col]);
+        }
+    rp_w32(c, RP_GTE_ADDRESS(c, background_color[1]), 2048);
+    rp_w32(c, RP_GTE_ADDRESS(c, background_color[2]), 1024);
+    rp_pops_gte_ncds(c);
+    const uint32_t mixed[] = {1536,1792,896};
+    for (unsigned i = 0; i < 3; ++i)
+        assert(rp_u32(c, RP_GTE_ADDRESS(c, mac[i + 1])) == mixed[i]);
+    assert(rp_u32(c, RP_GTE_ADDRESS(c, color_fifo[2])) == 0x3C387060);
+
+    color_setup(c);
+    half(c, RP_GTE_ADDRESS(c, vectors[0].component[0]), (uint16_t)-4096);
+    rp_pops_gte_ncds(c);
+    assert(rp_u32(c, RP_GTE_ADDRESS(c, color_fifo[2])) == 0x3C082000);
+    assert(c->vfpu_s330_bits == 0x1000000);
+
+    /* VF2IN uses nearest-even: 0.5, 1.5, 2.5 become 0, 2, 2. */
+    color_setup(c);
+    rp_w32(c, RP_GTE_ADDRESS(c, source_color), 0x3C808080);
+    for (unsigned i = 0; i < 3; ++i)
+        half(c, RP_GTE_ADDRESS(c, vectors[0].component[i]), (uint16_t)(i * 2 + 1));
+    rp_pops_gte_ncds(c);
+    assert(rp_u32(c, RP_GTE_ADDRESS(c, mac[1])) == 0);
+    assert(rp_u32(c, RP_GTE_ADDRESS(c, mac[2])) == 2);
+    assert(rp_u32(c, RP_GTE_ADDRESS(c, mac[3])) == 2);
+    assert(rp_u32(c, RP_GTE_ADDRESS(c, color_fifo[2])) == 0x3C000000);
+
+    /* The difference comparison sets FLAG even at the positive clamp limit. */
+    color_setup(c);
+    for (unsigned i = 0; i < 3; ++i)
+        half(c, RP_GTE_ADDRESS(c, vectors[0].component[i]), 0);
+    rp_w32(c, RP_GTE_ADDRESS(c, far_color[0]), 32767);
+    rp_pops_gte_ncds(c);
+    assert(rp_u32(c, RP_GTE_ADDRESS(c, color_fifo[2])) == 0x3C000000);
+    assert(c->vfpu_s330_bits == 0x1000000);
+
+    /* The ninth coefficient follows VI2F.S's full-word load, not a halfword. */
+    color_setup(c);
+    rp_w32(c, RP_GTE_ADDRESS(c, light_matrix[2][2]), 0x10000);
+    half(c, RP_GTE_ADDRESS(c, vectors[0].component[2]), 4096);
+    rp_pops_gte_ncds(c);
+    assert(rp_u32(c, RP_GTE_ADDRESS(c, color_fifo[2])) == 0x3CFF2080);
+    assert(rp_u32(c, RP_GTE_ADDRESS(c, mac[3])) == 4096);
+    assert(c->vfpu_s330_bits == 0x400000);
+}
+
 int main(void)
 {
     rp_context *c = calloc(1, sizeof(*c)); assert(c);
@@ -149,7 +254,8 @@ int main(void)
         assert(c->vfpu_s330_bits == averages[i].flags);
         assert(c->run_gpr[8] == 0x12345678);
     }
+    color_checks(c);
     fclose(c->trace); free(c->regions[0].bytes); free(c);
-    puts("GTE: RTPT, NCLIP and AVSZ3/4 depths, saturation, MAC truncation and preserved state passed.");
+    puts("GTE: projection, clipping, AVSZ and NCDS matrices/depth-cue/FIFO/rounding contracts passed.");
     return 0;
 }

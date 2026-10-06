@@ -78,19 +78,21 @@ static void graphics_tables(rp_context *c)
     for (unsigned bank = 0; bank < 2; ++bank) {
         for (unsigned group = 0; group < 15; group += 3) {
             for (unsigned plane = 0; plane < 3; ++plane) {
-                const uint32_t row = c->gp + 0x3400 + (bank * 16 + group + plane) * 8;
-                rp_w32(c, row, storage + plane * 0x80);
-                rp_w8(c, row + 5, (uint8_t)plane);
-                rp_w8(c, row + 4, 0);
-                put_half(c, row + 6, (uint16_t)(plane == 0 ? group << 6 : 0));
+                const unsigned index = bank * 16 + group + plane;
+                rp_w32(c, RP_GPU_ADDRESS(c, texture_cache[index].storage_address), storage + plane * 0x80);
+                rp_w8(c, RP_GPU_ADDRESS(c, texture_cache[index].group_offset), (uint8_t)plane);
+                rp_w8(c, RP_GPU_ADDRESS(c, texture_cache[index].cache_flags), 0);
+                put_half(c, RP_GPU_ADDRESS(c, texture_cache[index].group_x_origin),
+                         (uint16_t)(plane == 0 ? group << 6 : 0));
             }
             storage += 0x20000;
         }
-        const uint32_t base = c->gp + bank * 0x80;
-        rp_w32(c, base + 0x3478, rp_u32(c, base + 0x3470) + 0x80);
-        rp_w8(c, base + 0x347D, 3);
-        rp_w8(c, base + 0x347C, 0);
-        put_half(c, base + 0x347E, 0);
+        const unsigned last = bank * 16 + 15;
+        rp_w32(c, RP_GPU_ADDRESS(c, texture_cache[last].storage_address),
+               rp_u32(c, RP_GPU_ADDRESS(c, texture_cache[last - 1].storage_address)) + 0x80);
+        rp_w8(c, RP_GPU_ADDRESS(c, texture_cache[last].group_offset), 3);
+        rp_w8(c, RP_GPU_ADDRESS(c, texture_cache[last].cache_flags), 0);
+        put_half(c, RP_GPU_ADDRESS(c, texture_cache[last].group_x_origin), 0);
         storage = 0x04100000;
     }
     uint32_t mode = display_choice(c);
@@ -397,6 +399,17 @@ static void advance_frame_phase(rp_context *c)
 void rp_pops_graphics_event(rp_context *c, uint32_t callback)
 {
     switch (callback) {
+    case 0x125F0: {
+        rp_function(c, 0x125F0, "pops.GPU_ready_event_partial");
+        const uint32_t status = RP_GPU_ADDRESS(c, status);
+        rp_w32(c, status, rp_u32(c, status) | 0x14000000);
+        if (rp_cd_u8(c, RP_GPU_ADDRESS(c, refresh_on_ready)))
+            refresh_disabled_display(c);
+        else if ((int8_t)rp_cd_u8(c, RP_GPU_ADDRESS(c, ge_transfer_pending)) > 0)
+            rp_block(c, "GPU_ready_list_submission_not_reconstructed", 0x12624);
+        rp_event(c, "milestone", "GPU_ready_event_completed", callback, rp_u32(c, status));
+        return;
+    }
     case 0x1265C: advance_frame_phase(c); return;
     case 0x11410: begin_frame(c); return;
     case 0x15FE4:

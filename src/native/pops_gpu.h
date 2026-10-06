@@ -2,6 +2,14 @@
 #define REPOPS_GPU_H
 #include "pops_cdrom.h"
 
+typedef struct {
+    uint32_t storage_address;
+    uint8_t cache_flags;
+    int8_t group_offset;
+    uint16_t group_x_origin;
+} rp_gpu_texture_cache_entry;
+typedef struct { uint32_t command, origin, extent; } rp_gpu_fill_packet_layout;
+
 /* Selected core GPU fields, recovered from +0x12FBC and their producers.
  * This is a wire view: use named addresses, never cast the guest backing. */
 typedef struct {
@@ -9,7 +17,8 @@ typedef struct {
     uint32_t dma_cost_scaling;
     uint8_t unknown_6ec[0x710 - 0x6EC];
     uint32_t data_read_cycle_cost;
-    uint8_t unknown_714[0x3500 - 0x714];
+    uint8_t unknown_714[0x3400 - 0x714];
+    rp_gpu_texture_cache_entry texture_cache[32];
     union {
         uint32_t packet_words[48];
         struct { uint8_t packet_prefix[0xBC]; uint32_t data_read_latch; };
@@ -34,7 +43,7 @@ typedef struct {
     uint8_t unknown_3656, command_mode, ge_transfer_pending, read_selector;
     uint8_t draw_area_exceeds_display, draw_area_intersects_display;
     uint8_t draw_mode_gate, display_mode_gate;
-    uint8_t interlaced, display_dirty, previous_field, unknown_3661, frame_phase;
+    uint8_t interlaced, display_dirty, previous_field, refresh_on_ready, frame_phase;
     uint8_t unknown_3663[5];
     union {
         uint32_t display_mode;
@@ -52,6 +61,9 @@ uint32_t rp_ge_capture_state_list(rp_context *, uint32_t address, int module_rel
 enum { RP_GPU_DISPLAY_TRANSITION_ADDRESS = 0x49CBD4 };
 
 _Static_assert(offsetof(rp_core_gpu_layout, data_read_latch) == 0x35BC, "GPU data latch");
+_Static_assert(sizeof(rp_gpu_texture_cache_entry) == 8, "GPU texture cache stride");
+_Static_assert(sizeof(rp_gpu_fill_packet_layout) == 12, "GPU fill packet bytes");
+_Static_assert(offsetof(rp_core_gpu_layout, texture_cache) == 0x3400, "GPU texture cache base");
 _Static_assert(offsetof(rp_core_gpu_layout, dma_cost_scaling) == 0x6E8, "GPU DMA cost scaling");
 _Static_assert(offsetof(rp_core_gpu_layout, packet_words[47]) == 0x35BC, "GPU packet/latch alias");
 _Static_assert(offsetof(rp_core_gpu_layout, ready_event) == 0x35F8, "GPU ready event");
@@ -59,6 +71,7 @@ _Static_assert(offsetof(rp_core_gpu_layout, status) == 0x3630, "GPU status");
 _Static_assert(offsetof(rp_core_gpu_layout, draw_mode) == 0x3654, "GPU draw mode");
 _Static_assert(offsetof(rp_core_gpu_layout, read_selector) == 0x3659, "GPU read selector");
 _Static_assert(offsetof(rp_core_gpu_layout, frame_phase) == 0x3662, "GPU frame phase");
+_Static_assert(offsetof(rp_core_gpu_layout, refresh_on_ready) == 0x3661, "GPU ready refresh flag");
 _Static_assert(offsetof(rp_core_gpu_layout, display_mode) == 0x3668, "GPU display mode");
 _Static_assert(offsetof(rp_core_gpu_layout, packet_extra_words) == 0x366B, "GPU packet extra words");
 _Static_assert(offsetof(rp_core_gpu_layout, packet_word_count) == 0x366C, "GPU packet count");

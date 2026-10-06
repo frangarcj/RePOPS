@@ -1,5 +1,12 @@
 # Reverse coverage snapshot
 
+## GPU fill and ready-event update
+
+The latest ledger adds the partial GPU-ready entry +0x125F0. Against the
+same 536-entry historical internal inventory, 66 bodies are complete (12.3%)
+and 54 partial, or 120 combined (22.4%). Full POPS ledger totals are 77 complete
+and 74 partial. Fill remains a branch within +0x133D0, not a new function.
+
 ## Latest comparable count: timer/DMA readers and linked GPU DMA
 
 `out/gpu-dma-linked.qooyux/result/coverage.json` compares the updated ledger

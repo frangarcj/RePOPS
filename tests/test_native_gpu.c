@@ -259,6 +259,43 @@ int main(void)
     assert(scheduled_delay == 36025 && delayed_words == 4);
     assert(rp_core_downcount(c) == 983);
 
+    /* The three-word fill emits a temporary scissor and restores it. Cache
+     * groups follow the same 3+3+3+3+3+1 layout as the original initializer. */
+    reset_status(c);
+    rp_w32(c, RP_GPU_ADDRESS(c, list_cursor), 0x49A00000);
+    for (unsigned i = 0; i < 32; ++i) {
+        const unsigned column = i & 15;
+        rp_w8(c, RP_GPU_ADDRESS(c, texture_cache[i].group_offset),
+               (uint8_t)(column == 15 ? 3 : column % 3));
+        rp_w8(c, RP_GPU_ADDRESS(c, texture_cache[i].cache_flags), 0xA5);
+    }
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, draw_area_start[0]), 3);
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, draw_area_start[1]), 4);
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, draw_area_end[0]), 99);
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, draw_area_end[1]), 79);
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, display_size[0]), 640);
+    rp_cd_w16(c, RP_GPU_ADDRESS(c, display_size[1]), 480);
+    const unsigned before_fill = scheduled;
+    rp_pops_gpu_write(c, 0x1810, 0x02123456);
+    rp_pops_gpu_write(c, 0x1810, (10u << 16) | 19);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)) == 0x49A00000);
+    rp_pops_gpu_write(c, 0x1810, (8u << 16) | 32);
+    const uint32_t fill_words[] = {0xD4002810, 0xD500442F, 0x55103050,
+        0x13041B90, 0x0A000040, 0xD4001003, 0xD5013C63};
+    for (unsigned i = 0; i < 7; ++i)
+        assert(rp_u32(c, 0x49A00000 + i * 4) == fill_words[i]);
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)) == 0x49A0001C);
+    assert(scheduled == before_fill + 1 && scheduled_delay == 16);
+    for (unsigned i = 0; i < 32; ++i)
+        assert(rp_cd_u8(c, RP_GPU_ADDRESS(c, texture_cache[i].cache_flags)) == (i < 3 ? 0 : 0xA5));
+    assert(rp_cd_u8(c, RP_GPU_ADDRESS(c, previous_field)) == 1);
+    assert(!rp_cd_u8(c, RP_GPU_ADDRESS(c, packet_word_count)));
+    rp_pops_gpu_write(c, 0x1810, 0x02000000);
+    rp_pops_gpu_write(c, 0x1810, 0);
+    rp_pops_gpu_write(c, 0x1810, 4u << 16); /* Zero width is a consumed no-op. */
+    assert(rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)) == 0x49A0001C);
+    assert(scheduled == before_fill + 1);
+
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[1].bytes);
     free(c->regions[2].bytes); free(c);
     puts("GPU: port state, typed linked DMA, GE words, cycle debit and continuation passed; rendering pending.");

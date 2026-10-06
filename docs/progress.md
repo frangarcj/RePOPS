@@ -1,5 +1,21 @@
 # RePops progress
 
+## Current: 640x480 fill and GPU-ready event pass
+
+`out/gpu-fill-ready.6tT86C/result/` emits the original GE fill template for
+a real 640x480 packet (9,600 work units), completes the idle GPU-ready event
+at +0x125F0 and reaches a CPU state-emitter policy at +0x4930. It records
+39,392,837 generated-cache observations, 39,102 transfers and
+`game_executed: false`. No framebuffer has been rendered.
+
+The three-word packet and eight-byte cache entries are now named C layouts;
+the initializer and fill use the same fields. Focused checks verify exact
+GE words, cache invalidation, zero-size handling and cost. GPU-ready's positive
+pending-list branch remains explicit. See `gpu_fill.md`.
+
+Comparable coverage is 66/536 complete (12.3%) and 120/536 complete or partial
+(22.4%); the full POPS ledger has 77 complete and 74 partial entries.
+
 ## Current: GPU linked DMA reaches the fill packet
 
 `out/gpu-dma-linked.qooyux/result/` reads the actual five-word DMA payload

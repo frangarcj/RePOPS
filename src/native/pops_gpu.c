@@ -87,7 +87,70 @@ static uint32_t drawing_environment(rp_context *c, uint32_t word, uint32_t out)
     return out;
 }
 
-/* Reached state-only paths of +0x133D0. GE words are retained in guest RAM;
+/* +0x134E0..+0x136C8: temporary fill scissor, cache invalidation and the
+ * original GE clear template, followed by restoration of the draw scissor. */
+static uint32_t fill_rectangle(rp_context *c, uint32_t packet, uint32_t *cursor)
+{
+    const uint32_t extent = rp_u32(c, RP_FIELD_ADDRESS(packet, rp_gpu_fill_packet_layout, extent));
+    const uint32_t width = extent & 0x3FF, height = (extent >> 16) & 0x1FF;
+    if (!width || !height) return 0;
+    const uint32_t origin = rp_u32(c, RP_FIELD_ADDRESS(packet, rp_gpu_fill_packet_layout, origin));
+    const uint32_t command = rp_u32(c, RP_FIELD_ADDRESS(packet, rp_gpu_fill_packet_layout, command));
+    uint32_t x = origin & 0x3FF;
+    const uint32_t y = (origin >> 16) & 0x1FF;
+    if (!(rp_u32(c, RP_DEVICE_ADDRESS(c, compatibility_flags)) & 0x01000000)) x &= 0x3F0;
+    const uint32_t bottom = y + height;
+    uint32_t out = emit_ge_word(c, *cursor, 0xD4000000 | (y << 10) | x);
+    out = emit_ge_word(c, out, 0xD5000000 | ((bottom - 1) << 10) | (x + width - 1));
+
+    const uint32_t first = x >> 6;
+    uint32_t end = ((x + width + 191) >> 6) & 15;
+    uint32_t begin = first - (uint32_t)(int32_t)(int8_t)GPU8(texture_cache[first].group_offset);
+    const int32_t right_group = (int8_t)GPU8(texture_cache[end].group_offset);
+    if (right_group != 3) end -= (uint32_t)right_group;
+    if (begin && begin == first && begin != end) begin -= 3;
+    if (width > 960) end = begin;
+    uint32_t bank = (y >> 8) & 1;
+    const uint32_t last_bank = ((bottom + 255) >> 8) & 1;
+    do {
+        uint32_t group = begin;
+        unsigned visited = 0;
+        do {
+            if (group > 15 || ++visited > 6)
+                rp_block(c, "GPU_fill_cache_group_domain", 0x135E8);
+            const uint32_t entry = bank * 16 + group;
+            SET_GPU8(texture_cache[entry].cache_flags, 0);
+            if (group == 15) group = 0;
+            else {
+                if (group > 12) rp_block(c, "GPU_fill_cache_group_domain", 0x135F8);
+                SET_GPU8(texture_cache[entry + 1].cache_flags, 0);
+                SET_GPU8(texture_cache[entry + 2].cache_flags, 0);
+                group += 3;
+            }
+        } while (group != end);
+        bank ^= 1;
+    } while (bank != last_bank);
+
+    const bool in_x = x - GPU16(display_origin[0]) < GPU16(display_size[0]);
+    if (in_x && (y - GPU16(display_origin[1]) < GPU16(display_size[1]) ||
+                 bottom - 1 - GPU16(display_origin[1]) < GPU16(display_size[1])))
+        SET_GPU8(previous_field, 1);
+    out = emit_ge_word(c, out, 0x55000000 | (command & 0xF8F8F8));
+    out = emit_ge_word(c, out, 0x13041B90);
+    out = emit_ge_word(c, out, 0x0A000040);
+    const uint32_t x0 = (uint32_t)(int32_t)(int16_t)GPU16(draw_area_start[0]);
+    const uint32_t y0 = (uint32_t)(int32_t)(int16_t)GPU16(draw_area_start[1]);
+    const uint32_t x1 = (uint32_t)(int32_t)(int16_t)GPU16(draw_area_end[0]);
+    const uint32_t y1 = (uint32_t)(int32_t)(int16_t)GPU16(draw_area_end[1]);
+    out = emit_ge_word(c, out, 0xD4000000 | (y0 << 10) | x0);
+    out = emit_ge_word(c, out, 0xD5000000 | (y1 << 10) | x1);
+    *cursor = out;
+    const uint32_t cost = (width * height) >> ((GPU8(draw_mode_gate) + 4) & 31);
+    rp_event(c, "milestone", "GPU_fill_GE_template_emitted", (width << 16) | height, cost);
+    return cost;
+}
+
+/* Reached state/fill paths of +0x133D0. GE words are retained in guest RAM;
  * list services remain the existing explicit headless execution adapter. */
 static uint32_t consume_packet(rp_context *c, uint32_t source, uint32_t bytes)
 {
@@ -104,6 +167,7 @@ static uint32_t consume_packet(rp_context *c, uint32_t source, uint32_t bytes)
         rp_event(c, "headless_adapter", "GE_list_queued_at_stall_not_rendered", c->ge_stalled_list, c->next_id);
     }
     unsigned mode = GPU8(command_mode);
+    uint32_t work = 0;
     for (uint32_t offset = 0; offset < bytes; offset += 4) {
         const uint32_t word = rp_u32(c, source + offset);
         if (!mode) mode = word >> 29;
@@ -115,7 +179,10 @@ static uint32_t consume_packet(rp_context *c, uint32_t source, uint32_t bytes)
                 out = emit_ge_word(c, out, 0xC4000001);
                 SET_GPU16(draw_mode, GPU16(draw_mode) | 0x8000);
             } else if (command == 2) {
-                rp_block(c, "GPU_fill_packet_not_reconstructed", 0x134E0);
+                if (bytes - offset < sizeof(rp_gpu_fill_packet_layout))
+                    rp_block(c, "GPU_fill_truncated_packet", 0x134E0);
+                work += fill_rectangle(c, source + offset, &out);
+                offset += sizeof(rp_gpu_fill_packet_layout) - 4;
             }
         } else if (mode == 7) {
             out = drawing_environment(c, word, out);
@@ -126,7 +193,7 @@ static uint32_t consume_packet(rp_context *c, uint32_t source, uint32_t bytes)
     }
     SET_GPU8(command_mode, mode);
     SET_GPU32(list_cursor, out);
-    return 0;
+    return work;
 }
 
 /* +0x12C74 linked-list branch. Packet data goes directly to the original

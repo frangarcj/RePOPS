@@ -24,6 +24,7 @@ typedef struct {
 #define RP_DMA_REGISTER(c, index, member) RP_DMA_ADDRESS(c, registers[index].member)
 
 void rp_pops_dma_try_channel(rp_context *, unsigned);
+uint32_t rp_pops_dma_read(rp_context *, uint32_t address, uint32_t width);
 void rp_pops_dma_channel_write(rp_context *, uint32_t, uint32_t, uint32_t);
 void rp_pops_dma_finish(rp_context *, uint32_t);
 uint32_t rp_pops_cd_dma_transfer(rp_context *, uint32_t, uint32_t, uint32_t);

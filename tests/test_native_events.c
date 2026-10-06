@@ -1,5 +1,6 @@
 #include "../src/native/runtime.h"
 #include "../src/native/pops_timer.h"
+#include "../src/native/pops_dma.h"
 #include <assert.h>
 #include <stdlib.h>
 
@@ -127,7 +128,24 @@ int main(void)
     rp_w32(c, RP_TIMER_FIELD(timer2, origin_cycles), 3);
     rp_w8(c, RP_TIMER_FIELD(timer2, clock_shift), 3);
     assert(rp_pops_timer_read(c, 0x1F801120, 2) == 3);
+
+    /* DMA readers must preserve the busy bit, apply the original width table
+     * and refund four cycles rather than manufacture a completed transfer. */
+    const uint32_t chcr = RP_DMA_REGISTER(c, 2, channel_control);
+    rp_w32(c, chcr, UINT32_C(0x9182FEDC));
+    const uint32_t expected[] = {
+        UINT32_C(0xFFFFFFDC), UINT32_C(0xFFFFFEDC), UINT32_C(0x9182FEDC),
+        0xFEDC, 0xDC, 0xFEDC, 0xFEDC
+    };
+    for (unsigned width = 0; width < 7; ++width) {
+        rp_core_set_downcount(c, UINT32_MAX - 5);
+        assert(rp_pops_dma_read(c, 0x1F8010A8, width) == expected[width]);
+        assert(rp_core_downcount(c) == UINT32_MAX - 1);
+        assert(rp_u32(c, chcr) == UINT32_C(0x9182FEDC));
+    }
+    assert(rp_pops_dma_read(c, 0x1F8010A9, 4) == 0xFE);
+    assert(rp_pops_dma_read(c, 0x1F8010AA, 5) == 0x9182);
     fclose(c->trace); free(c);
-    puts("Guest events/timers: scheduling, typed writes, counter widths, paused reads and status clearing passed.");
+    puts("Guest events/timers/DMA: typed register reads, widths, clocks and status effects passed.");
     return 0;
 }

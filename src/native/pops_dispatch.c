@@ -137,6 +137,10 @@ static void native_helper(rp_context *c)
         r[2] = rp_pops_timer_read(c, r[4], r[5]);
         transfer(c, r[31]);
         return;
+    case 0x9158:
+        r[2] = rp_pops_dma_read(c, r[4], r[5]);
+        transfer(c, r[31]);
+        return;
     case 0x9C60:
         rp_pops_timer_write(c, r[4], r[5]);
         transfer(c, r[31]);
@@ -294,6 +298,10 @@ static void native_helper(rp_context *c)
                 } else if (handler == 0x9BE0) {
                     rp_core_set_downcount(c, r[25]);
                     r[2] = rp_pops_timer_read(c, address, width);
+                    r[25] = rp_core_downcount(c);
+                } else if (handler == 0x9158) {
+                    rp_core_set_downcount(c, r[25]);
+                    r[2] = rp_pops_dma_read(c, address, width);
                     r[25] = rp_core_downcount(c);
                 } else if (handler == 0x85F4) {
                     rp_core_set_downcount(c, r[25]);

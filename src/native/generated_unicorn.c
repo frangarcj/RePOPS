@@ -76,7 +76,7 @@ void rp_unicorn_open(rp_context *c)
                                0x1DE8, 0x1E00, 0x1E20, 0x1E40,
                                0xD088, 0xD1B0, 0x12FBC, 0x127D8,
                                0x2110, 0x2128, 0x2140, 0x2160, 0x2180,
-                               0x267C, 0x2694, 0x26B4, 0x26D4, 0x2878, 0x2918, 0x98C4, 0x9C60, 0x9BE0, 0x85F4};
+                               0x267C, 0x2694, 0x26B4, 0x26D4, 0x2878, 0x2918, 0x98C4, 0x9C60, 0x9BE0, 0x9158, 0x85F4};
     checked(c, uc_ctl_exits_enable(engine->uc), 0);
     checked(c, uc_ctl_set_exits(engine->uc, helpers, sizeof(helpers) / sizeof(helpers[0])), 0);
     for (unsigned i = 0; i < RP_REGION_COUNT; ++i) {

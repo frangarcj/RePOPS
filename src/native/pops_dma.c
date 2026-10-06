@@ -1,5 +1,30 @@
 #include "pops_dma.h"
 
+/* +0x9158..+0x91BB and its width table at +0xD45AC. The helper refunds
+ * four cycles before reading the shadow, including the default LHU path. */
+uint32_t rp_pops_dma_read(rp_context *c, uint32_t address, uint32_t width)
+{
+    rp_function(c, 0x9158, "pops.read_DMA_register");
+    const uint32_t shadow = RP_DMA_ADDRESS(c, registers) + (address & 0x7F);
+    rp_core_set_downcount(c, rp_core_downcount(c) + 4);
+    uint32_t value;
+    switch (width) {
+    case 0:
+        value = rp_cd_u8(c, shadow);
+        if (value & 0x80) value |= UINT32_C(0xFFFFFF00);
+        break;
+    case 1:
+        value = rp_cd_u16(c, shadow);
+        if (value & 0x8000) value |= UINT32_C(0xFFFF0000);
+        break;
+    case 2: value = rp_u32(c, shadow); break;
+    case 4: value = rp_cd_u8(c, shadow); break;
+    default: value = rp_cd_u16(c, shadow); break;
+    }
+    rp_event(c, "DMA_register_read", "shadow_with_original_cycle_refund", address, value);
+    return value;
+}
+
 /* +0x8BB8: postpone active channels matching the original mode mask. */
 static uint32_t delay_active(rp_context *c, uint16_t mask, uint32_t delay, uint32_t horizon)
 {

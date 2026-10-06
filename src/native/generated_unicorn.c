@@ -110,12 +110,12 @@ void rp_unicorn_open(rp_context *c)
     engine->always_flush = legacy && legacy[0] == '1';
     checked(c, uc_open(UC_ARCH_MIPS, UC_MODE_MIPS32 | UC_MODE_LITTLE_ENDIAN, &engine->uc), 0);
     checked(c, uc_ctl_set_cpu_model(engine->uc, UC_CPU_MIPS32_24KF), 0);
-    const uint64_t helpers[] = {0x89A0, 0x2888, 0x91BC, 0x94C4, 0x96AC, 0x1A80, 0x1A68, 0x2450, 0x2468, 0x7F00, 0x2648,
+    const uint64_t helpers[] = {0x89A0, 0x2888, 0x91BC, 0x92A4, 0x94C4, 0x96AC, 0x1A80, 0x1A68, 0x2450, 0x2468, 0x7F00, 0x2648,
                                0x1A90, 0x1AA8, 0x1AC8, 0x1AE4, 0x1DD0,
                                0x1DE8, 0x1E00, 0x1E20, 0x1E40,
                                0xD088, 0xD1B0, 0x12FBC, 0x127D8,
                                0x2110, 0x2128, 0x2140, 0x2160, 0x2180,
-                               0x267C, 0x2694, 0x26B4, 0x26D4, 0x2878, 0x2918, 0x98C4, 0x9C60, 0x9BE0, 0x9158, 0x85F4,
+                               0x267C, 0x2694, 0x26B4, 0x26D4, 0x2878, 0x2918, 0x9850, 0x98C4, 0x9C60, 0x9BE0, 0x9158, 0x85F4,
                                RP_GTE_RTPT_FLAGS_HELPER, RP_GTE_RTPT_NO_FLAGS_HELPER,
                                RP_GTE_NCLIP_HELPER, RP_GTE_AVSZ3_HELPER, RP_GTE_AVSZ4_HELPER,
                                RP_GTE_NCDS_HELPER};

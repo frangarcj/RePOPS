@@ -6,6 +6,8 @@
 #include "pops_gte.h"
 #include "pops_timer.h"
 #include "pops_emit.h"
+#include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* +0x7E60. CACHE/SYNC are host-coherent data operations in this diagnostic.
@@ -166,9 +168,17 @@ static void native_helper(rp_context *c)
         rp_pops_dma_control_write(c, r[4], r[5], r[6]);
         transfer(c, r[31]);
         return;
+    case 0x92A4:
+        rp_pops_dma_channel_write(c, r[4], r[5], r[6]);
+        transfer(c, r[31]);
+        return;
     case 0x94C4:
         rp_pops_prepare_exception(c, r[4]);
         r[2] = rp_u32(c, c->gp + 0x1B4);
+        transfer(c, r[31]);
+        return;
+    case 0x9850:
+        r[2] = rp_pops_irq_read(c, r[4]);
         transfer(c, r[31]);
         return;
     case 0x98C4:
@@ -484,6 +494,19 @@ static void native_helper(rp_context *c)
 void rp_pops_run_core(rp_context *c)
 {
     rp_function(c, 0x1A00, "pops.core_dispatch_entry");
+    /* Host diagnostic limit only: never change the guest cycle downcount or
+     * synthesize a ready event to extend the observed execution window. */
+    uint32_t limit = 500000;
+    const char *setting = getenv("REPOPS_RUN_STEPS");
+    if (setting && *setting) {
+        char *end;
+        errno = 0;
+        const unsigned long value = strtoul(setting, &end, 10);
+        if (errno || *end || !value || value > 10000000)
+            rp_block(c, "invalid_host_execution_step_limit", 0x1A00);
+        limit = (uint32_t)value;
+    }
+    rp_event(c, "execution_adapter", "host_dispatch_step_limit", 0, limit);
     memset(c->run_gpr, 0, sizeof(c->run_gpr));
     memset(c->run_fpr, 0, sizeof(c->run_fpr));
     c->run_gpr[28] = c->gp;
@@ -491,11 +514,14 @@ void rp_pops_run_core(rp_context *c)
     c->run_gpr[25] = rp_core_downcount(c);
     rp_unicorn_open(c);
     transfer(c, lookup_block(c, rp_u32(c, c->gp + 0x1A0)));
-    for (unsigned steps = 0; steps < 500000; ++steps) {
+    for (uint32_t steps = 0; steps < limit; ++steps) {
         if (generated_address(c, c->run_pc))
             rp_unicorn_run(c);
         else
             native_helper(c);
     }
+    rp_event(c, "diagnostic_state", "guest_cycles_at_host_limit", rp_core_guest_cycles(c), limit);
+    rp_event(c, "diagnostic_state", "display_at_host_limit",
+             rp_u32(c, RP_GPU_ADDRESS(c, frame_counter)), rp_u32(c, RP_GPU_ADDRESS(c, status)));
     rp_block(c, "generated_execution_diagnostic_budget", c->run_pc);
 }

@@ -4,6 +4,20 @@ Historical native runs retain `result/retained-trace-result.json` instead of
 their full trace once superseded. Keep the latest two traces and the GE-preview
 provenance source; decompilers and focused verification outputs are not pruned.
 
+## Current: extended execution passes direct IRQ and DMA entry points
+
+`out/direct-io.7ao5Jf/result/` passes the direct I/O entries +0x9850 and
++0x92A4 and reaches the selected 2,000,000-iteration host limit: 165,294,563
+generated-code observations, 820,180 transfers, frame counter 349 and
+`game_executed: false`. This is a longer observation window, not a measured
+game boot or proof that the final repeated BIOS calls make useful progress.
+
+The optional REPOPS_RUN_STEPS setting leaves the default at 500,000 and changes
+no guest clocks or generated words. The direct IRQ/DMA paths call C bodies
+already reconstructed; they are not counted again. Native build, event and
+Unicorn cache tests pass. See `diagnostic_execution_window.md`. The final BIOS
+loop needs inspection rather than blindly increasing the budget again.
+
 ## Current: textured rectangles pass and execution reaches the harness budget
 
 `out/gpu-rectangle.4dYayz/result/` emits 180 rectangle records after the mixed

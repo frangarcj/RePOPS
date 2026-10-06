@@ -26,6 +26,35 @@ uint32_t rp_pops_dma_read(rp_context *c, uint32_t address, uint32_t width)
     return value;
 }
 
+/* +0x9364: build descending links by writing memory upwards. The first
+ * entry is a terminator, not a pointer to address zero. Cache maintenance
+ * is an explicit adapter on coherent host backing, not emulated PSP cache. */
+uint32_t rp_pops_dma_clear_ordering_table(rp_context *c, uint32_t address,
+                                         uint32_t bytes, uint32_t control)
+{
+    rp_function(c, 0x9364, "pops.clear_ordering_table_DMA");
+    if (control != RP_DMA_OTC_CONTROL) return 1;
+    const uint32_t count = address < bytes ? address : bytes;
+    if (!count) return 1;
+    const uint32_t stride = sizeof(rp_ordering_table_link_layout);
+    if ((address | count) & (stride - 1))
+        rp_block(c, "OTC_unaligned_transfer_not_supported", address);
+    const uint32_t bottom = address - count;
+    uint32_t destination = RP_DMA_OTC_RAM_VIEW | (bottom & 0x1FFFFF);
+    if (count > 0x2000) {
+        rp_event(c, "host_adapter", "OTC_cache_maintenance_elided_on_coherent_backing",
+                 destination + stride, count);
+        destination |= UINT32_C(0x40000000);
+    }
+    rp_w32(c, RP_FIELD_ADDRESS(destination + stride, rp_ordering_table_link_layout, previous),
+           RP_DMA_OTC_TERMINATOR);
+    for (uint32_t offset = stride * 2; offset <= count; offset += stride)
+        rp_w32(c, RP_FIELD_ADDRESS(destination + offset, rp_ordering_table_link_layout, previous),
+               bottom + offset - stride);
+    rp_event(c, "milestone", "OTC_ordering_table_written", address, count);
+    return count;
+}
+
 /* +0x8BB8: postpone active channels matching the original mode mask. */
 uint32_t rp_pops_dma_delay_active(rp_context *c, uint16_t mask, uint32_t delay, uint32_t horizon)
 {
@@ -125,6 +154,8 @@ void rp_pops_dma_try_channel(rp_context *c, unsigned channel)
         moved = rp_pops_cd_dma_transfer(c, address & 0xFFFFFC, bytes, chcr);
     else if (callback == 0x12C74)
         moved = rp_pops_gpu_dma_transfer(c, address & 0xFFFFFC, bytes, chcr);
+    else if (callback == 0x9364)
+        moved = rp_pops_dma_clear_ordering_table(c, address & 0xFFFFFC, bytes, chcr);
     else
         rp_block(c, "DMA_transfer_callback_not_reconstructed", callback);
     if ((int32_t)moved <= 0) {

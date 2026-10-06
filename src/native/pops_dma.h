@@ -8,6 +8,11 @@ typedef struct {
     uint16_t transfer_mode, channel;
 } rp_dma_channel_layout;
 typedef struct { uint32_t address, block_control, channel_control, reserved; } rp_dma_registers_layout;
+typedef struct { uint32_t previous; } rp_ordering_table_link_layout;
+enum {
+    RP_DMA_OTC_CONTROL = 0x11000002, RP_DMA_OTC_TERMINATOR = 0x00FFFFFF,
+    RP_DMA_OTC_RAM_VIEW = 0x09800000
+};
 typedef struct {
     uint8_t earlier_state[0x1D8];
     uint32_t compiled_ram_pages;
@@ -27,12 +32,14 @@ typedef struct {
 void rp_pops_dma_try_channel(rp_context *, unsigned);
 uint32_t rp_pops_dma_delay_active(rp_context *, uint16_t mask, uint32_t delay, uint32_t horizon);
 uint32_t rp_pops_dma_read(rp_context *, uint32_t address, uint32_t width);
+uint32_t rp_pops_dma_clear_ordering_table(rp_context *, uint32_t address, uint32_t bytes, uint32_t control);
 void rp_pops_dma_channel_write(rp_context *, uint32_t, uint32_t, uint32_t);
 void rp_pops_dma_finish(rp_context *, uint32_t);
 uint32_t rp_pops_cd_dma_transfer(rp_context *, uint32_t, uint32_t, uint32_t);
 
 _Static_assert(sizeof(rp_dma_channel_layout) == 0x1C, "DMA channel state stride");
 _Static_assert(sizeof(rp_dma_registers_layout) == 0x10, "DMA register stride");
+_Static_assert(sizeof(rp_ordering_table_link_layout) == 4, "ordering table link stride");
 _Static_assert(offsetof(rp_core_dma_layout, channels) == 0x1E8, "DMA core state");
 _Static_assert(offsetof(rp_core_dma_layout, deferred_frame_debit) == 0x1E4, "DMA frame debit");
 _Static_assert(offsetof(rp_core_dma_layout, pending_channels) == 0x2AC, "DMA pending mask");

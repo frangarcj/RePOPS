@@ -3,6 +3,7 @@
 #include "../src/native/pops_dma.h"
 #include <assert.h>
 #include <stdlib.h>
+#include <string.h>
 
 static unsigned callbacks;
 uint32_t rp_pops_gpu_dma_transfer(rp_context *c, uint32_t a, uint32_t n, uint32_t f)
@@ -28,6 +29,51 @@ void rp_pops_graphics_event(rp_context *c, uint32_t callback)
 void rp_pops_initialize_core(rp_context *c) { (void)c; abort(); }
 void rp_pops_invalidate_ram_code(rp_context *c) { (void)c; abort(); }
 void rp_pops_prepare_exception(rp_context *c, uint32_t v) { (void)c; (void)v; abort(); }
+
+static void check_ordering_table_dma(rp_context *c)
+{
+    const uint32_t ram = RP_DMA_OTC_RAM_VIEW;
+    c->regions[0] = (rp_region){ram, 0x24000, malloc(0x24000)};
+    assert(c->regions[0].bytes);
+    memset(c->regions[0].bytes, 0xA5, c->regions[0].size);
+    assert(rp_pops_dma_clear_ordering_table(c, 0x100, 16, 0) == 1);
+    assert(rp_pops_dma_clear_ordering_table(c, 0, 16, RP_DMA_OTC_CONTROL) == 1);
+    assert(rp_u32(c, ram + 0x100) == 0xA5A5A5A5);
+    assert(rp_pops_dma_clear_ordering_table(c, 0x100, 16, RP_DMA_OTC_CONTROL) == 16);
+    assert(rp_u32(c, ram + 0xF0) == 0xA5A5A5A5);
+    assert(rp_u32(c, ram + 0xF4) == RP_DMA_OTC_TERMINATOR);
+    assert(rp_u32(c, ram + 0xF8) == 0xF4 && rp_u32(c, ram + 0xFC) == 0xF8);
+    assert(rp_u32(c, ram + 0x100) == 0xFC && rp_u32(c, ram + 0x104) == 0xA5A5A5A5);
+    assert(rp_pops_dma_clear_ordering_table(c, 8, 32, RP_DMA_OTC_CONTROL) == 8);
+    assert(rp_u32(c, ram) == 0xA5A5A5A5);
+    assert(rp_u32(c, ram + 4) == RP_DMA_OTC_TERMINATOR && rp_u32(c, ram + 8) == 4);
+    assert(rp_pops_dma_clear_ordering_table(c, 0x23000, 0x20004, RP_DMA_OTC_CONTROL) == 0x20004);
+    assert(rp_u32(c, ram + 0x3000) == RP_DMA_OTC_TERMINATOR);
+    assert(rp_u32(c, ram + 0x13000) == 0x12FFC);
+    assert(rp_u32(c, ram + 0x23000) == 0x22FFC);
+    assert(rp_u32(c, (ram | 0x40000000) + 0x23000) == 0x22FFC);
+
+    /* Exercise callback selection and actual completion, not a forced CHCR. */
+    rp_w32(c, RP_DMA_CHANNEL(c, 6, event.prev), 0);
+    rp_cd_w16(c, RP_DMA_CHANNEL(c, 6, channel), 6);
+    rp_w32(c, RP_DMA_CHANNEL(c, 6, transfer_callback), 0x9364);
+    rp_w32(c, RP_DMA_ADDRESS(c, priority), 0x08000000);
+    rp_w32(c, RP_DMA_ADDRESS(c, interrupt_control), 0);
+    rp_cd_w16(c, RP_DMA_ADDRESS(c, pending_channels), 0);
+    rp_w32(c, RP_DMA_REGISTER(c, 6, address), 0x120);
+    rp_w32(c, RP_DMA_REGISTER(c, 6, block_control), 4);
+    rp_w32(c, RP_DMA_REGISTER(c, 6, channel_control), RP_DMA_OTC_CONTROL);
+    rp_core_set_downcount(c, 100);
+    rp_pops_dma_try_channel(c, 6);
+    assert(rp_u32(c, ram + 0x114) == RP_DMA_OTC_TERMINATOR);
+    assert(rp_u32(c, ram + 0x120) == 0x11C);
+    assert(rp_u32(c, RP_DMA_REGISTER(c, 6, address)) == 0x110);
+    assert(!(rp_u32(c, RP_DMA_REGISTER(c, 6, channel_control)) & 0x01000000));
+    assert(!rp_u32(c, RP_DMA_REGISTER(c, 6, block_control)));
+    assert(rp_core_downcount(c) == 89);
+    free(c->regions[0].bytes);
+    c->regions[0] = (rp_region){0};
+}
 
 int main(void)
 {
@@ -147,7 +193,8 @@ int main(void)
     }
     assert(rp_pops_dma_read(c, 0x1F8010A9, 4) == 0xFE);
     assert(rp_pops_dma_read(c, 0x1F8010AA, 5) == 0x9182);
+    check_ordering_table_dma(c);
     fclose(c->trace); free(c);
-    puts("Guest events/timers/DMA: typed register reads, widths, clocks and status effects passed.");
+    puts("Events/timers/DMA: register reads, OTC links, aliases, completion and cycles passed.");
     return 0;
 }

@@ -1,5 +1,19 @@
 # RePops progress
 
+## Current: ordering-table DMA completes and reaches a CPU emitter category
+
+`out/otc-dma.RrgP2k/result/` passes callback +0x9364 and completes DMA channel
+6, then stops in emitter category 8 (`RP_CAT_LOAD_COP_MEMORY`). It records
+39,470,213 generated-cache observations, 40,357 entry transfers and
+`game_executed: false`.
+
+The new callback writes the terminator and backward links through a named
+four-byte layout, preserving the original address/count clamp. Focused checks
+cover the control gate, cached/uncached backing and the existing channel's
+address update, cycle debit and completion. PSP cache maintenance remains an
+explicit coherent-host adapter; this is a partial original function entry.
+See `dma_ordering_table.md`.
+
 ## Current: ME envelope phases reach the ordering-table DMA callback
 
 `out/me-phases.uYbFq9/result/` passes the threshold transitions at +0x14C0

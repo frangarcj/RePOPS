@@ -1,4 +1,5 @@
 #include "pops_cdrom.h"
+#include "pops_dma.h"
 #include <string.h>
 #include <math.h>
 
@@ -319,6 +320,61 @@ static void sector_event(rp_context *c)
     rp_pops_schedule_event(c, RP_CD_ADDRESS(c, sector_event), delay);
     if (!CD8(irq_flags) && (int8_t)CD8(deferred_command) >= 0 && !CD32(primary.event.prev))
         command(c, CD8(deferred_command));
+}
+
+/* +0xCE18: CD FIFO to RAM. VFPU copy/clear instructions express memory
+ * effects here; cache-maintenance instructions are host-coherent adapters. */
+uint32_t rp_pops_cd_dma_transfer(rp_context *c, uint32_t address, uint32_t length, uint32_t control)
+{
+    rp_function(c, 0xCE18, "pops.CD_DMA_to_RAM");
+    if (!(control & 0x10000000)) return length;
+    const uint32_t offset = address & 0x1FFFFF;
+    if ((offset & 3) || (length & 3) || length > 0x200000 - offset)
+        rp_block(c, "CD_DMA_RAM_span_not_reconstructed", address);
+    const uint32_t destination = UINT32_C(0x09800000) + offset;
+    const uint32_t cursor = CD16(data_cursor), limit = CD16(data_limit);
+    const unsigned selected = CD8(selected_buffer);
+    if (selected > 1 || cursor > limit)
+        rp_block(c, "CD_DMA_FIFO_state_not_reconstructed", 0xCE30);
+    const uint32_t requested_end = cursor + length;
+    if (requested_end > sizeof(rp_cd_sector_header_layout)) {
+        const uint32_t page_end = (destination | 0xFFFF) + 1;
+        const uint32_t pages = rp_u32(c, RP_DMA_ADDRESS(c, compiled_ram_pages)) >> (offset >> 16);
+        const uint32_t begin = pages & 1 ? destination : page_end;
+        uint32_t end = destination + length;
+        if (end > page_end && !(pages & 2)) end = page_end;
+        if (end > begin) {
+            const uint32_t lookup = begin + 0x400000;
+            const uint32_t bytes = end - begin;
+            uint8_t *target = rp_memory(c, lookup, bytes);
+            if (((lookup ^ (lookup + bytes)) & ~UINT32_C(63)) == 0) {
+                memset(target, 0, bytes);
+            } else {
+                if (!c->vfpu_zero_ready)
+                    rp_block(c, "CD_DMA_cache_vector_not_initialized", 0xCEBC);
+                for (uint32_t i = 0; i < bytes; i += 4)
+                    memcpy(target + i, &c->vfpu_reset_rows[3][((lookup + i) >> 2) & 3], 4);
+            }
+            rp_event(c, "milestone", "CD_DMA_invalidated_RAM_entries", lookup, bytes);
+        }
+    }
+    uint32_t end = requested_end;
+    if (end >= limit) {
+        end = limit;
+        SET8(status_index, CD8(status_index) & ~0x40);
+        SET8(data_request, CD8(data_request) & ~0x80);
+    }
+    const uint32_t copied = end - cursor;
+    if (copied & 3) rp_block(c, "CD_DMA_partial_word_tail_not_reconstructed", 0xCF90);
+    SET16(data_cursor, end);
+    uint8_t *output = rp_memory(c, destination, length);
+    if (copied) memcpy(output, rp_memory(c, CD32(sector_buffers[selected]) + cursor, copied), copied);
+    if (copied < length) {
+        const uint8_t last = copied ? output[copied - 1] : rp_cd_u8(c, destination - 1);
+        memset(output + copied, last, length - copied);
+    }
+    rp_event(c, "milestone", "CD_DMA_bytes_copied", destination, copied);
+    return length;
 }
 
 void rp_pops_cd_event(rp_context *c, uint32_t event, uint32_t callback)

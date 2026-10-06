@@ -1,5 +1,19 @@
 # RePops progress
 
+## Current: CD DMA completes and reaches Pause
+
+`out/cd-dma.PLQDH0/result/` transfers 2048 bytes from the delivered CD sector
+to RAM at 0x09810000, completes DMA channel 3 and then reaches command 0x09
+(Pause). It records 38,445,828 generated-cache observations, 13,410 transfers
+and `game_executed: false`. This is real input data moving through reconstructed
+FIFO/DMA code, not a substituted ready response.
+
+`pops_dma.h` names the channel and register layouts; `pops_dma.c` implements
+the reached selection, cycle-accounting and completion paths. CD DMA handles
+compiled-RAM lookup invalidation and last-byte underrun fill. Focused
+CD/DMA/event checks pass with sanitizers. Other device callbacks, queued
+arbitration and GPU cancellation still stop explicitly. See `cd_dma.md`.
+
 ## Current: cache reuse reaches CD DMA control
 
 `out/cd-reuse.5qcfhr89/result/` completes in 56.5 seconds, delivers the real

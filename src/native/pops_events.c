@@ -1,5 +1,6 @@
 #include "runtime.h"
 #include "pops_cdrom.h"
+#include "pops_dma.h"
 
 /* +0x8AA4: width selects one of three stores or a no-op return. */
 void rp_pops_shadow_write(rp_context *c, uint32_t address, uint32_t value, uint32_t width)
@@ -60,24 +61,18 @@ static uint32_t rotate_right(uint32_t value, unsigned shift)
     return (value >> shift) | (value << ((32 - shift) & 31));
 }
 
-/* +0x91BC. Newly enabled channels enter +0x8E4C, whose idle prefix is
- * reconstructed here; an actual DMA request remains a separate boundary. */
+/* +0x91BC. Newly enabled channels enter the reconstructed +0x8E4C path. */
 void rp_pops_dma_control_write(rp_context *c, uint32_t address, uint32_t value, uint32_t width)
 {
     rp_function(c, 0x91BC, "pops.write_DMA_control");
-    const uint32_t slot = c->gp + 0x20F0 + (address & 4);
+    const uint32_t slot = RP_DMA_ADDRESS(c, priority) + (address & 4);
     const uint32_t old = rp_u32(c, slot);
     if (!(address & 4)) {
         uint32_t newly_set = value & ~old;
         rp_w32(c, slot, value);
         for (unsigned channel = 0; newly_set; ++channel, newly_set >>= 4) {
             if (!(newly_set & 8)) continue;
-            rp_function(c, 0x8E4C, "pops.try_DMA_channel_idle_prefix");
-            if (rp_u32(c, c->gp + 0x1EC + channel * 28)) continue;
-            const uint32_t chcr = rp_u32(c, c->gp + 0x2088 + channel * 16);
-            if (!(chcr & 0x01000000)) continue;
-            rp_event(c, "DMA_boundary", "newly_enabled_active_channel", channel, chcr);
-            rp_block(c, "active_DMA_channel_not_reconstructed", 0x8E4C);
+            rp_pops_dma_try_channel(c, channel);
         }
         return;
     }
@@ -276,7 +271,9 @@ uint32_t rp_pops_dispatch_events(rp_context *c)
         rp_w32(c, previous, next);
         rp_w32(c, event + 4, 0);
         rp_event(c, "milestone", "guest_event_due", callback, deadline);
-        if (callback == 0xC268 || callback == 0xCE00 || callback == 0xC5EC)
+        if (callback == 0x8B1C)
+            rp_pops_dma_finish(c, event);
+        else if (callback == 0xC268 || callback == 0xCE00 || callback == 0xC5EC)
             rp_pops_cd_event(c, event, callback);
         else
             rp_pops_graphics_event(c, callback);

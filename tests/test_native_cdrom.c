@@ -1,4 +1,5 @@
 #include "../src/native/pops_cdrom.h"
+#include "../src/native/pops_dma.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -227,9 +228,56 @@ int main(void)
     }
     assert(strcmp(c->stop_kind, "cd_block_read_or_decode_failed") == 0);
     assert(rp_u32(c, RP_FIELD_ADDRESS(cache, rp_cd_cache_node_layout, first_sector)) == 0x80000000);
+
+    /* Manual CD DMA consumes real FIFO bytes, clears stale code entries and
+     * raises the completion IRQ only after copying and charging cycles. */
+    free(c->regions[3].bytes);
+    c->regions[3] = (rp_region){0x09800000, 0x600000, calloc(1, 0x600000)};
+    assert(c->regions[3].bytes);
+    memset(c->scratchpad, 0, sizeof(c->scratchpad));
+    rp_w32(c, head, head); rp_w32(c, RP_CORE_CLOCK_ADDRESS(c, event_head_prev), head);
+    rp_w32(c, RP_CORE_CLOCK_ADDRESS(c, event_deadline), 1000000);
+    rp_core_set_downcount(c, 1000000);
+    if (setjmp(c->stop)) { fprintf(stderr, "DMA stop: %s at %x\n", c->stop_kind, c->stop_address); abort(); }
+    const uint32_t cd_source = RP_SHARED_ADDRESS(sample_ram) + 0x6000;
+    memcpy(rp_memory(c, cd_source, RP_CD_SECTOR_BYTES), raw, RP_CD_SECTOR_BYTES);
+    rp_w32(c, RP_CD_ADDRESS(c, sector_buffers[0]), cd_source);
+    rp_cd_w16(c, RP_CD_ADDRESS(c, data_cursor), 24);
+    rp_cd_w16(c, RP_CD_ADDRESS(c, data_limit), 2072);
+    rp_w8(c, RP_CD_ADDRESS(c, status_index), 0x40);
+    rp_w8(c, RP_CD_ADDRESS(c, data_request), 0x80);
+    rp_w32(c, RP_DMA_CHANNEL(c, 3, event.callback), 0x8B1C);
+    rp_w32(c, RP_DMA_CHANNEL(c, 3, transfer_callback), 0xCE18);
+    rp_cd_w16(c, RP_DMA_CHANNEL(c, 3, channel), 3);
+    rp_w32(c, RP_DMA_REGISTER(c, 3, address), 0x1200);
+    rp_w32(c, RP_DMA_REGISTER(c, 3, block_control), 512);
+    rp_w32(c, RP_DMA_ADDRESS(c, interrupt_control), 0x00880000);
+    rp_w32(c, RP_DMA_ADDRESS(c, compiled_ram_pages), 1);
+    memset(rp_memory(c, 0x09C01200, 2048), 0xA5, 2048);
+    c->vfpu_zero_ready = 1;
+    rp_pops_dma_channel_write(c, 0x1F8010B8, 0x11000000, 2);
+    assert(rp_cd_u16(c, RP_CD_ADDRESS(c, data_cursor)) == 24); /* DPCR disabled. */
+    rp_pops_dma_control_write(c, 0x1F8010F0, 0x8000, 2);
+    assert(memcmp(rp_memory(c, 0x09801200, 2048), raw + 24, 2048) == 0);
+    for (unsigned i = 0; i < 2048; i += 4) assert(rp_u32(c, 0x09C01200 + i) == 0);
+    assert(rp_u32(c, RP_DMA_REGISTER(c, 3, address)) == 0x1A00);
+    assert(rp_u32(c, RP_DMA_REGISTER(c, 3, block_control)) == 0);
+    assert(!(rp_u32(c, RP_DMA_REGISTER(c, 3, channel_control)) & 0x01000000));
+    assert(rp_u32(c, RP_DMA_ADDRESS(c, interrupt_control)) == 0x88880000);
+    assert(rp_u32(c, RP_DEVICE_ADDRESS(c, irq_status)) == 8);
+    assert(rp_core_downcount(c) == 1000000 - 16387);
+    assert(rp_cd_u16(c, RP_CD_ADDRESS(c, data_cursor)) == 2072);
+    assert(!(rp_cd_u8(c, RP_CD_ADDRESS(c, status_index)) & 0x40));
+    assert(!(rp_cd_u8(c, RP_CD_ADDRESS(c, data_request)) & 0x80));
+    /* Overrun uses the last copied byte, not an invented all-zero padding. */
+    rp_w32(c, RP_DMA_ADDRESS(c, compiled_ram_pages), 0);
+    rp_cd_w16(c, RP_CD_ADDRESS(c, data_cursor), 24);
+    rp_cd_w16(c, RP_CD_ADDRESS(c, data_limit), 28);
+    assert(rp_pops_cd_dma_transfer(c, 0x2400, 12, 0x11000000) == 12);
+    for (unsigned i = 0; i < 12; ++i) assert(rp_cd_u8(c, 0x09802400 + i) == 0x5A);
     fclose(c->disc); fclose(c->trace);
     for (unsigned i = 0; i < RP_REGION_COUNT; ++i) free(c->regions[i].bytes);
     free(c);
-    puts("CD: command/IRQ scheduling, DEFLATE block, cache, sector FIFO and truncated-input rejection passed.");
+    puts("CD: block/cache/FIFO, rejected truncation and DMA data/cache/debit/completion IRQ passed.");
     return 0;
 }

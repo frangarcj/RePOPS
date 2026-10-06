@@ -14,6 +14,18 @@
     "alternate_gp": {"address": "0x09FF8000", "cleared_prefix_bytes": "0xB04", "ownership": "distinct_context_subsystem_unresolved", "evidence": ["original:+0x1BF40..+0x1BF48", "original:+0x1C254..+0x1C348", "original:+0x1C5FC..+0x1C600"]}
   },
   "types": {
+    "DmaChannelState": {
+      "size": "0x1C", "confidence": "layout_confirmed_CD_path_reconstructed_other_callbacks_pending",
+      "fields": [["0x00", "event", "PopsEvent"], ["0x10", "transfer_callback", "guest_code_address32"], ["0x14", "completion_debit", "u32"], ["0x18", "transfer_mode", "u16"], ["0x1A", "channel", "u16"]],
+      "instances": [{"base": "core", "offset": "0x1E8", "count": 7, "stride": "0x1C"}],
+      "evidence": ["original:+0x8B1C", "original:+0x8E4C", "original:+0x1A1F0", "src/native/pops_dma.h"]
+    },
+    "DmaChannelRegisters": {
+      "size": "0x10", "confidence": "register_layout_confirmed",
+      "fields": [["0x00", "address", "u32"], ["0x04", "block_control", "u32"], ["0x08", "channel_control", "u32"], ["0x0C", "reserved", "u32"]],
+      "instances": [{"base": "core", "offset": "0x2080", "count": 7, "stride": "0x10"}],
+      "evidence": ["original:+0x92A4", "original:+0x8E4C", "src/native/pops_dma.h"]
+    },
     "CdMode2SectorHeader": {
       "size": "0x18", "confidence": "sector_event_accesses_confirmed",
       "fields": [["0x00", "sync", "bytes[12]"], ["0x0C", "msf", "u8[3]"], ["0x0F", "mode", "u8"], ["0x10", "file", "u8"], ["0x11", "channel", "u8"], ["0x12", "submode", "u8"], ["0x13", "coding", "u8"], ["0x14", "repeated_subheader", "bytes[4]"]],

@@ -215,6 +215,68 @@ static void check_cpu_upload(rp_context *c)
     dma_fixture = false;
 }
 
+static void check_mixed_upload(rp_context *c)
+{
+    c->regions[3] = (rp_region){0x04000000, 0x100000, malloc(0x100000)};
+    assert(c->regions[3].bytes);
+    if (setjmp(c->stop)) {
+        fprintf(stderr, "Unexpected mixed-upload boundary: %s\n", c->stop_kind);
+        abort();
+    }
+    const uint32_t out = 0x49A00800, source = 0x09800600;
+    for (unsigned test = 0; test < 3; ++test) {
+        reset_status(c);
+        memset(c->regions[3].bytes, 0xA5, c->regions[3].size);
+        rp_w32(c, RP_GPU_ADDRESS(c, list_cursor), out);
+        for (unsigned i = 0; i < 32; ++i)
+            rp_w8(c, RP_GPU_ADDRESS(c, texture_cache[i].group_offset),
+                      (uint8_t)(i % 16 == 15 ? 3 : (i % 16) % 3));
+        const unsigned width = test == 0 ? 16 : test == 1 ? 50 : 3;
+        const unsigned height = test == 0 ? 1 : test == 1 ? 4 : 3;
+        const unsigned x = test == 2 ? 1023 : 10, y = test == 2 ? 511 : 20;
+        const unsigned prefix_words = test == 2 ? 0 : 2;
+        const unsigned words = (width * height + 1) / 2;
+        if (test == 2) rp_w32(c, RP_GPU_ADDRESS(c, status), 0x800);
+        dma_fixture = true;
+        scheduled = 0;
+        rp_pops_gpu_write(c, 0x1810, 0xA0000000);
+        rp_pops_gpu_write(c, 0x1810, x | (y << 16));
+        rp_pops_gpu_write(c, 0x1810, width | (height << 16));
+        for (unsigned i = 0; i < words; ++i) {
+            const uint32_t pair = (0x100 + i * 2) | ((0x101 + i * 2) << 16);
+            if (i < prefix_words) rp_pops_gpu_write(c, 0x1810, pair);
+            else rp_w32(c, source + (i - prefix_words) * 4, pair);
+        }
+        assert(rp_cd_u8(c, RP_GPU_ADDRESS(c, packet_word_count)) == prefix_words);
+        const uint32_t bytes = (words - prefix_words) * 4;
+        assert(rp_pops_gpu_dma_transfer(c, 0x600, bytes, 0x01000201) == bytes);
+        assert(scheduled_delay == bytes / 4);
+        assert(!rp_cd_u8(c, RP_GPU_ADDRESS(c, command_mode)));
+        assert(!rp_cd_u8(c, RP_GPU_ADDRESS(c, packet_word_count)));
+        if (test == 0) {
+            /* Small prefix + block is one GE upload from the port buffer. */
+            assert(rp_u32(c, out) == 0xB2013500);
+            assert(rp_u32(c, RP_GPU_ADDRESS(c, packet_words[0])) == 0x01010100);
+            assert(rp_u32(c, RP_GPU_ADDRESS(c, packet_words[7])) == 0x010F010E);
+        } else {
+            /* Large partial multi-row and mask/wrap use original CPU stores,
+             * including low/high ordering across rows and odd tail padding. */
+            assert(rp_u32(c, out) == 0x0F000000);
+            assert(rp_u32(c, RP_GPU_ADDRESS(c, list_cursor)) == out + 4);
+            const uint16_t mask = test == 2 ? 0x8000 : 0;
+            for (unsigned pixel = 0; pixel < width * height; ++pixel)
+                assert(rp_cd_u16(c, rp_gpu_vram_pixel(x + pixel % width, y + pixel / width)) ==
+                       ((0x100 + pixel) | mask));
+            assert(rp_cd_u16(c, RP_GPU_ADDRESS(c, transfer_cursor[1])) == y + height);
+            assert(rp_cd_u16(c, rp_gpu_vram_pixel(x + width, y + height - 1)) == 0xA5A5);
+            assert(rp_cd_u16(c, RP_GPU_ADDRESS(c, upload_end[0])) == x + width);
+        }
+    }
+    dma_fixture = false;
+    free(c->regions[3].bytes);
+    c->regions[3] = (rp_region){0};
+}
+
 int main(void)
 {
     rp_context *c = calloc(1, sizeof(*c));
@@ -516,8 +578,9 @@ int main(void)
 
     check_vram_copy(c);
     check_cpu_upload(c);
+    check_mixed_upload(c);
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[1].bytes);
     free(c->regions[2].bytes); free(c);
-    puts("GPU: state/fill/DMA/polygons/copy and CPU upload header, rows, payload and continuation passed; rendering pending.");
+    puts("GPU: GE uploads, mixed port/DMA prefixes, CPU pixel order, mask, wrap and odd tail passed; rendering pending.");
     return 0;
 }

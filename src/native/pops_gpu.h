@@ -47,7 +47,10 @@ typedef struct {
     uint32_t list_cursor, status;
     uint32_t status_poll_previous_cycles, status_poll_last_cycles;
     union {
-        struct { uint16_t transfer_origin[2], transfer_size[2]; };
+        struct {
+            uint16_t transfer_origin[2];
+            union { uint16_t transfer_size[2], upload_end[2]; };
+        };
         struct { uint16_t copy_source[2], copy_destination[2]; };
     };
     uint16_t transfer_cursor[2];
@@ -75,6 +78,8 @@ void rp_pops_gpu_submit_pending_list(rp_context *);
 /* Existing headless adapter for bounded state lists, not a POPSMAN body. */
 uint32_t rp_ge_capture_state_list(rp_context *, uint32_t address, int module_relative);
 enum { RP_GPU_DISPLAY_TRANSITION_ADDRESS = 0x49CBD4 };
+static inline uint32_t rp_gpu_vram_pixel(uint32_t x, uint32_t y)
+{ return UINT32_C(0x44000000) | ((y & 511) << 11) | ((x & 1023) << 1); }
 
 _Static_assert(offsetof(rp_core_gpu_layout, data_read_latch) == 0x35BC, "GPU data latch");
 _Static_assert(sizeof(rp_gpu_texture_cache_entry) == 8, "GPU texture cache stride");
@@ -83,6 +88,7 @@ _Static_assert(sizeof(rp_gpu_copy_packet_layout) == 16, "GPU copy packet bytes")
 _Static_assert(sizeof(rp_gpu_upload_packet_layout) == 12, "GPU upload header bytes");
 _Static_assert(offsetof(rp_core_gpu_layout, copy_cost_shift) == 0x718, "GPU copy cycle shift");
 _Static_assert(offsetof(rp_core_gpu_layout, copy_destination) == 0x3640, "GPU copy destination alias");
+_Static_assert(offsetof(rp_core_gpu_layout, upload_end) == 0x3640, "GPU CPU-upload end alias");
 _Static_assert(sizeof(rp_gpu_flat_packet_layout) == 20, "flat quad packet");
 _Static_assert(sizeof(rp_gpu_flat_ge_layout) == 36, "flat GE body");
 _Static_assert(offsetof(rp_gpu_flat_ge_layout, vertices[1].x) == 18, "flat second vertex");

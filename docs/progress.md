@@ -1,5 +1,17 @@
 # RePops progress
 
+## Current: mixed pixel uploads reach a textured rectangle
+
+`out/mixed-upload.pgEy9j/result/` passes the pending port/DMA combination and
+the original CPU pixel-store path. It stops on GP0 0x64808080 in +0x133D0:
+59,410,773 generated-code observations, 87,379 transfers, `game_executed: false`.
+
+The new paths preserve small-prefix concatenation versus large-prefix drain,
+the transfer-end alias, pixel-pair row crossing, mask OR, VRAM wrap and odd
+padding. Three focused fixtures inspect emitted words and actual CPU-written
+VRAM backing; GPU/display tests and native build pass. See `gpu_cpu_upload.md`.
+The next work is textured-rectangle GE emission, not replacing POPS's GPU.
+
 ## Current: CPU uploads and idle refresh reach mixed port/DMA buffering
 
 `out/upload-port-sync.ASFVDl/result/` passes GP0 A0h data reception, ordinary

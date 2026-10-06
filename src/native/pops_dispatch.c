@@ -523,5 +523,16 @@ void rp_pops_run_core(rp_context *c)
     rp_event(c, "diagnostic_state", "guest_cycles_at_host_limit", rp_core_guest_cycles(c), limit);
     rp_event(c, "diagnostic_state", "display_at_host_limit",
              rp_u32(c, RP_GPU_ADDRESS(c, frame_counter)), rp_u32(c, RP_GPU_ADDRESS(c, status)));
+    rp_event(c, "diagnostic_state", "CD_seek_deadline_and_sector",
+             rp_u32(c, RP_CD_ADDRESS(c, seek_deadline)), rp_u32(c, RP_CD_ADDRESS(c, current_sector)));
+    rp_event(c, "diagnostic_state", "CD_secondary_deadline_and_link",
+             rp_u32(c, RP_CD_ADDRESS(c, secondary.event.deadline_cycles)),
+             rp_u32(c, RP_CD_ADDRESS(c, secondary.event.prev)));
+    rp_event(c, "diagnostic_state", "CD_irq_and_pending_response",
+             rp_cd_u8(c, RP_CD_ADDRESS(c, irq_flags)), rp_cd_u8(c, RP_CD_ADDRESS(c, secondary.pending_irq)));
+    rp_event(c, "diagnostic_state", "CPU_interrupt_status_and_cause",
+             rp_u32(c, RP_DEVICE_ADDRESS(c, cpu_status)), rp_u32(c, RP_DEVICE_ADDRESS(c, cpu_cause)));
+    rp_event(c, "diagnostic_state", "IRQ_status_and_mask",
+             rp_u32(c, RP_DEVICE_ADDRESS(c, irq_status)), rp_u32(c, RP_DEVICE_ADDRESS(c, irq_mask)));
     rp_block(c, "generated_execution_diagnostic_budget", c->run_pc);
 }

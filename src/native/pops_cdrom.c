@@ -57,6 +57,7 @@ uint32_t rp_pops_cd_seek_cycles(rp_context *c, uint32_t sector)
     cost += (128 - (random & 127)) * 32;
     if (sector == rp_u32(c, RP_DEVICE_ADDRESS(c, cd_slow_seek_sector))) cost *= 24;
     SET8(location_pending, 0);
+    rp_event(c, "cd_seek", "calculated_guest_delay", sector, CD8(saved_flag) ? cost : 1);
     return CD8(saved_flag) ? cost : 1;
 }
 

@@ -4,6 +4,21 @@ Historical native runs retain `result/retained-trace-result.json` instead of
 their full trace once superseded. Keep the latest two traces and the GE-preview
 provenance source; decompilers and focused verification outputs are not pruned.
 
+## Current: BIOS wait has a future CD completion queued
+
+`out/cd-wait.4NdwzQ/result/` reaches the 2,000,000-dispatch host limit at
+164,943,156 generated-code observations and 820,186 transfers. The CD has a
+pending secondary response (code 2), still linked for cycle 210,687,324;
+the observed guest clock is 195,928,620. This explains the terminal BIOS event
+polling without demonstrating a lost interrupt. No deadline was accelerated.
+See `bios_cd_wait.md`. `game_executed` remains false and no GE rendering is added.
+
+The host timer/streaming changes are committed as `f65b503`; generated-cache
+checks pass in both timer modes and the runner's three focused tests pass.
+See `diagnostic_speed.md` for microbenchmark scope, not a full-emulator ratio.
+Concurrent changes to main/runtime and the emitter were left untouched when
+the user requested that this work increment be finished.
+
 ## Current: extended execution passes direct IRQ and DMA entry points
 
 `out/direct-io.7ao5Jf/result/` passes the direct I/O entries +0x9850 and

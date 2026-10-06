@@ -75,3 +75,12 @@ Check `completed` and `parameter_storage` in the report rather than assuming
 success from headless's exit code. The script refuses an existing export path.
 Type/prototype improvements do not increase the count of complete original
 function bodies in `data/function_progress.csv`; runtime behavior is unchanged.
+
+## Optional implicit GP view
+
+Passing `implicit-core` as the second script argument produces an additional
+scoped analysis view in which core fields are named too. It represents GP as
+an implicit register input and disables GP's global-spacebase interpretation
+only for that decompiler instance. Use read-only processing for this mode;
+see `implicit_gp_context.md`. Its extra displayed parameter is not part of the
+original explicit call ABI or evidence of a new source-level function argument.

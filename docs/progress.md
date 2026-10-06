@@ -27,6 +27,15 @@ inference. All four exports completed with expected a0/a1 storage; unknown
 calling-convention warnings and unresolved GP globals are retained.
 See `typed_event_contracts.md`. No runtime features or offset refactor were added.
 
+The optional `implicit-core` export now also resolves those GP labels to
+`core->event_deadline`, `core->event_downcount` and the sentinel links. The
+context is a custom-storage analysis parameter in gp:4, not a new ABI argument.
+A decompiler-local CompilerSpec view removes only GP's spacebase/global rule;
+the installed extension and existing project are unchanged. All four exports
+completed and propagate core through the timer calls. See `implicit_gp_context.md`
+and `out/ghidra-gp-view.uBbqaV/contracts/`; read-only processing discarded the
+temporary prototype changes. Native execution and coverage counts are unchanged.
+
 The alternate initializer +0x1C254 uses incoming GP despite the raw decompiler
 displaying 0x10000. Its caller sets GP=0x09FF8000. A 0xB04-byte cleared prefix,
 distinct list links and a nibble-mask table are now documented without assigning

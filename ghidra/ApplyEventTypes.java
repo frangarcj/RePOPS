@@ -4,18 +4,55 @@
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
+import ghidra.app.plugin.processors.sleigh.SleighLanguage;
 import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.data.*;
+import ghidra.program.model.lang.BasicCompilerSpec;
+import ghidra.program.model.lang.CompilerSpec;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Parameter;
 import ghidra.program.model.listing.ParameterImpl;
+import ghidra.program.model.listing.Program;
+import ghidra.program.model.pcode.XmlEncode;
 import ghidra.program.model.symbol.SourceType;
 import com.google.gson.GsonBuilder;
+import java.io.ByteArrayInputStream;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.regex.Pattern;
 
 public class ApplyEventTypes extends GhidraScript {
+    private boolean implicitCore;
+
+    private Program contextView(Path out) throws Exception {
+        if (!implicitCore) return currentProgram;
+        XmlEncode xml = new XmlEncode(false);
+        CompilerSpec original = currentProgram.getCompilerSpec();
+        original.encode(xml);
+        String source = xml.toString();
+        Pattern base = Pattern.compile("<spacebase\\b[^>]*\\bname=\"gp\"[^>]*/>");
+        Pattern range = Pattern.compile("<range\\b[^>]*\\bspace=\"gp\"[^>]*/>");
+        if (base.matcher(source).results().count() != 1 || range.matcher(source).results().count() != 1)
+            throw new IllegalStateException("Expected exactly one Allegrex GP spacebase and global range");
+        String modified = range.matcher(base.matcher(source).replaceFirst("")).replaceFirst("");
+        BasicCompilerSpec view = new BasicCompilerSpec(original.getCompilerSpecDescription(),
+                (SleighLanguage)currentProgram.getLanguage(),
+                new ByteArrayInputStream(modified.getBytes(StandardCharsets.UTF_8)));
+        Files.writeString(out.resolve("source_compiler.cspec"), source);
+        Files.writeString(out.resolve("context_view.cspec"), modified);
+        /* The decompiler sees a local compiler view. Neither ProgramDB's
+         * compiler specification nor the installed extension is replaced. */
+        return (Program)Proxy.newProxyInstance(Program.class.getClassLoader(),
+                new Class<?>[]{Program.class}, (proxy, method, values) -> {
+                    if (method.getName().equals("getCompilerSpec")) return view;
+                    try { return method.invoke(currentProgram, values); }
+                    catch (InvocationTargetException failure) { throw failure.getCause(); }
+                });
+    }
     private DataType pointerTo(String name) {
         DataType type = currentProgram.getDataTypeManager().getDataType("/RePops/Recovered/" + name);
         if (type == null) throw new IllegalStateException("Run ImportStateLayouts first: " + name);
@@ -37,20 +74,34 @@ public class ApplyEventTypes extends GhidraScript {
             parameters[i] = new ParameterImpl(paramNames[i], paramTypes[i], currentProgram);
         f.replaceParameters(Function.FunctionUpdateType.DYNAMIC_STORAGE_ALL_PARAMS,
                 true, SourceType.USER_DEFINED, parameters);
+        if (implicitCore) {
+            List<Parameter> explicit = new ArrayList<>();
+            for (int i = 0; i < paramNames.length; ++i)
+                explicit.add(new ParameterImpl(paramNames[i], paramTypes[i],
+                        currentProgram.getRegister("a" + i), currentProgram));
+            explicit.add(new ParameterImpl("core", pointerTo("CoreStatePartial"),
+                    currentProgram.getRegister("gp"), currentProgram));
+            f.replaceParameters(explicit, Function.FunctionUpdateType.CUSTOM_STORAGE,
+                    true, SourceType.USER_DEFINED);
+        }
         f.setComment("RePops: signature and bounded body checked against the pinned Allegrex listing. " +
             "Pointer arguments model 32-bit guest addresses, not host C pointers. " +
-            "GP-relative globals remain unresolved between runtime scratchpad and module-offset storage.");
+            (implicitCore ? "The core parameter is an analysis representation of the implicit GP register, not a new ABI argument." :
+            "GP-relative globals remain unresolved between runtime scratchpad and module-offset storage."));
         return f;
     }
 
     public void run() throws Exception {
         String[] args = getScriptArgs();
-        if (args.length != 1 ||
+        if (args.length < 1 || args.length > 2 ||
             !"6a4aea3f731336916db97194c1a27983c18297c2dfcb1a1a328fd4ff8b09c8e0"
                 .equals(currentProgram.getExecutableSHA256()) ||
             currentProgram.getImageBase().getOffset() != 0 ||
             !"Allegrex:LE:32:default".equals(currentProgram.getLanguageID().getIdAsString()))
             throw new IllegalArgumentException("Expected pinned base-zero Allegrex program and new output directory");
+        if (args.length == 2 && !args[1].equals("implicit-core"))
+            throw new IllegalArgumentException("Unknown mode: " + args[1]);
+        implicitCore = args.length == 2;
         Path out = Path.of(args[0]);
         if (Files.exists(out)) throw new IllegalArgumentException("Refusing existing export directory");
         DataType event = pointerTo("PopsEvent");
@@ -68,7 +119,8 @@ public class ApplyEventTypes extends GhidraScript {
 
         Files.createDirectories(out);
         DecompInterface decompiler = new DecompInterface();
-        if (!decompiler.openProgram(currentProgram)) throw new IllegalStateException("Decompiler open failed");
+        if (!decompiler.openProgram(contextView(out)))
+            throw new IllegalStateException("Decompiler open failed: " + decompiler.getLastMessage());
         List<Map<String,Object>> rows = new ArrayList<>();
         try {
             for (Function f : targets) {
@@ -85,6 +137,7 @@ public class ApplyEventTypes extends GhidraScript {
                     String code = result.getDecompiledFunction().getC();
                     row.put("has_warnings", code.contains("WARNING"));
                     row.put("named_field_access", code.contains("->"));
+                    row.put("typed_core_access", code.contains("core->"));
                     Files.writeString(out.resolve(f.getName() + ".c"),
                         "/* Typed decompiler output, NOT native implementation or equivalence proof.\n" +
                         " * GP globals may still be represented as base-zero module-offset labels.\n" +
@@ -99,6 +152,8 @@ public class ApplyEventTypes extends GhidraScript {
         report.put("input_sha256", currentProgram.getExecutableSHA256());
         report.put("functions", rows); report.put("original_bytes_modified", false);
         report.put("global_state_memory_typed", false);
+        report.put("implicit_gp_parameter", implicitCore);
+        report.put("gp_spacebase_disabled_in_local_decompiler_view_only", implicitCore);
         report.put("scope", "Four checked pointer/prototype contracts, not global GP recovery or new emulator code.");
         Files.writeString(out.resolve("contracts.json"), new GsonBuilder().setPrettyPrinting().create().toJson(report));
         println("RePops: exported " + rows.size() + " typed event/timer contracts to " + out);

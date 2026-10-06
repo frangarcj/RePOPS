@@ -16,9 +16,12 @@ REPOPS_RUN_STEPS=2000000 python3 scripts/run_native.py \
   --out out/diagnostic-long-new/result --diagnostic-skip-ui --timeout 600
 ```
 
-The original per-call Unicorn instruction/time safeguards are unchanged.
-Host runner timeout and dispatcher iterations are separate limits; neither
-is evidence that the guest is stuck or that a game successfully booted.
+The per-call Unicorn instruction bound is unchanged. The optional per-call
+wall-clock timer is now disabled by default to avoid repeated host timer
+creation; REPOPS_UNICORN_TIMER=1 restores it. The runner still enforces its
+global timeout. See diagnostic_speed.md for the measured scope. Host timeout
+and dispatcher iterations are separate limits; neither is evidence that the
+guest is stuck or that a game successfully booted.
 
 The longer window reached a direct generated-code call to +0x9850 with A0
 containing 0x1074. The IRQ reader already existed in native C but was connected

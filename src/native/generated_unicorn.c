@@ -8,6 +8,7 @@
 #include <unicorn/unicorn.h>
 #include <unicorn/mips.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define CODE_BEGIN RP_GENERATED_BIOS_BEGIN
 #define CODE_END RP_GENERATED_BIOS_END
@@ -26,6 +27,7 @@ typedef struct generated_engine {
     uint32_t published_end, ram_published_end;
     uint64_t outside_published_code;
     uint64_t synchronized_revision;
+    uint64_t call_timeout_us;
     bool synchronized, always_flush;
     const uint8_t *bios_code, *ram_code;
     uint32_t previous_pc, scalar_pc, scalar_word;
@@ -108,6 +110,10 @@ void rp_unicorn_open(rp_context *c)
     engine->context = c;
     const char *legacy = getenv("REPOPS_UNICORN_ALWAYS_FLUSH");
     engine->always_flush = legacy && legacy[0] == '1';
+    const char *timer = getenv("REPOPS_UNICORN_TIMER");
+    engine->call_timeout_us = timer && strcmp(timer, "1") == 0 ? 10000000 : 0;
+    rp_event(c, "execution_adapter", "unicorn_per_call_timeout_us", 0,
+             (uint32_t)engine->call_timeout_us);
     checked(c, uc_open(UC_ARCH_MIPS, UC_MODE_MIPS32 | UC_MODE_LITTLE_ENDIAN, &engine->uc), 0);
     checked(c, uc_ctl_set_cpu_model(engine->uc, UC_CPU_MIPS32_24KF), 0);
     const uint64_t helpers[] = {0x89A0, 0x2888, 0x91BC, 0x92A4, 0x94C4, 0x96AC, 0x1A80, 0x1A68, 0x2450, 0x2468, 0x7F00, 0x2648,
@@ -224,7 +230,10 @@ void rp_unicorn_run(rp_context *c)
     }
     checked(c, uc_reg_write(uc, UC_MIPS_REG_HI, &c->run_hi), c->run_pc);
     checked(c, uc_reg_write(uc, UC_MIPS_REG_LO, &c->run_lo), c->run_pc);
-    const uc_err result = uc_emu_start(uc, c->run_pc, 0, 10000000, 10000000);
+    /* A nonzero timeout creates/joins a host timer thread for every entry.
+     * Keep the instruction bound; the runner supplies the global wall clock.
+     * REPOPS_UNICORN_TIMER=1 restores the earlier per-call timer for comparison. */
+    const uc_err result = uc_emu_start(uc, c->run_pc, 0, engine->call_timeout_us, 10000000);
     checked(c, uc_reg_read(uc, UC_MIPS_REG_PC, &c->run_pc), c->run_pc);
     c->run_next_pc = c->run_pc + 4;
     for (unsigned i = 0; i < 32; ++i) {

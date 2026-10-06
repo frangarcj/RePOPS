@@ -4,12 +4,24 @@ import argparse
 import hashlib
 import json
 import subprocess
+import time
 from pathlib import Path
 
 from analyze_pops import Image, parse_module_info, parse_imports
 from build_psp_hybrid import SOURCE_SHA256
 
 ROOT=Path(__file__).resolve().parents[1]
+
+
+def last_trace_event(path: Path) -> dict:
+    """Read the terminal record without retaining the entire diagnostic log."""
+    last = b''
+    if path.exists():
+        with path.open('rb') as stream:
+            for line in stream:
+                if line.strip():
+                    last = line
+    return json.loads(last) if last else {'status': 'no_result'}
 
 
 def main():
@@ -45,12 +57,14 @@ def main():
     command=[str(ROOT/'build/repops-native'),str(binary.resolve()),str(imports_file.resolve()),str(trace.resolve())]
     if args.pbp is not None:command.append(str(args.pbp.resolve()))
     if args.diagnostic_skip_ui:command.append('--diagnostic-skip-ui')
+    started=time.perf_counter()
     run=subprocess.run(command,cwd=ROOT,capture_output=True,text=True,timeout=args.timeout)
+    elapsed=time.perf_counter()-started
     (args.out/'stdout.log').write_text(run.stdout+run.stderr)
-    events=[json.loads(line) for line in trace.read_text().splitlines()] if trace.exists() else []
-    last=events[-1] if events else {'status':'no_result'}
+    last=last_trace_event(trace)
     report={'exit_code':run.returncode,'result':last,'original_sha256':SOURCE_SHA256,
             'host_timeout_seconds':args.timeout,
+            'host_execution_seconds':elapsed,
             'diagnostic_ui_bypassed':args.diagnostic_skip_ui,
             'image_sha256':manifest['image_sha256'],'native_binary_sha256':hashlib.sha256((ROOT/'build/repops-native').read_bytes()).hexdigest(),
             'scope':'Reconstructed POPS C plus Unicorn MIPS32 execution of the generated cache; original PRX pages are nonexecutable',

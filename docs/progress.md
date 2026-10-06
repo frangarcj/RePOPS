@@ -1,5 +1,17 @@
 # RePops progress
 
+## Current: deferred DMA resumes and reaches GPU command 0x80
+
+`out/dma-resume.C9bwg5/result/` passes callback +0x8CAC and continues the real
+GPU DMA chain to GP0 word 0x80000000 in +0x133D0. It records 40,087,427
+generated-code observations, 43,469 transfers and `game_executed: false`.
+
+The callback preserves the original signed return protocol: tagged continuation,
+delayed completion, immediate completion or disabled-channel handling. Types
+are shared with the existing DMA state. Focused contract tests and the actual
+GPU route pass; device-specific transfer paths are not promoted to complete.
+See `dma_resume.md`. No rendered framebuffer is claimed.
+
 ## Current: flat quad reaches deferred DMA continuation
 
 `out/gpu-flat.ubRtWo/result/` processes one real flat quadrilateral, emitting

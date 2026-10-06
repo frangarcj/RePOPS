@@ -35,6 +35,7 @@ uint32_t rp_pops_dma_read(rp_context *, uint32_t address, uint32_t width);
 uint32_t rp_pops_dma_clear_ordering_table(rp_context *, uint32_t address, uint32_t bytes, uint32_t control);
 void rp_pops_dma_channel_write(rp_context *, uint32_t, uint32_t, uint32_t);
 void rp_pops_dma_finish(rp_context *, uint32_t);
+void rp_pops_dma_resume(rp_context *, uint32_t node);
 uint32_t rp_pops_cd_dma_transfer(rp_context *, uint32_t, uint32_t, uint32_t);
 
 _Static_assert(sizeof(rp_dma_channel_layout) == 0x1C, "DMA channel state stride");

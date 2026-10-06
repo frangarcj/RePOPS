@@ -105,6 +105,50 @@ void rp_pops_dma_finish(rp_context *c, uint32_t node)
         rp_block(c, "DMA_pending_arbitration_not_reconstructed", 0x8D88);
 }
 
+static uint32_t transfer_channel(rp_context *c, unsigned channel, uint32_t address,
+                                  uint32_t bytes, uint32_t control)
+{
+    const uint32_t callback = rp_u32(c, RP_DMA_CHANNEL(c, channel, transfer_callback));
+    switch (callback) {
+    case 0xCE18: return rp_pops_cd_dma_transfer(c, address, bytes, control);
+    case 0x12C74: return rp_pops_gpu_dma_transfer(c, address, bytes, control);
+    case 0x9364: return rp_pops_dma_clear_ordering_table(c, address, bytes, control);
+    default: rp_block(c, "DMA_transfer_callback_not_reconstructed", callback);
+    }
+}
+
+/* +0x8CAC..+0x8D87. A negative result carries the next link address. For a
+ * nonnegative result the callback changes to completion, either now or at
+ * the returned delay. The transfer callback may have scheduled continuation
+ * itself; do not replace its event or treat a tagged address as bytes moved. */
+void rp_pops_dma_resume(rp_context *c, uint32_t node)
+{
+    rp_function(c, 0x8CAC, "pops.resume_DMA_channel");
+    const unsigned channel = rp_cd_u16(c, RP_FIELD_ADDRESS(node, rp_dma_channel_layout, channel));
+    if (channel >= 7) rp_block(c, "DMA_channel_out_of_range", channel);
+    const uint32_t callback_slot = RP_FIELD_ADDRESS(node, rp_dma_channel_layout, event.callback);
+    if (!(rp_u32(c, RP_DMA_ADDRESS(c, priority)) & (8u << (channel * 4)))) {
+        if (channel == 2) rp_pops_graphics_event(c, 0x125F0);
+        rp_w32(c, callback_slot, 0x8B1C);
+        rp_event(c, "milestone", "DMA_resume_disabled_channel_left_unscheduled", channel, 0);
+        return;
+    }
+    const uint32_t address_slot = RP_DMA_REGISTER(c, channel, address);
+    const uint32_t result = transfer_channel(c, channel, rp_u32(c, address_slot),
+        rp_u32(c, RP_DMA_REGISTER(c, channel, block_control)),
+        rp_u32(c, RP_DMA_REGISTER(c, channel, channel_control)));
+    if ((int32_t)result < 0) {
+        rp_w32(c, address_slot, result & 0x00FFFFFC);
+        rp_event(c, "milestone", "DMA_continuation_address_retained", channel, result);
+        return;
+    }
+    rp_w32(c, address_slot, 0);
+    rp_w32(c, callback_slot, 0x8B1C);
+    if (result) rp_pops_schedule_event(c, node, result);
+    else rp_pops_dma_finish(c, node);
+    rp_event(c, "milestone", "DMA_continuation_reached_completion_path", channel, result);
+}
+
 /* +0x8E4C: enabled-channel selection and the reached CD transfer route. */
 void rp_pops_dma_try_channel(rp_context *c, unsigned channel)
 {
@@ -148,16 +192,7 @@ void rp_pops_dma_try_channel(rp_context *c, unsigned channel)
     const uint32_t madr = RP_DMA_REGISTER(c, channel, address);
     const uint32_t address = rp_u32(c, madr);
     if (address & 0x800000) { rp_pops_dma_finish(c, node); return; }
-    const uint32_t callback = rp_u32(c, RP_DMA_CHANNEL(c, channel, transfer_callback));
-    uint32_t moved;
-    if (callback == 0xCE18)
-        moved = rp_pops_cd_dma_transfer(c, address & 0xFFFFFC, bytes, chcr);
-    else if (callback == 0x12C74)
-        moved = rp_pops_gpu_dma_transfer(c, address & 0xFFFFFC, bytes, chcr);
-    else if (callback == 0x9364)
-        moved = rp_pops_dma_clear_ordering_table(c, address & 0xFFFFFC, bytes, chcr);
-    else
-        rp_block(c, "DMA_transfer_callback_not_reconstructed", callback);
+    const uint32_t moved = transfer_channel(c, channel, address & 0xFFFFFC, bytes, chcr);
     if ((int32_t)moved <= 0) {
         if (moved) rp_w32(c, madr, moved & 0xFFFFFC);
         else if (channel < 2) rp_cd_w16(c, RP_DMA_CHANNEL(c, channel, transfer_mode), 0);

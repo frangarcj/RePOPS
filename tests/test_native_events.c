@@ -6,8 +6,17 @@
 #include <string.h>
 
 static unsigned callbacks;
+static bool resume_fixture;
+static uint32_t resume_result, resume_address, resume_bytes, resume_control;
+static unsigned resume_calls, ready_calls;
 uint32_t rp_pops_gpu_dma_transfer(rp_context *c, uint32_t a, uint32_t n, uint32_t f)
-{ (void)c; (void)a; (void)n; (void)f; abort(); }
+{
+    assert(resume_fixture);
+    ++resume_calls; resume_address = a; resume_bytes = n; resume_control = f;
+    if ((int32_t)resume_result < 0)
+        rp_pops_schedule_event(c, RP_DMA_ADDRESS(c, channels[2]), 7);
+    return resume_result;
+}
 uint32_t rp_pops_cd_dma_transfer(rp_context *c, uint32_t a, uint32_t n, uint32_t f)
 { (void)c; (void)a; (void)n; (void)f; abort(); }
 void rp_pops_cd_event(rp_context *c, uint32_t event, uint32_t callback)
@@ -16,6 +25,7 @@ void rp_pops_cd_event(rp_context *c, uint32_t event, uint32_t callback)
 /* One scripted callback isolates the scheduler's unlink and time accounting. */
 void rp_pops_graphics_event(rp_context *c, uint32_t callback)
 {
+    if (resume_fixture && callback == 0x125F0) { ++ready_calls; return; }
     const uint32_t head = c->gp + 0x1B8, event = c->gp + 0x280;
     assert(callback == 0x1265C);
     assert(rp_u32(c, head) == head && rp_u32(c, head + 4) == head);
@@ -29,6 +39,68 @@ void rp_pops_graphics_event(rp_context *c, uint32_t callback)
 void rp_pops_initialize_core(rp_context *c) { (void)c; abort(); }
 void rp_pops_invalidate_ram_code(rp_context *c) { (void)c; abort(); }
 void rp_pops_prepare_exception(rp_context *c, uint32_t v) { (void)c; (void)v; abort(); }
+
+/* Scripted transfer return isolates the resumed-channel contract. The real
+ * linked GPU callback is exercised by the integrated FFVI diagnostic. */
+static void check_dma_resume(rp_context *c)
+{
+    const uint32_t node = RP_DMA_ADDRESS(c, channels[2]);
+    const uint32_t head = RP_CORE_CLOCK_ADDRESS(c, event_head_next);
+    const uint32_t deadline = RP_CORE_CLOCK_ADDRESS(c, event_deadline);
+    const uint32_t addr = RP_DMA_REGISTER(c, 2, address);
+    const uint32_t block = RP_DMA_REGISTER(c, 2, block_control);
+    const uint32_t control = RP_DMA_REGISTER(c, 2, channel_control);
+    const uint32_t callback = RP_DMA_CHANNEL(c, 2, event.callback);
+    resume_fixture = true; resume_calls = ready_calls = 0;
+    memset(c->scratchpad, 0, sizeof(c->scratchpad));
+    rp_w32(c, head, head);
+    rp_w32(c, RP_CORE_CLOCK_ADDRESS(c, event_head_prev), head);
+    rp_w32(c, deadline, 1000); rp_core_set_downcount(c, 900);
+    rp_cd_w16(c, RP_DMA_CHANNEL(c, 2, channel), 2);
+    rp_w32(c, RP_DMA_CHANNEL(c, 2, transfer_callback), 0x12C74);
+    rp_w32(c, callback, 0x8CAC);
+    rp_w32(c, addr, 0x123457); rp_w32(c, block, 0x12340004);
+    rp_w32(c, control, 0x01000401);
+    rp_w32(c, RP_DMA_ADDRESS(c, priority), 0x800);
+    resume_result = 0x801234AB;
+    rp_pops_dma_resume(c, node);
+    assert(resume_calls == 1 && resume_address == 0x123457);
+    assert(resume_bytes == 0x12340004 && resume_control == 0x01000401);
+    assert(rp_u32(c, addr) == 0x1234A8 && rp_u32(c, callback) == 0x8CAC);
+    assert(rp_u32(c, RP_DMA_CHANNEL(c, 2, event.prev)) == head);
+    assert(rp_u32(c, RP_DMA_CHANNEL(c, 2, event.deadline_cycles)) == 107);
+    assert(rp_u32(c, control) == 0x01000401);
+
+    rp_pops_remove_event(c, node);
+    resume_result = 19;
+    rp_pops_dma_resume(c, node);
+    assert(rp_u32(c, addr) == 0 && rp_u32(c, callback) == 0x8B1C);
+    assert(rp_u32(c, block) == 0x12340004 && rp_u32(c, control) == 0x01000401);
+    assert(rp_u32(c, RP_DMA_CHANNEL(c, 2, event.deadline_cycles)) == 119);
+
+    rp_pops_remove_event(c, node);
+    rp_w32(c, callback, 0x8CAC); rp_w32(c, addr, 0x400);
+    rp_w32(c, RP_DMA_CHANNEL(c, 2, completion_debit), 3);
+    const uint32_t before = rp_core_downcount(c);
+    resume_result = 0;
+    rp_pops_dma_resume(c, node);
+    assert(rp_u32(c, addr) == 0 && rp_u32(c, block) == 0);
+    assert(rp_u32(c, control) == 0x401 && rp_core_downcount(c) == before - 3);
+    assert(!rp_u32(c, RP_DMA_CHANNEL(c, 2, event.prev)));
+
+    rp_w32(c, RP_DMA_ADDRESS(c, priority), 0);
+    rp_w32(c, addr, 0x700); rp_w32(c, callback, 0x8CAC);
+    const unsigned calls_before = resume_calls;
+    rp_pops_dma_resume(c, node);
+    assert(ready_calls == 1 && resume_calls == calls_before);
+    assert(rp_u32(c, addr) == 0x700 && rp_u32(c, callback) == 0x8B1C);
+    assert(!rp_u32(c, RP_DMA_CHANNEL(c, 2, event.prev)));
+    rp_cd_w16(c, RP_DMA_CHANNEL(c, 1, channel), 1);
+    rp_w32(c, RP_DMA_CHANNEL(c, 1, event.callback), 0x8CAC);
+    rp_pops_dma_resume(c, RP_DMA_ADDRESS(c, channels[1]));
+    assert(ready_calls == 1 && rp_u32(c, RP_DMA_CHANNEL(c, 1, event.callback)) == 0x8B1C);
+    resume_fixture = false;
+}
 
 static void check_ordering_table_dma(rp_context *c)
 {
@@ -194,7 +266,8 @@ int main(void)
     assert(rp_pops_dma_read(c, 0x1F8010A9, 4) == 0xFE);
     assert(rp_pops_dma_read(c, 0x1F8010AA, 5) == 0x9182);
     check_ordering_table_dma(c);
+    check_dma_resume(c);
     fclose(c->trace); free(c);
-    puts("Events/timers/DMA: register reads, OTC links, aliases, completion and cycles passed.");
+    puts("Events/timers/DMA: reads, OTC, resume tags/delays/disabled channels and completion passed.");
     return 0;
 }

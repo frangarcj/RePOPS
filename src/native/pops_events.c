@@ -300,6 +300,8 @@ uint32_t rp_pops_dispatch_events(rp_context *c)
         rp_event(c, "milestone", "guest_event_due", callback, deadline);
         if (callback == 0x8B1C)
             rp_pops_dma_finish(c, event);
+        else if (callback == 0x8CAC)
+            rp_pops_dma_resume(c, event);
         else if (callback == 0xC268 || callback == 0xCE00 || callback == 0xC5EC)
             rp_pops_cd_event(c, event, callback);
         else

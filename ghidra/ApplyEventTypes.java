@@ -4,54 +4,23 @@
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
-import ghidra.app.plugin.processors.sleigh.SleighLanguage;
 import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.data.*;
-import ghidra.program.model.lang.BasicCompilerSpec;
-import ghidra.program.model.lang.CompilerSpec;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Parameter;
 import ghidra.program.model.listing.ParameterImpl;
 import ghidra.program.model.listing.Program;
-import ghidra.program.model.pcode.XmlEncode;
 import ghidra.program.model.symbol.SourceType;
 import com.google.gson.GsonBuilder;
-import java.io.ByteArrayInputStream;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Proxy;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
-import java.util.regex.Pattern;
 
 public class ApplyEventTypes extends GhidraScript {
     private boolean implicitCore;
 
     private Program contextView(Path out) throws Exception {
-        if (!implicitCore) return currentProgram;
-        XmlEncode xml = new XmlEncode(false);
-        CompilerSpec original = currentProgram.getCompilerSpec();
-        original.encode(xml);
-        String source = xml.toString();
-        Pattern base = Pattern.compile("<spacebase\\b[^>]*\\bname=\"gp\"[^>]*/>");
-        Pattern range = Pattern.compile("<range\\b[^>]*\\bspace=\"gp\"[^>]*/>");
-        if (base.matcher(source).results().count() != 1 || range.matcher(source).results().count() != 1)
-            throw new IllegalStateException("Expected exactly one Allegrex GP spacebase and global range");
-        String modified = range.matcher(base.matcher(source).replaceFirst("")).replaceFirst("");
-        BasicCompilerSpec view = new BasicCompilerSpec(original.getCompilerSpecDescription(),
-                (SleighLanguage)currentProgram.getLanguage(),
-                new ByteArrayInputStream(modified.getBytes(StandardCharsets.UTF_8)));
-        Files.writeString(out.resolve("source_compiler.cspec"), source);
-        Files.writeString(out.resolve("context_view.cspec"), modified);
-        /* The decompiler sees a local compiler view. Neither ProgramDB's
-         * compiler specification nor the installed extension is replaced. */
-        return (Program)Proxy.newProxyInstance(Program.class.getClassLoader(),
-                new Class<?>[]{Program.class}, (proxy, method, values) -> {
-                    if (method.getName().equals("getCompilerSpec")) return view;
-                    try { return method.invoke(currentProgram, values); }
-                    catch (InvocationTargetException failure) { throw failure.getCause(); }
-                });
+        return implicitCore ? RePopsDecompilerView.withoutGpSpacebase(currentProgram, out) : currentProgram;
     }
     private DataType pointerTo(String name) {
         DataType type = currentProgram.getDataTypeManager().getDataType("/RePops/Recovered/" + name);

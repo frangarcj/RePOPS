@@ -14,6 +14,20 @@
     "alternate_gp": {"address": "0x09FF8000", "cleared_prefix_bytes": "0xB04", "ownership": "distinct_context_subsystem_unresolved", "evidence": ["original:+0x1BF40..+0x1BF48", "original:+0x1C254..+0x1C348", "original:+0x1C5FC..+0x1C600"]}
   },
   "types": {
+    "MeSharedPrefix": {
+      "size": "0x2C0", "confidence": "confirmed_selected_fields_gaps_unresolved",
+      "fields": [["0x000", "voices", "SharedVoiceRegisters[24]"], ["0x180", "unknown_180", "bytes[8]"], ["0x188", "key_on_register", "u32"], ["0x18C", "key_off_register", "u32"], ["0x190", "pitch_modulation_mask", "u32"], ["0x194", "noise_mask", "u32"], ["0x198", "reverb_mask", "u32"], ["0x19C", "end_mask", "u32"], ["0x1A0", "unknown_1a0", "bytes[4]"], ["0x1A4", "irq_address_units", "u16"], ["0x1A6", "unknown_1a6", "u16"], ["0x1A8", "unknown_1a8", "u16"], ["0x1AA", "control", "u16"], ["0x1AC", "unknown_1ac", "u16"], ["0x1AE", "status", "u16"], ["0x1B0", "unknown_1b0", "bytes[80]"], ["0x200", "effective_voice_volumes", "u32[24]"], ["0x260", "unknown_260", "bytes[32]"], ["0x280", "pending_key_on", "u32"], ["0x284", "pending_key_off", "u32"], ["0x288", "dirty_voice_mask", "u32"], ["0x28C", "unknown_28c", "u32"], ["0x290", "transfer_notification", "u16"], ["0x292", "clear_irq_latch", "u8"], ["0x293", "producer_notification", "u8"], ["0x294", "callback_count", "u32"], ["0x298", "unknown_298", "u32"], ["0x29C", "producer_state", "u16"], ["0x29E", "consumer_state", "u16"], ["0x2A0", "repeat_dirty_mask", "u32"], ["0x2A4", "unknown_2a4", "bytes[28]"]],
+      "instances": [{"base": "me_shared", "offset": "0x0"}],
+      "evidence": ["original:+0x0000..+0x019DF", "src/native/pops_spu.c"],
+      "warning": "This is a prefix, not the entire sound-RAM allocation. Fields at +0x29C..+0x29F also have combined word and individual byte protocol accesses."
+    },
+    "MeMixerPrefix": {
+      "size": "0x179C", "confidence": "confirmed_selected_fields_gaps_unresolved",
+      "fields": [["0x0000", "interpolation_coefficients", "i16[1024]"], ["0x0800", "unknown_800", "bytes[70]"], ["0x0846", "predictor_positive", "u8[5]"], ["0x084B", "predictor_negative", "u8[5]"], ["0x0850", "unknown_850", "bytes[8]"], ["0x0858", "voices", "MixerVoice[24]"], ["0x1338", "unknown_1338", "bytes[172]"], ["0x13E4", "end_mask", "u32"], ["0x13E8", "capture_cursor", "u16"], ["0x13EA", "unknown_13ea", "bytes[928]"], ["0x178A", "noise_sample", "i16"], ["0x178C", "noise_countdown", "i16"], ["0x178E", "noise_phase", "u8"], ["0x178F", "unknown_178f", "u8"], ["0x1790", "previous_control", "u16"], ["0x1792", "paired_block_address_units", "u16"], ["0x1794", "paired_voice_index", "i8"], ["0x1795", "relative_voice_index", "i8"], ["0x1796", "unknown_1796", "u8"], ["0x1797", "irq_latch", "u8"], ["0x1798", "irq_cursor", "guest_address32"]],
+      "instances": [{"base": "me_mixer", "offset": "0x0"}],
+      "evidence": ["original:+0x0000..+0x019DF", "original:+0x19DD8", "src/native/pops_reset.c:spu_state_reset", "src/native/pops_spu.c"],
+      "warning": "The reset-cleared prefix and selected fields are recovered; unknown regions and allocation ownership are not given invented semantics."
+    },
     "AlternateGpPrefix": {
       "size": "0xB04", "confidence": "cleared_prefix_and_selected_fields_only",
       "fields": [["0x000", "unknown_000", "bytes[380]"], ["0x17C", "nibble_byte_masks", "u32[16]"], ["0x1BC", "unknown_1bc", "bytes[2320]"], ["0xACC", "list_link0", "guest_address32"], ["0xAD0", "list_link1", "guest_address32"], ["0xAD4", "unknown_ad4", "bytes[48]"]],

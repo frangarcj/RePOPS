@@ -25,7 +25,8 @@ In `implicit-core` mode, the script encodes the current CompilerSpec and removes
 only the GP spacebase declaration and the matching global range. It parses
 that into a separate BasicCompilerSpec, then gives the decompiler a forwarding
 Program view whose `getCompilerSpec()` returns that local object. Other Program
-operations use the actual analysis copy. No installed language file, persisted
+operations use the actual analysis copy. The shared implementation is now
+`ghidra/RePopsDecompilerView.java`, also used by the ME type exporter. No installed language file, persisted
 compiler selection or instruction bytes are replaced.
 
 The checked functions retain a0/a1 argument storage. `core` uses gp:4 and is a

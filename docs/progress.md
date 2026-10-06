@@ -5,18 +5,19 @@
 The requested first pass is in `pops_state_layout.md` and
 `../data/state_layout.json`. It distinguishes main scratchpad GP, shared-ME GP,
 the private mixer base and an alternate GP context whose ownership remains open.
-Ten descriptive type layouts cover events, frame phases, timers, I/O pairs,
+Twelve descriptive type layouts cover events, frame phases, timers, I/O pairs,
 shared voice registers, volume/envelope state, mixer voices, compiler records
-and the separately initialized alternate-GP prefix.
+and the separate alternate-GP, ME-shared and ME-private prefixes.
 Their field widths/extents were checked; that is not complete behavioral recovery.
 
 The concrete `gp + 0x35F0` field is `frame_phase.event.callback`, inside the
 event at GP+0x35E4. Important unresolved/overlapping cases include the sentinel
 control word, phase-dependent compiler records and alternate-GP lifecycle.
 `ImportStateLayouts.java` has now installed these types plus `CoreStatePartial`
-in a new Ghidra project and exported a reusable GDT archive. Eleven root sizes,
+in a new Ghidra project and exported a reusable GDT archive. Thirteen root sizes,
 the nested frame callback and the instruction-record unions were checked.
-No program-memory typing or mass C offset replacement has been performed.
+No original module memory has been retyped and no mass C offset replacement
+has been performed. The ME-specific pass adds typed synthetic state below.
 See `ghidra_state_types.md`; pre-existing projects and emulator source are unchanged.
 
 The next pass applies event/timer prototypes to four checked functions with
@@ -35,6 +36,19 @@ the installed extension and existing project are unchanged. All four exports
 completed and propagate core through the timer calls. See `implicit_gp_context.md`
 and `out/ghidra-gp-view.uBbqaV/contracts/`; read-only processing discarded the
 temporary prototype changes. Native execution and coverage counts are unchanged.
+
+The ME callback now has named shared/private state in a fresh analysis copy:
+`MeSharedPrefix` (0x2C0) and `MeMixerPrefix` (0x179C). Both shared addresses map
+to one uninitialized backing; the mixer prefix is separate. All synthetic blocks
+are non-executable and have no supplied initial values. The latest export is
+`out/ghidra-me-types.EuhMEh/state/`, with the type archive in its sibling `types/`.
+
+The first typed export reordered mailbox reads across cached/uncached clears.
+Marking both shared blocks volatile in the analysis view preserves the checked
+consumer begin/end and read-before-clear sequence. This is a scoped decompiler
+annotation, not a claim about the original C keyword or full cache semantics.
+See `typed_me_state.md`; the event GP view still passes after extraction into
+`RePopsDecompilerView.java`. No native SPU implementation changed in this pass.
 
 The alternate initializer +0x1C254 uses incoming GP despite the raw decompiler
 displaying 0x10000. Its caller sets GP=0x09FF8000. A 0xB04-byte cleared prefix,

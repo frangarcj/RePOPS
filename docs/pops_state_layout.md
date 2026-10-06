@@ -153,6 +153,22 @@ period u16 +0xC; signed level i16 +0xE. The phase table at module +0xD4074
 and consumers +0x1418..+0x17EC support this layout. Field identification is
 broader than the currently implemented subset of phase transitions.
 
+### Owning ME prefixes and aliases
+
+`MeSharedPrefix` spans 0x2C0 bytes at both 0x09F40000 and 0x49F40000. Its
+24 voice-register records, key/dirty mailboxes, control/status and effective
+volumes are named; unresolved gaps remain byte ranges. `MeMixerPrefix` spans
+the reset-cleared 0x179C bytes at 0x09FF0000, including coefficient tables,
+24 mixer voices, capture/end state, noise and IRQ fields. Neither prefix defines
+the full allocation ownership merely by its end address.
+
+`ApplyMeStateTypes.java` applies them to newly added uninitialized analysis
+memory. The shared cached/uncached addresses are a byte-mapped alias, not separate
+objects. The shared analysis blocks are volatile to prevent the decompiler from
+moving cached mailbox loads below uncached clearing writes; the private mixer
+remains ordinary memory. No initial byte values are supplied. See
+`typed_me_state.md` for the successful export and the first alias-ordering failure.
+
 ## 5. Structures that need unions or phase-specific views
 
 The analysis record at `0x041B0000 + 4 * (guest_pc - base_pc)` is 16 bytes.
@@ -173,17 +189,18 @@ context/overlap until the empty-list lifecycle is fully recovered.
 
 ## 6. Ghidra type import and later application
 
-`ghidra/ImportStateLayouts.java` imports the ten schema types plus a partial
-16-KiB core view into a new analysis project. The successful export is
-`out/ghidra-state.GMXnwg/export/repops_types.gdt`, with verified field/size
+`ghidra/ImportStateLayouts.java` imports the twelve schema types plus a partial
+16-KiB core view into a new analysis project. The latest successful export is
+`out/ghidra-me-types.EuhMEh/types/repops_types.gdt`, with verified field/size
 metadata in `types.json`. Instruction-record phase reuse is represented by
 unions. Core, alternate-GP and ME base warnings are attached to selected code
 entries; no universal GP register value is imposed.
 
-These types are present in the new project's datatype manager, not applied over
-program memory. In particular the script must never reinterpret module code at
-0x10000 as core scratchpad. See `ghidra_state_types.md` for reproducible import
-and the fresh project location. Existing Ghidra projects remain unchanged.
+The importer only registers types. `ApplyMeStateTypes.java` separately types
+the newly created synthetic ME regions, never original module bytes. In particular
+no script may reinterpret module code at 0x10000 as core scratchpad. See
+`ghidra_state_types.md` for the earlier eleven-root import and `typed_me_state.md`
+for the current thirteen-root export. Existing Ghidra projects remain unchanged.
 
 When migrating C later, replace one family of accesses at a time. Keep guest
 addresses as u32 and use the existing little-endian accessors; casting directly

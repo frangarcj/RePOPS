@@ -14,6 +14,17 @@
     "alternate_gp": {"address": "0x09FF8000", "cleared_prefix_bytes": "0xB04", "ownership": "distinct_context_subsystem_unresolved", "evidence": ["original:+0x1BF40..+0x1BF48", "original:+0x1C254..+0x1C348", "original:+0x1C5FC..+0x1C600"]}
   },
   "types": {
+    "CdMode2SectorHeader": {
+      "size": "0x18", "confidence": "sector_event_accesses_confirmed",
+      "fields": [["0x00", "sync", "bytes[12]"], ["0x0C", "msf", "u8[3]"], ["0x0F", "mode", "u8"], ["0x10", "file", "u8"], ["0x11", "channel", "u8"], ["0x12", "submode", "u8"], ["0x13", "coding", "u8"], ["0x14", "repeated_subheader", "bytes[4]"]],
+      "evidence": ["original:+0xC6B0..+0xC78C", "src/native/pops_cdrom.h"]
+    },
+    "CdBlockIndex": {
+      "size": "0x20", "confidence": "worker_accesses_and_prepared_index_layout_confirmed",
+      "fields": [["0x00", "file_offset", "u32"], ["0x04", "encoded_bytes", "u16"], ["0x06", "sector_transform", "u16"], ["0x08", "integrity_data", "bytes[16]"], ["0x18", "aligned_read_bytes", "i32"], ["0x1C", "reserved", "u32"]],
+      "evidence": ["original:+0xDAF4..+0xDCB0", "original:+0xD5CC", "src/native/pops_disc.c:rp_pops_finalize_disc_selection", "src/native/pops_cdrom.h"],
+      "warning": "File offsets are relocated during disc selection. Plain-PBP DEFLATE is a format adapter; the original +0xE02C codec and integrity service are not reconstructed."
+    },
     "CdResponseRecord": {
       "size": "0x1C", "confidence": "confirmed_layout",
       "fields": [["0x00", "event", "PopsEvent"], ["0x10", "payload", "u8[10]"], ["0x1A", "pending_irq", "i8"], ["0x1B", "length", "u8"]],
@@ -22,7 +33,7 @@
     },
     "CdControllerState": {
       "size": "0xC0", "confidence": "confirmed_selected_roles_other_fields_preserved",
-      "fields": [["0x00", "primary", "CdResponseRecord"], ["0x1C", "secondary", "CdResponseRecord"], ["0x38", "unknown_event", "PopsEvent"], ["0x48", "sector_event", "PopsEvent"], ["0x58", "drive_event", "PopsEvent"], ["0x68", "response_fifo", "u8[12]"], ["0x74", "response_length", "u8"], ["0x75", "parameter_count", "u8"], ["0x76", "parameters", "u8[4]"], ["0x7A", "data_cursor", "u16"], ["0x7C", "data_limit", "u16"], ["0x7E", "deferred_command", "i8"], ["0x7F", "current_track", "u8"], ["0x80", "audio_muted", "u8"], ["0x81", "unknown_81", "u8"], ["0x82", "producer_buffer", "u8"], ["0x83", "selected_buffer", "u8"], ["0x84", "error_flag", "u8"], ["0x85", "error_code", "u8"], ["0x86", "command_lock", "u8"], ["0x87", "unknown_87", "u8"], ["0x88", "location_pending", "u8"], ["0x89", "response_cursor", "u8"], ["0x8A", "poll_flag", "u8"], ["0x8B", "lid_phase", "u8"], ["0x8C", "poll_countdown", "u8"], ["0x8D", "retained_config", "u8"], ["0x8E", "unknown_8e", "u8"], ["0x8F", "saved_flag", "u8"], ["0x90", "speed_transition", "u8"], ["0x91", "seek_header_pending", "u8"], ["0x92", "unknown_92", "bytes[2]"], ["0x94", "sector_buffers", "guest_address32[2]"], ["0x9C", "mode", "u8"], ["0x9D", "drive_status", "u8"], ["0x9E", "filter", "u16"], ["0xA0", "random_state", "u32"], ["0xA4", "seek_deadline", "u32"], ["0xA8", "current_sector", "u32"], ["0xAC", "requested_sector", "u32"], ["0xB0", "playing_sector", "u32"], ["0xB4", "header_pointer", "guest_address32"], ["0xB8", "volume_matrix", "u8[4]"], ["0xBC", "status_index", "u8"], ["0xBD", "irq_enable", "u8"], ["0xBE", "irq_flags", "u8"], ["0xBF", "data_request", "u8"]],
+      "fields": [["0x00", "primary", "CdResponseRecord"], ["0x1C", "secondary", "CdResponseRecord"], ["0x38", "unknown_event", "PopsEvent"], ["0x48", "sector_event", "PopsEvent"], ["0x58", "drive_event", "PopsEvent"], ["0x68", "response_fifo", "u8[12]"], ["0x74", "response_length", "u8"], ["0x75", "parameter_count", "u8"], ["0x76", "parameters", "u8[4]"], ["0x7A", "data_cursor", "u16"], ["0x7C", "data_limit", "u16"], ["0x7E", "deferred_command", "i8"], ["0x7F", "current_track", "u8"], ["0x80", "audio_muted", "u8"], ["0x81", "unknown_81", "u8"], ["0x82", "producer_buffer", "u8"], ["0x83", "selected_buffer", "u8"], ["0x84", "error_flag", "u8"], ["0x85", "error_code", "u8"], ["0x86", "command_lock", "u8"], ["0x87", "unknown_87", "u8"], ["0x88", "location_pending", "u8"], ["0x89", "response_cursor", "u8"], ["0x8A", "poll_flag", "u8"], ["0x8B", "lid_phase", "u8"], ["0x8C", "poll_countdown", "u8"], ["0x8D", "retained_config", "u8"], ["0x8E", "sector_defer_count", "u8"], ["0x8F", "saved_flag", "u8"], ["0x90", "speed_transition", "u8"], ["0x91", "seek_header_pending", "u8"], ["0x92", "unknown_92", "bytes[2]"], ["0x94", "sector_buffers", "guest_address32[2]"], ["0x9C", "mode", "u8"], ["0x9D", "drive_status", "u8"], ["0x9E", "filter", "u16"], ["0xA0", "random_state", "u32"], ["0xA4", "seek_deadline", "u32"], ["0xA8", "current_sector", "u32"], ["0xAC", "requested_sector", "u32"], ["0xB0", "playing_sector", "u32"], ["0xB4", "header_pointer", "guest_address32"], ["0xB8", "volume_matrix", "u8[4]"], ["0xBC", "status_index", "u8"], ["0xBD", "irq_enable", "u8"], ["0xBE", "irq_flags", "u8"], ["0xBF", "data_request", "u8"]],
       "instances": [{"base": "core", "offset": "0x3800"}],
       "evidence": ["original:+0xD088..+0xD41C", "original:+0x1ADB0", "src/native/pops_cdrom.h"],
       "warning": "Identified field roles do not imply that every CD command, sector worker or audio mode is implemented."

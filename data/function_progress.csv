@@ -1,4 +1,8 @@
 profile,entry,name,status,source,verification,integration
+pops_660,0xDA3C,CD_data_worker,partial,src/native/pops_cdrom.c,native_cache_publication_smoke_with_plain_format_adapter,diagnostic_only
+pops_660,0xD5CC,CD_get_sector,partial,src/native/pops_cdrom.c,native_cache_sector_FIFO_smoke_and_real_PBP,integrated
+pops_660,0xC5EC,CD_sector_event,partial,src/native/pops_cdrom.c,native_sector_IRQ_smoke_and_real_PBP,integrated
+pops_660,0x8AA4,write_shadow_register,complete,src/native/pops_events.c,byte_half_word_noop_contract_smoke,integrated
 pops_660,0x16000,module_start,complete,src/bootstrap.c,host_contract,integrated
 pops_660,0x16080,main_thread,partial,src/native/pops_boot.c,host_run_prefix,integrated
 pops_660,0x24A08,patch_syscall_stubs,adapter,src/native/pops_boot.c,synthetic_imports,integrated

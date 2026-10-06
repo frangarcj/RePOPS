@@ -23,7 +23,7 @@ typedef struct {
     uint8_t current_track, audio_muted, unknown_81, producer_buffer, selected_buffer;
     uint8_t error_flag, error_code, command_lock, unknown_87, location_pending;
     uint8_t response_cursor, poll_flag, lid_phase, poll_countdown, retained_config;
-    uint8_t unknown_8e, saved_flag, speed_transition, seek_header_pending;
+    uint8_t sector_defer_count, saved_flag, speed_transition, seek_header_pending;
     uint8_t unknown_92[2];
     uint32_t sector_buffers[2];
     uint8_t mode, drive_status;
@@ -35,6 +35,25 @@ typedef struct {
 
 typedef struct { uint32_t read, write; } rp_io_handler_layout;
 typedef struct { uint32_t next, prev, first_sector, buffer; } rp_cd_cache_node_layout;
+typedef struct {
+    uint32_t file_offset;
+    uint16_t encoded_bytes, sector_transform;
+    uint8_t integrity_data[16];
+    int32_t aligned_read_bytes;
+    uint32_t reserved;
+} rp_cd_block_index_layout;
+typedef struct {
+    uint8_t sync[12], msf[3], mode;
+    uint8_t file, channel, submode, coding, repeated_subheader[4];
+} rp_cd_sector_header_layout;
+
+enum {
+    RP_CD_SECTOR_BYTES = 2352, RP_CD_PAYLOAD_BYTES = 2048, RP_CD_BLOCK_SECTORS = 16,
+    RP_CD_BLOCK_BYTES = RP_CD_SECTOR_BYTES * RP_CD_BLOCK_SECTORS,
+    RP_CD_INDEX_BASE = 0x09E84000
+};
+static inline uint32_t rp_cd_block_index(uint32_t sector)
+{ return RP_CD_INDEX_BASE + (sector / RP_CD_BLOCK_SECTORS) * sizeof(rp_cd_block_index_layout); }
 typedef struct {
     uint8_t unknown_000[0x130];
     uint32_t cpu_status, cpu_cause;
@@ -48,9 +67,14 @@ typedef struct {
     uint32_t disc_sector_limit;
     uint8_t unknown_734[0x1000 - 0x734];
     rp_io_handler_layout io_handlers[512];
-    uint8_t unknown_2000[0x70];
-    uint32_t irq_status, irq_mask;
-    uint8_t unknown_2078[0x3608 - 0x2078];
+    union {
+        uint8_t io_register_shadow[0x1000];
+        struct {
+            uint8_t unknown_2000[0x70];
+            uint32_t irq_status, irq_mask;
+        };
+    };
+    uint8_t unknown_3000[0x3608 - 0x3000];
     uint32_t audio_sample_origin, audio_cycle_origin;
     uint8_t unknown_3610[0x3668 - 0x3610];
     uint32_t display_mode;
@@ -98,7 +122,13 @@ void rp_pops_cd_controller_reset(rp_context *);
 void rp_pops_cd_audio_sync(rp_context *);
 void rp_pops_audio_pace(rp_context *);
 void rp_pops_raise_irq(rp_context *, uint32_t);
+void rp_pops_shadow_write(rp_context *, uint32_t, uint32_t, uint32_t);
+bool rp_cd_plain_block_read(rp_context *, uint32_t, uint32_t);
+uint32_t rp_pops_cd_get_sector(rp_context *, uint32_t, bool);
 
+_Static_assert(sizeof(rp_cd_block_index_layout) == 32, "CD block index stride");
+_Static_assert(sizeof(rp_cd_sector_header_layout) == 24, "Mode-2 sector prefix");
+_Static_assert(offsetof(rp_cd_block_index_layout, aligned_read_bytes) == 24, "CD prepared read size");
 _Static_assert(sizeof(rp_cd_response_layout) == 0x1C, "CD response layout");
 _Static_assert(sizeof(rp_cdrom_layout) == 0xC0, "CD controller layout");
 _Static_assert(offsetof(rp_cdrom_layout, response_fifo) == 0x68, "CD response FIFO");

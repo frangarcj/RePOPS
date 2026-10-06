@@ -109,6 +109,87 @@ static void request_prefetch(rp_context *c, uint32_t sector)
     rp_event(c, "host_adapter", "cd_worker_request_queued", c->cd_thread_entry, sector);
 }
 
+/* Cooperative execution of the reached +0xDA3C data-worker iteration. The
+ * original thread/512-byte input-cache scheduling remains a host adapter. */
+static void service_block_request(rp_context *c)
+{
+    const uint32_t sector = rp_u32(c, RP_DEVICE_ADDRESS(c, cd_read_request));
+    if (sector == UINT32_MAX) return;
+    if (rp_cd_u8(c, RP_DEVICE_ADDRESS(c, cd_audio_read_pending)))
+        rp_block(c, "cd_audio_worker_not_reconstructed", 0xDCB4);
+    rp_function(c, 0xDA3C, "pops.cd_data_worker_iteration_partial");
+    if (!(c->cd_event_bits & 1)) rp_block(c, "cd_worker_request_not_signalled", 0xDA84);
+    c->cd_event_bits &= ~UINT32_C(1);
+    const uint32_t head = rp_u32(c, RP_DEVICE_ADDRESS(c, cd_cache_head));
+    const uint32_t node = rp_u32(c, RP_FIELD_ADDRESS(head, rp_cd_cache_node_layout, prev));
+    const uint32_t buffer = rp_u32(c, RP_FIELD_ADDRESS(node, rp_cd_cache_node_layout, buffer));
+    rp_w32(c, RP_FIELD_ADDRESS(node, rp_cd_cache_node_layout, first_sector), 0x80000000);
+    const bool loaded = rp_cd_plain_block_read(c, rp_cd_block_index(sector), buffer);
+    if (loaded) {
+        rp_w32(c, RP_FIELD_ADDRESS(node, rp_cd_cache_node_layout, first_sector), sector);
+        rp_w32(c, RP_DEVICE_ADDRESS(c, cd_cache_head), node);
+        rp_event(c, "milestone", "cd_block_cache_published", sector, buffer);
+    }
+    rp_w32(c, RP_DEVICE_ADDRESS(c, cd_read_request), UINT32_MAX);
+    c->cd_event_bits |= 2;
+    if (!loaded) rp_block(c, "cd_block_read_or_decode_failed", sector);
+}
+
+/* +0xD5CC normal data: satisfy a cache miss, promote its node, fix optional
+ * sector headers and request the next block. No data-ready flag is set here. */
+uint32_t rp_pops_cd_get_sector(rp_context *c, uint32_t sector, bool wait)
+{
+    rp_function(c, 0xD5CC, "pops.cd_get_cached_sector_partial");
+    uint32_t head = rp_u32(c, RP_DEVICE_ADDRESS(c, cd_cache_head));
+    uint32_t found = find_cached_sector(c, head, sector);
+    if (!found) {
+        if (!wait) return 0;
+        if (rp_cd_u8(c, RP_DEVICE_ADDRESS(c, cd_audio_read_pending)))
+            rp_block(c, "cd_audio_cache_miss_not_reconstructed", 0xD7AC);
+        service_block_request(c);
+        request_prefetch(c, sector & ~UINT32_C(15));
+        if (rp_u32(c, RP_DEVICE_ADDRESS(c, cd_read_request)) == (sector & ~UINT32_C(15)))
+            service_block_request(c);
+        head = rp_u32(c, RP_DEVICE_ADDRESS(c, cd_cache_head));
+        found = find_cached_sector(c, head, sector);
+        if (!found) rp_block(c, "cd_sector_retry_not_reconstructed", 0xD5CC);
+    }
+    if (rp_cd_u8(c, RP_DEVICE_ADDRESS(c, cd_audio_read_pending)))
+        rp_block(c, "cd_audio_cache_hit_not_reconstructed", 0xD61C);
+    const uint32_t next = rp_u32(c, RP_FIELD_ADDRESS(found, rp_cd_cache_node_layout, next));
+    const uint32_t prev = rp_u32(c, RP_FIELD_ADDRESS(found, rp_cd_cache_node_layout, prev));
+    rp_w32(c, RP_FIELD_ADDRESS(next, rp_cd_cache_node_layout, prev), prev);
+    rp_w32(c, RP_FIELD_ADDRESS(prev, rp_cd_cache_node_layout, next), next);
+    const uint32_t tail = rp_u32(c, RP_FIELD_ADDRESS(head, rp_cd_cache_node_layout, prev));
+    const uint32_t after_tail = rp_u32(c, RP_FIELD_ADDRESS(tail, rp_cd_cache_node_layout, next));
+    rp_w32(c, RP_FIELD_ADDRESS(found, rp_cd_cache_node_layout, prev), tail);
+    rp_w32(c, RP_FIELD_ADDRESS(found, rp_cd_cache_node_layout, next), after_tail);
+    rp_w32(c, RP_FIELD_ADDRESS(after_tail, rp_cd_cache_node_layout, prev), found);
+    rp_w32(c, RP_FIELD_ADDRESS(tail, rp_cd_cache_node_layout, next), found);
+    rp_w32(c, RP_DEVICE_ADDRESS(c, cd_cache_head), found);
+    uint32_t slot = sector - rp_u32(c, RP_FIELD_ADDRESS(found, rp_cd_cache_node_layout, first_sector));
+    const uint16_t transform = rp_cd_u16(c,
+        RP_FIELD_ADDRESS(rp_cd_block_index(sector), rp_cd_block_index_layout, sector_transform));
+    if (transform == 2) {
+        slot = 15 - slot;
+        slot = ((slot & 5) << 1) | ((slot >> 1) & 5);
+        slot = ((slot & 3) << 2) | ((slot >> 2) & 3);
+    }
+    const uint32_t address = rp_u32(c, RP_FIELD_ADDRESS(found, rp_cd_cache_node_layout, buffer)) +
+                             slot * RP_CD_SECTOR_BYTES;
+    if (transform) {
+        uint8_t *bytes = rp_memory(c, address, sizeof(rp_cd_sector_header_layout));
+        bytes[0] = bytes[11] = 0;
+        memset(bytes + 1, 0xFF, 10);
+        const uint32_t absolute = sector + 150;
+        const unsigned msf[] = {absolute / 4500, (absolute / 75) % 60, absolute % 75};
+        for (unsigned i = 0; i < 3; ++i)
+            bytes[offsetof(rp_cd_sector_header_layout, msf) + i] = (uint8_t)(msf[i] + (msf[i] / 10) * 6);
+    }
+    request_prefetch(c, sector + 16);
+    return address;
+}
+
 /* +0xC3A4: prepare a reply but expose it only when its scheduled event runs. */
 static uint32_t primary_response(rp_context *c, uint8_t length, uint32_t delay)
 {
@@ -181,8 +262,68 @@ static void publish_response(rp_context *c, uint32_t event)
     if (irq & CD8(irq_enable)) rp_pops_raise_irq(c, 4);
 }
 
+/* +0xC5EC reached Mode-2 data path. XA playback and error reporting still
+ * stop at their original branches rather than publishing substitute data. */
+static void sector_event(rp_context *c)
+{
+    rp_function(c, 0xC5EC, "pops.cd_sector_event_partial");
+    uint32_t sector = CD32(current_sector);
+    const uint8_t mode = CD8(mode);
+    SET8(drive_status, (CD8(drive_status) & ~0x40) | 0x20);
+    if (!(mode & 0x40) && (CD8(retained_config) & 8) && !(CD8(data_request) & 0x80) &&
+            CD8(sector_defer_count) < 3) {
+        SET8(sector_defer_count, CD8(sector_defer_count) + 1);
+        rp_pops_schedule_event(c, RP_CD_ADDRESS(c, sector_event), mode & 0x80 ? 0x1B900 : 0x37200);
+        return;
+    }
+    SET8(sector_defer_count, 0);
+    if (sector >= rp_u32(c, RP_DEVICE_ADDRESS(c, disc_sector_limit)))
+        rp_block(c, "cd_sector_end_error_not_reconstructed", 0xC6E0);
+    const uint32_t data = rp_pops_cd_get_sector(c, sector, true);
+    if (!data || rp_u32(c, data) != 0xFFFFFF00 || rp_u32(c, data + 4) != UINT32_MAX ||
+            rp_u32(c, data + 8) != 0x00FFFFFF)
+        rp_block(c, "cd_sector_sync_error_not_reconstructed", 0xC6E0);
+    SET32(header_pointer, RP_FIELD_ADDRESS(data, rp_cd_sector_header_layout, msf));
+    if (rp_cd_u8(c, RP_FIELD_ADDRESS(data, rp_cd_sector_header_layout, mode)) == 2) {
+        if ((rp_cd_u8(c, RP_FIELD_ADDRESS(data, rp_cd_sector_header_layout, submode)) & 0x44) == 0x44 && (mode & 0x40))
+            rp_block(c, "cd_XA_sector_path_not_reconstructed", 0xC9D0);
+        const unsigned buffer = CD8(producer_buffer);
+        if (buffer > 1) rp_block(c, "cd_producer_buffer_out_of_range", buffer);
+        SET32(sector_buffers[buffer], data);
+        SET8(producer_buffer, buffer ^ 1);
+        if (!(CD8(status_index) & 0x40)) {
+            SET16(data_cursor, mode & 0x20 ? offsetof(rp_cd_sector_header_layout, msf) : sizeof(rp_cd_sector_header_layout));
+            SET16(data_limit, mode & 0x30 ? RP_CD_SECTOR_BYTES : sizeof(rp_cd_sector_header_layout) + RP_CD_PAYLOAD_BYTES);
+            SET8(status_index, CD8(status_index) | 0x40);
+        }
+        const int8_t pending = (int8_t)CD8(secondary.pending_irq);
+        SET8(secondary.length, 1); SET8(secondary.pending_irq, 1);
+        if (pending < 0) {
+            if (CD32(secondary.event.prev)) rp_pops_remove_event(c, RP_CD_ADDRESS(c, secondary));
+        }
+        publish_response(c, RP_CD_ADDRESS(c, secondary));
+        rp_event(c, "milestone", "cd_sector_data_published", sector, data);
+    }
+    if (mode & 0x40) rp_block(c, "cd_XA_sector_timing_not_reconstructed", 0xC868);
+    uint32_t delay = CD8(retained_config) & 8 ? 0x37200 : 0x6E400;
+    if (mode & 0x80) delay >>= 1;
+    if ((rp_u32(c, RP_DEVICE_ADDRESS(c, cd_timing_flags)) & 0x200) && CD8(location_pending)) {
+        const uint32_t next = CD32(requested_sector) - 1;
+        if (sector != next) {
+            sector = next;
+            delay = rp_pops_cd_seek_cycles(c, next);
+            SET32(playing_sector, 0);
+        }
+    }
+    SET32(current_sector, sector + 1);
+    rp_pops_schedule_event(c, RP_CD_ADDRESS(c, sector_event), delay);
+    if (!CD8(irq_flags) && (int8_t)CD8(deferred_command) >= 0 && !CD32(primary.event.prev))
+        command(c, CD8(deferred_command));
+}
+
 void rp_pops_cd_event(rp_context *c, uint32_t event, uint32_t callback)
 {
+    if (callback == 0xC5EC) { sector_event(c); return; }
     if (callback == 0xC268) { publish_response(c, event); return; }
     if (callback == 0xCE00) {
         rp_function(c, 0xCE00, "pops.cd_drive_ready");

@@ -1,5 +1,21 @@
 # RePops progress
 
+## Current: first real CD sector delivered
+
+`out/cd-sector.fwAsEX/result/` reads block zero from the local plain FFVI PBP,
+expands 8099 raw-DEFLATE bytes to 37632, publishes the cache node and delivers
+Mode-2 sector 4 with its IRQ. It reaches the subsequent control-register write
+at 0x1F801018, with 38,445,534 generated-code observations and 13,404 transfers.
+The +0x8AA4 shadow writer is now reconstructed and connected to dynamic stores;
+the following integrated attempt hit its 120-second host cap before the CD,
+so it is not recorded as further execution progress.
+
+Worker/cached-sector/event bodies remain partial. zlib is explicitly a codec
+adapter for the already admitted plain PBP, not reconstructed Sony +0xE02C.
+Focused CD/event tests pass, including real buffer contents, IRQ/FIFO delivery,
+failed-decode nonpublication and byte/half/word shadow writes. See
+`cd_sector_io.md`. `game_executed` remains false.
+
 ## Current: Setmode and ReadN reach the first sector event
 
 `out/cd-readn.LUz1jf/result/` completes Setmode and ReadN and stops at the

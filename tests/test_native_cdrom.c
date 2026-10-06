@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+#include <zlib.h>
 
 void rp_pops_graphics_event(rp_context *c, uint32_t cb) { (void)c; (void)cb; abort(); }
 void rp_pops_initialize_core(rp_context *c) { (void)c; abort(); }
@@ -18,10 +19,18 @@ int main(void)
     rp_context *c = calloc(1, sizeof(*c));
     assert(c); c->gp = 0x10000; c->trace = tmpfile(); assert(c->trace);
     c->regions[0] = (rp_region){0, 0x100000, calloc(1, 0x100000)};
-    c->regions[1] = (rp_region){0x09E80000, 0x1000, calloc(1, 0x1000)};
+    c->regions[1] = (rp_region){0x09E80000, 0x10000, calloc(1, 0x10000)};
     c->regions[2] = (rp_region){0x09F40000, 0xC0000, calloc(1, 0xC0000)};
     assert(c->regions[0].bytes && c->regions[2].bytes);
     if (setjmp(c->stop)) { fprintf(stderr, "%s at %x\n", c->stop_kind, c->stop_address); return 1; }
+
+    rp_pops_shadow_write(c, 0x1F801018, 0x12345678, 2);
+    rp_pops_shadow_write(c, 0x1F801019, 0xA5, 0);
+    rp_pops_shadow_write(c, 0x1F80101A, 0xBEEF, 1);
+    const uint32_t shadow = RP_DEVICE_ADDRESS(c, io_register_shadow) + 0x18;
+    assert(rp_u32(c, shadow) == 0xBEEFA578);
+    rp_pops_shadow_write(c, 0x1F801018, 0, 3);
+    assert(rp_u32(c, shadow) == 0xBEEFA578);
 
     const uint32_t head = RP_CORE_CLOCK_ADDRESS(c, event_head_next);
     rp_w32(c, head, head); rp_w32(c, RP_CORE_CLOCK_ADDRESS(c, event_head_prev), head);
@@ -155,7 +164,72 @@ int main(void)
     assert(rp_cd_u8(c, RP_CD_ADDRESS(c, irq_flags)) == 0);
     assert(!(rp_cd_u8(c, RP_CD_ADDRESS(c, status_index)) & 0x40));
 
-    fclose(c->trace); free(c->regions[0].bytes); free(c->regions[1].bytes); free(c->regions[2].bytes); free(c);
-    puts("CD: registers, responses, seek, Setmode transition and deferred ReadN scheduling passed.");
+    /* A complete compressed block -> cache -> sector event -> FIFO path. */
+    memset(c->scratchpad, 0, sizeof(c->scratchpad));
+    rp_w32(c, head, head); rp_w32(c, RP_CORE_CLOCK_ADDRESS(c, event_head_prev), head);
+    rp_w32(c, RP_CORE_CLOCK_ADDRESS(c, event_deadline), 0x1000000);
+    rp_core_set_downcount(c, 0x1000000);
+    c->regions[3] = (rp_region){0x09490000, 0x20000, calloc(1, 0x20000)};
+    assert(c->regions[3].bytes);
+    uint8_t raw[RP_CD_BLOCK_BYTES], compressed[RP_CD_BLOCK_BYTES];
+    memset(raw, 0x5A, sizeof(raw));
+    for (unsigned i = 0; i < RP_CD_BLOCK_SECTORS; ++i) {
+        uint8_t *sector_data = raw + i * RP_CD_SECTOR_BYTES;
+        sector_data[0] = sector_data[11] = 0; memset(sector_data + 1, 0xFF, 10);
+        sector_data[12] = 0; sector_data[13] = 2;
+        sector_data[14] = (uint8_t)(i + (i / 10) * 6); sector_data[15] = 2;
+    }
+    z_stream z = {0};
+    assert(deflateInit2(&z, 6, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY) == Z_OK);
+    z.next_in = raw; z.avail_in = sizeof(raw);
+    z.next_out = compressed; z.avail_out = sizeof(compressed);
+    assert(deflate(&z, Z_FINISH) == Z_STREAM_END);
+    const size_t encoded = z.total_out; deflateEnd(&z);
+    c->disc = tmpfile(); assert(c->disc);
+    assert(fwrite(compressed, 1, encoded, c->disc) == encoded); fflush(c->disc);
+    c->disc_bytes = encoded; c->disc_header.valid = 1; c->data_psp_word = 0x464C457F;
+    const uint32_t index = rp_cd_block_index(4), output_buffer = 0x09492600;
+    rp_w32(c, RP_FIELD_ADDRESS(index, rp_cd_block_index_layout, file_offset), 0);
+    rp_cd_w16(c, RP_FIELD_ADDRESS(index, rp_cd_block_index_layout, encoded_bytes), (uint16_t)encoded);
+    rp_w32(c, RP_DEVICE_ADDRESS(c, cd_cache_head), cache);
+    rp_w32(c, RP_FIELD_ADDRESS(cache, rp_cd_cache_node_layout, next), cache);
+    rp_w32(c, RP_FIELD_ADDRESS(cache, rp_cd_cache_node_layout, prev), cache);
+    rp_w32(c, RP_FIELD_ADDRESS(cache, rp_cd_cache_node_layout, first_sector), 0x80000000);
+    rp_w32(c, RP_FIELD_ADDRESS(cache, rp_cd_cache_node_layout, buffer), output_buffer);
+    rp_w32(c, RP_DEVICE_ADDRESS(c, disc_sector_limit), 16);
+    rp_w32(c, RP_DEVICE_ADDRESS(c, cd_read_request), 0); c->cd_event_bits = 1;
+    rp_w32(c, RP_CD_ADDRESS(c, current_sector), 4);
+    rp_w8(c, RP_CD_ADDRESS(c, mode), 0x80);
+    rp_w8(c, RP_CD_ADDRESS(c, drive_status), 2);
+    rp_w8(c, RP_CD_ADDRESS(c, deferred_command), 0xFF);
+    rp_w8(c, RP_CD_ADDRESS(c, irq_enable), 0x1F);
+    rp_w32(c, RP_CD_ADDRESS(c, secondary.event.callback), 0xC268);
+    rp_w32(c, RP_CD_ADDRESS(c, sector_event.callback), 0xC5EC);
+    rp_pops_cd_event(c, RP_CD_ADDRESS(c, sector_event), 0xC5EC);
+    assert(memcmp(rp_memory(c, output_buffer, sizeof(raw)), raw, sizeof(raw)) == 0);
+    assert(rp_u32(c, RP_DEVICE_ADDRESS(c, cd_read_request)) == UINT32_MAX);
+    assert(c->cd_event_bits == 2);
+    assert(rp_u32(c, RP_CD_ADDRESS(c, sector_buffers[0])) == output_buffer + 4 * RP_CD_SECTOR_BYTES);
+    assert(rp_cd_u8(c, RP_CD_ADDRESS(c, irq_flags)) == 1);
+    assert(rp_u32(c, RP_CD_ADDRESS(c, current_sector)) == 5);
+    assert(rp_u32(c, RP_CD_ADDRESS(c, sector_event.deadline_cycles)) == 0x37200);
+    assert(rp_pops_cd_read(c, 1, 4) == 0x22);
+    rp_pops_cd_write(c, 3, 0x80);
+    assert(rp_pops_cd_read(c, 2, 4) == 0x5A);
+    assert(rp_pops_cd_get_sector(c, 5, false) == output_buffer + 5 * RP_CD_SECTOR_BYTES);
+    /* A truncated stream must not turn an invalid cache entry into a hit. */
+    rp_cd_w16(c, RP_FIELD_ADDRESS(index, rp_cd_block_index_layout, encoded_bytes), 5);
+    rp_w32(c, RP_FIELD_ADDRESS(cache, rp_cd_cache_node_layout, first_sector), 0x80000000);
+    rp_w32(c, RP_DEVICE_ADDRESS(c, cd_read_request), 0); c->cd_event_bits = 1;
+    if (!setjmp(c->stop)) {
+        (void)rp_pops_cd_get_sector(c, 4, true);
+        assert(!"Truncated block was accepted");
+    }
+    assert(strcmp(c->stop_kind, "cd_block_read_or_decode_failed") == 0);
+    assert(rp_u32(c, RP_FIELD_ADDRESS(cache, rp_cd_cache_node_layout, first_sector)) == 0x80000000);
+    fclose(c->disc); fclose(c->trace);
+    for (unsigned i = 0; i < RP_REGION_COUNT; ++i) free(c->regions[i].bytes);
+    free(c);
+    puts("CD: command/IRQ scheduling, DEFLATE block, cache, sector FIFO and truncated-input rejection passed.");
     return 0;
 }

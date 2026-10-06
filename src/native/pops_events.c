@@ -1,6 +1,19 @@
 #include "runtime.h"
 #include "pops_cdrom.h"
 
+/* +0x8AA4: width selects one of three stores or a no-op return. */
+void rp_pops_shadow_write(rp_context *c, uint32_t address, uint32_t value, uint32_t width)
+{
+    rp_function(c, 0x8AA4, "pops.write_shadow_register");
+    const uint32_t target = RP_DEVICE_ADDRESS(c, io_register_shadow) + (address & 0xFFF);
+    switch (width & 3) {
+    case 0: rp_w8(c, target, (uint8_t)value); break;
+    case 1: rp_cd_w16(c, target, (uint16_t)value); break;
+    case 2: rp_w32(c, target, value); break;
+    default: break;
+    }
+}
+
 /* +0x96E4, shared by video and CD response publication. */
 void rp_pops_raise_irq(rp_context *c, uint32_t bits)
 {

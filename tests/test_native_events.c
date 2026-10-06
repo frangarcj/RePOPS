@@ -1,6 +1,7 @@
 #include "../src/native/runtime.h"
 #include "../src/native/pops_timer.h"
 #include "../src/native/pops_dma.h"
+#include "../src/native/pops_serial.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -147,6 +148,94 @@ static void check_ordering_table_dma(rp_context *c)
     c->regions[0] = (rp_region){0};
 }
 
+static void check_serial_controller(rp_context *c)
+{
+    memset(c->scratchpad, 0, sizeof(c->scratchpad));
+    const uint32_t head = RP_CORE_CLOCK_ADDRESS(c, event_head_next);
+    const uint32_t node = RP_SERIAL_PORT(c, 0, event);
+    rp_w32(c, head, head);
+    rp_w32(c, RP_CORE_CLOCK_ADDRESS(c, event_head_prev), head);
+    rp_w32(c, RP_CORE_CLOCK_ADDRESS(c, event_deadline), 1000);
+    rp_core_set_downcount(c, 500);
+    rp_cd_w16(c, RP_SERIAL_PORT(c, 0, status), 5);
+    rp_cd_w16(c, RP_SERIAL_PORT(c, 0, bit_cycles), 4);
+    rp_w32(c, RP_SERIAL_PORT(c, 0, transfer_callback), 0x9E64);
+    rp_w8(c, RP_SERIAL_PORT(c, 0, device_kind), 1);
+    rp_w8(c, RP_CONTROLLER_PORT(c, 0, connected), 1);
+    rp_w8(c, RP_CONTROLLER_PORT(c, 0, id_byte), 0x41);
+    rp_w8(c, RP_CONTROLLER_PORT(c, 0, response_length), 2);
+    rp_w8(c, RP_CONTROLLER_PORT(c, 0, sync_byte), 0x5A);
+    rp_w32(c, RP_CONTROLLER_PORT(c, 0, response_bytes), UINT32_MAX);
+
+    const uint8_t tx[] = {1, 0x42, 0, 0, 0, 0};
+    const uint8_t rx[] = {0xFF, 0x41, 0x5A, 0xFF, 0xFF, 0xFF};
+    for (unsigned i = 0; i < sizeof(tx); ++i) {
+        rp_pops_serial_data_write(c, 0x1F801040, tx[i]);
+        assert(rp_u32(c, RP_FIELD_ADDRESS(node, rp_guest_event_layout, prev)));
+        rp_pops_remove_event(c, node);
+        rp_pops_serial_event(c, node, 0x9E64);
+        assert(rp_cd_u8(c, RP_SERIAL_PORT(c, 0, receive_data)) == rx[i]);
+        if (i + 1 < sizeof(tx)) {
+            assert(rp_u32(c, RP_FIELD_ADDRESS(node, rp_guest_event_layout, prev)));
+            rp_pops_remove_event(c, node);
+            rp_pops_serial_event(c, node, 0xA220);
+        }
+    }
+    assert(!rp_u32(c, RP_FIELD_ADDRESS(node, rp_guest_event_layout, prev)));
+    assert(rp_u32(c, RP_SERIAL_PORT(c, 0, protocol_callback)) == 0x1A574);
+
+    rp_cd_w16(c, RP_SERIAL_PORT(c, 0, status), 0x195);
+    rp_pops_serial_control_write(c, 0x1F80104A, 0x40);
+    assert(rp_cd_u16(c, RP_SERIAL_PORT(c, 0, status)) == 5);
+    assert(!rp_cd_u16(c, RP_SERIAL_PORT(c, 0, control)));
+
+    /* +0xA138 is a delay-slot store: reset clears either port's phase,
+     * while only the primary port replaces its status with 5. */
+    rp_w8(c, RP_SERIAL_PORT(c, 1, transfer_phase), 37);
+    rp_cd_w16(c, RP_SERIAL_PORT(c, 1, status), 0x195);
+    rp_pops_serial_control_write(c, 0x1F80105A, 0x40);
+    assert(!rp_cd_u8(c, RP_SERIAL_PORT(c, 1, transfer_phase)));
+    assert(rp_cd_u16(c, RP_SERIAL_PORT(c, 1, status)) == 0x195);
+    rp_core_set_downcount(c, 100);
+    rp_w32(c, RP_DMA_ADDRESS(c, deferred_frame_debit), (uint32_t)-4);
+    rp_pops_serial_control_write(c, 0x1F80104A, 2);
+    assert(rp_core_downcount(c) == 104);
+    assert(!rp_u32(c, RP_DMA_ADDRESS(c, deferred_frame_debit)));
+
+    /* +0x9FB0 uses the current downcount, not sample_cycles. */
+    const uint32_t secondary = RP_SERIAL_PORT(c, 1, event);
+    rp_w32(c, head, secondary); rp_w32(c, head + 4, secondary);
+    rp_w32(c, secondary, head); rp_w32(c, secondary + 4, head);
+    rp_w32(c, RP_SERIAL_PORT(c, 1, event.callback), 0x1A56C);
+    rp_w32(c, RP_CORE_CLOCK_ADDRESS(c, event_deadline), 1000);
+    rp_core_set_downcount(c, 500);
+    rp_w32(c, RP_SERIAL_PORT(c, 1, previous_sample_cycles), 490);
+    rp_w32(c, RP_SERIAL_PORT(c, 1, sample_cycles), 7);
+    rp_w32(c, RP_DMA_ADDRESS(c, deferred_frame_debit), 600);
+    assert(rp_pops_serial_read(c, 0x1F801054, 2) == 0x195);
+    assert(rp_core_downcount(c) == 0);
+    assert(rp_u32(c, RP_DMA_ADDRESS(c, deferred_frame_debit)) == 100);
+    assert(rp_u32(c, RP_SERIAL_PORT(c, 1, previous_sample_cycles)) == 7);
+    assert(rp_u32(c, RP_SERIAL_PORT(c, 1, sample_cycles)) == 500);
+    assert(!rp_u32(c, secondary + 4));
+
+    /* A nonzero extended-response flag selects six bytes, not flag bytes.
+     * The terminal byte is still indexed by the configured response length. */
+    rp_w8(c, RP_CONTROLLER_PORT(c, 0, extended_response_active), 1);
+    rp_w8(c, RP_CONTROLLER_PORT(c, 0, command), 0x42);
+    rp_w32(c, RP_SERIAL_PORT(c, 0, protocol_callback), 0xA250);
+    for (unsigned i = 0; i < 6; ++i)
+        rp_w8(c, RP_CONTROLLER_PORT(c, 0, response_bytes[i]), (uint8_t)(0x30 + i));
+    for (unsigned phase = 3; phase <= 9; ++phase) {
+        rp_w8(c, RP_SERIAL_PORT(c, 0, transfer_phase), (uint8_t)phase);
+        rp_pops_serial_event(c, node, 0x9E64);
+        assert(rp_cd_u8(c, RP_SERIAL_PORT(c, 0, receive_data)) ==
+               (phase < 9 ? 0x30 + phase - 3 : 0x32));
+        if (phase < 9) rp_pops_remove_event(c, node);
+    }
+    assert(rp_u32(c, RP_SERIAL_PORT(c, 0, protocol_callback)) == 0x1A574);
+}
+
 int main(void)
 {
     rp_context *c = calloc(1, sizeof(*c));
@@ -267,7 +356,8 @@ int main(void)
     assert(rp_pops_dma_read(c, 0x1F8010AA, 5) == 0x9182);
     check_ordering_table_dma(c);
     check_dma_resume(c);
+    check_serial_controller(c);
     fclose(c->trace); free(c);
-    puts("Events/timers/DMA: reads, OTC, resume tags/delays/disabled channels and completion passed.");
+    puts("Events/timers/DMA/serial: controller poll, reads, OTC, resume and completion passed.");
     return 0;
 }

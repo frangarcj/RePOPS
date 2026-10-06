@@ -1,6 +1,7 @@
 #include "runtime.h"
 #include "pops_cdrom.h"
 #include "pops_dma.h"
+#include "pops_serial.h"
 #include "pops_timer.h"
 #include "pops_gpu.h"
 
@@ -304,6 +305,8 @@ uint32_t rp_pops_dispatch_events(rp_context *c)
             rp_pops_dma_resume(c, event);
         else if (callback == 0xC268 || callback == 0xCE00 || callback == 0xC5EC)
             rp_pops_cd_event(c, event, callback);
+        else if (callback == 0x9E64 || callback == 0xA220 || callback == 0x1A56C)
+            rp_pops_serial_event(c, event, callback);
         else
             rp_pops_graphics_event(c, callback);
         now -= rp_u32(c, c->gp + 0x1B0);

@@ -5,6 +5,7 @@
 #include "pops_gpu.h"
 #include "pops_gte.h"
 #include "pops_timer.h"
+#include "pops_serial.h"
 #include "pops_emit.h"
 #include <errno.h>
 #include <stdlib.h>
@@ -207,9 +208,12 @@ static void native_helper(rp_context *c)
         r[6] = 0x4C;
         if (r[2]) {
             const uint32_t handler = rp_device_handler(c, r[4], true);
-            if (handler != 0xD1B0) rp_block(c, "dynamic_byte_store_non_RAM_path", r[4]);
+            if (handler != 0xD1B0 && handler != 0xA06C && handler != 0xA0E8)
+                rp_block(c, "dynamic_byte_store_non_RAM_path", r[4]);
             rp_core_set_downcount(c, r[25]);
-            rp_pops_cd_write(c, r[4], r[5]);
+            if (handler == 0xD1B0) rp_pops_cd_write(c, r[4], r[5]);
+            else if (handler == 0xA06C) rp_pops_serial_data_write(c, r[4], r[5]);
+            else rp_pops_serial_control_write(c, r[4], r[5]);
             r[25] = rp_core_downcount(c);
             transfer(c, r[31]);
             return;
@@ -235,12 +239,15 @@ static void native_helper(rp_context *c)
             uint32_t index = (address + UINT32_C(0xE07FF000)) >> 3;
             if (index > 0x1FF) index = 0x1FF;
             const uint32_t handler = rp_u32(c, c->gp + 0x1004 + index * 8);
-            if (handler != 0x9C60 && handler != 0x98C4 && handler != 0x91BC && handler != 0x7F00)
+            if (handler != 0x9C60 && handler != 0x98C4 && handler != 0x91BC &&
+                    handler != 0x7F00 && handler != 0xA06C && handler != 0xA0E8)
                 rp_block(c, "dynamic_halfword_store_not_reconstructed", address);
             rp_core_set_downcount(c, r[25]);
             if (handler == 0x98C4) rp_pops_irq_write(c, address, r[5]);
             else if (handler == 0x91BC) rp_pops_dma_control_write(c, address, r[5], 1);
             else if (handler == 0x7F00) rp_pops_spu_write_register(c, address, r[5], 1);
+            else if (handler == 0xA06C) rp_pops_serial_data_write(c, address, r[5]);
+            else if (handler == 0xA0E8) rp_pops_serial_control_write(c, address, r[5]);
             else rp_pops_timer_write(c, address, r[5]);
             r[25] = rp_core_downcount(c);
         }
@@ -346,6 +353,10 @@ static void native_helper(rp_context *c)
                         const uint8_t byte = *(uint8_t *)rp_memory(c, shadow, 1);
                         r[2] = byte < 128 ? byte : (uint32_t)((int32_t)byte - 256);
                     }
+                } else if (handler == 0x9F30) {
+                    rp_core_set_downcount(c, r[25]);
+                    r[2] = rp_pops_serial_read(c, address, width);
+                    r[25] = rp_core_downcount(c);
                 } else {
                     rp_block(c, "read_IO_specialization_not_reconstructed", address);
                 }
@@ -393,13 +404,16 @@ static void native_helper(rp_context *c)
         } else {
             const uint32_t handler = rp_device_handler(c, r[4], true);
             if (handler != 0x98C4 && handler != 0x91BC && handler != 0x9C60 &&
-                    handler != 0x7F00 && handler != 0x8AA4 && handler != 0x92A4 && handler != 0x127D8)
+                    handler != 0x7F00 && handler != 0x8AA4 && handler != 0x92A4 &&
+                    handler != 0x127D8 && handler != 0xA06C && handler != 0xA0E8)
                 rp_block(c, "dynamic_word_store_non_RAM_path", r[4]);
             rp_core_set_downcount(c, r[25]);
             if (handler == 0x127D8) rp_pops_gpu_write(c, r[4], r[5]);
             else if (handler == 0x92A4) rp_pops_dma_channel_write(c, r[4], r[5], 2);
             else if (handler == 0x8AA4) rp_pops_shadow_write(c, r[4], r[5], 2);
             else if (handler == 0x91BC) rp_pops_dma_control_write(c, r[4], r[5], 2);
+            else if (handler == 0xA06C) rp_pops_serial_data_write(c, r[4], r[5]);
+            else if (handler == 0xA0E8) rp_pops_serial_control_write(c, r[4], r[5]);
             else if (handler == 0x9C60) rp_pops_timer_write(c, r[4], r[5]);
             else if (handler == 0x7F00) rp_pops_spu_write_register(c, r[4], r[5], 2);
             else rp_pops_irq_write(c, r[4], r[5]);

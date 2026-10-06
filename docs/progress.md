@@ -4,6 +4,19 @@ Historical native runs retain `result/retained-trace-result.json` instead of
 their full trace once superseded. Keep the latest two traces and the GE-preview
 provenance source; decompilers and focused verification outputs are not pruned.
 
+## Current: pending serial code reviewed; execution reaches the memory card
+
+The pending compact trace, EXT peephole and serial/controller integration
+were reviewed. The serial review corrected the status-poll downcount, the
+second-port reset delay slot, signed debit handling and the extended-response
+flag. Focused event/emitter/cache tests pass. See `serial_controller.md`.
+
+`out/serial-review.u0RiXh/result/` reaches +0xA508 after 200,395,762 generated
+instruction observations and 2,340,077 transfers. Controller replies now use
+an explicit neutral-input adapter. No rendered framebuffer or FFVI execution
+is claimed; `game_executed` remains false. The next body is the memory-card
+serial protocol, using the already initialized volatile-card backing.
+
 ## Current: BIOS wait has a future CD completion queued
 
 `out/cd-wait.4NdwzQ/result/` reaches the 2,000,000-dispatch host limit at

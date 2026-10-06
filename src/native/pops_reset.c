@@ -2,6 +2,7 @@
 #include "pops_state.h"
 #include "pops_cdrom.h"
 #include "pops_emit.h"
+#include "pops_serial.h"
 #include "../me_startup.h"
 #include <string.h>
 #include <time.h>
@@ -107,13 +108,12 @@ uint32_t rp_pops_controller_init(rp_context *c)
     rp_event(c, "headless_adapter", "controller_idle_thresholds", 64, 64);
     memset(rp_memory(c, c->gp + 0x3C00, 0x60), 0, 0x60);
     for (unsigned port = 0; port < 2; ++port) {
-        const uint32_t base = c->gp + port * 0x30;
-        rp_w8(c, base + 0x3C21, 1);
-        rp_w8(c, base + 0x3C24, 0x41);
-        rp_w8(c, base + 0x3C2C, 0x5A);
-        rp_w8(c, base + 0x3C22, 0x41);
-        rp_w8(c, base + 0x3C23, 2);
-        rp_w32(c, base + 0x3C00, UINT32_MAX);
+        rp_w8(c, RP_CONTROLLER_PORT(c, port, connected), 1);
+        rp_w8(c, RP_CONTROLLER_PORT(c, port, configured_id), 0x41);
+        rp_w8(c, RP_CONTROLLER_PORT(c, port, sync_byte), 0x5A);
+        rp_w8(c, RP_CONTROLLER_PORT(c, port, id_byte), 0x41);
+        rp_w8(c, RP_CONTROLLER_PORT(c, port, response_length), 2);
+        rp_w32(c, RP_CONTROLLER_PORT(c, port, response_bytes), UINT32_MAX);
     }
     rp_event(c, "headless_adapter", "controller_sampling_cycle", 0,
              rp_u32(c, c->gp + 0x6AC) & 0x100000 ? 0x2095 : 0);
@@ -244,12 +244,12 @@ static void disc_state_reset(rp_context *c)
 static void serial_reset(rp_context *c)
 {
     rp_function(c, 0x1A494, "pops.serial_port_reset");
-    halfword(c, c->gp + 0x2EC, 0x195);
-    rp_w32(c, c->gp + 0x2F8, 0x1A56C);
-    rp_w8(c, c->gp + 0x2C7, 1);
-    rp_w8(c, c->gp + 0x2F3, 2);
-    halfword(c, c->gp + 0x2C0, 5);
-    rp_w32(c, c->gp + 0x2CC, 0x9E64);
+    rp_cd_w16(c, RP_SERIAL_PORT(c, 1, status), 0x195);
+    rp_w32(c, RP_SERIAL_PORT(c, 1, transfer_callback), 0x1A56C);
+    rp_w8(c, RP_SERIAL_PORT(c, 0, device_kind), 1);
+    rp_w8(c, RP_SERIAL_PORT(c, 1, device_kind), 2);
+    rp_cd_w16(c, RP_SERIAL_PORT(c, 0, status), 5);
+    rp_w32(c, RP_SERIAL_PORT(c, 0, transfer_callback), 0x9E64);
     rp_pops_map_io(c, 0x1F801040, 8, 0x9F30, 0xA06C);
     rp_pops_map_io(c, 0x1F801050, 8, 0x9F30, 0xA06C);
     rp_pops_map_io(c, 0x1F801048, 8, 0, 0xA0E8);

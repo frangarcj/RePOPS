@@ -70,14 +70,18 @@ static int32_t signed_half(uint32_t value)
     return (int32_t)(value & 0x7FFF) - (int32_t)(value & 0x8000);
 }
 
-/* Recovered byte offsets within each 0x74-byte mixer voice. */
+/* Existing DSP code shares offsets derived from the recovered wire type. */
+#define VOICE_FIELD(member) offsetof(rp_mixer_voice_layout, member)
 enum {
-    VOICE_STATE = 0x1C, VOICE_EXPONENTIAL = 0x1D, VOICE_THRESHOLD = 0x1E,
-    VOICE_COUNTDOWN = 0x20, VOICE_STEP = 0x22, VOICE_PERIOD = 0x24,
-    VOICE_LEVEL = 0x26, VOICE_POSITION = 0x28, VOICE_BLOCK_ADDRESS = 0x2C,
-    VOICE_MANUAL_LOOP = 0x2E, VOICE_BLOCK_FLAGS = 0x2F, VOICE_PITCH = 0x30,
-    VOICE_REPEAT_ADDRESS = 0x32, VOICE_HISTORY = 0x34, VOICE_SAMPLES = 0x3A,
-    VOICE_STOPPED = 0x72, VOICE_BYTES = 0x74
+    VOICE_STATE = VOICE_FIELD(envelope.phase), VOICE_EXPONENTIAL = VOICE_FIELD(envelope.exponential),
+    VOICE_THRESHOLD = VOICE_FIELD(envelope.threshold), VOICE_COUNTDOWN = VOICE_FIELD(envelope.countdown),
+    VOICE_STEP = VOICE_FIELD(envelope.step), VOICE_PERIOD = VOICE_FIELD(envelope.period),
+    VOICE_LEVEL = VOICE_FIELD(envelope.level), VOICE_POSITION = VOICE_FIELD(sample_position),
+    VOICE_BLOCK_ADDRESS = VOICE_FIELD(block_address), VOICE_MANUAL_LOOP = VOICE_FIELD(manual_repeat),
+    VOICE_BLOCK_FLAGS = VOICE_FIELD(block_flags), VOICE_PITCH = VOICE_FIELD(pitch),
+    VOICE_REPEAT_ADDRESS = VOICE_FIELD(repeat_address), VOICE_HISTORY = VOICE_FIELD(history),
+    VOICE_SAMPLES = VOICE_FIELD(decoded), VOICE_STOPPED = VOICE_FIELD(stopped),
+    VOICE_BYTES = sizeof(rp_mixer_voice_layout)
 };
 
 /* +0x1418..+0x1484, with the terminal release transition +0x16D8.
@@ -427,15 +431,21 @@ static uint32_t active_sample(rp_context *c, uint16_t control)
      * +0x1B4..+0x284; never consume all voice controls ahead of their samples. */
     for (unsigned index = 0; index < 24; ++index) {
         const uint32_t bit = 1u << index;
-        const uint32_t voice = MIXER + 0x858 + index * VOICE_BYTES;
-        const uint32_t registers = SHARED + index * 0x10;
+        const uint32_t voice = RP_MIXER_ADDRESS(voices[index]);
+        const uint32_t registers = RP_SHARED_ADDRESS(voices[index]);
+        bool envelope_changed = false;
         if (dirty & bit) {
             write_half(c, voice + 0x30, read_half(c, registers + 4));
             if (repeat & bit) {
                 rp_w8(c, voice + 0x2E, 1);
                 write_half(c, voice + 0x32, read_half(c, registers + 0xE) & 0xFFFE);
             }
-            rp_w32(c, voice + 0x18, rp_u32(c, registers + 8));
+            const uint32_t configuration = rp_u32(c, RP_SHARED_ADDRESS(voices[index].adsr));
+            const uint32_t saved_configuration = RP_MIXER_ADDRESS(voices[index].envelope.configuration);
+            envelope_changed = rp_u32(c, saved_configuration) != configuration;
+            /* +0x180C's taken delay slot clears only this voice's dirty sign
+             * when ADSR is unchanged. Pitch/volume writes must not reset it. */
+            if (envelope_changed) rp_w32(c, saved_configuration, configuration);
             const uint32_t volumes = rp_u32(c, registers);
             if (volumes != rp_u32(c, voice + 0x14)) {
                 rp_w32(c, voice + 0x14, volumes);
@@ -490,8 +500,15 @@ static uint32_t active_sample(rp_context *c, uint16_t control)
         if (!release_started && remaining > 0 && state < 6) {
             write_half(c, voice + VOICE_COUNTDOWN, (uint16_t)remaining);
         } else {
-            if (!release_started && remaining > 0 && (dirty & bit) && !(keyon & bit))
-                rp_block(c, "ME_envelope_reconfiguration_not_reconstructed", 0x16E4);
+            if (!release_started && remaining > 0 && envelope_changed && !(keyon & bit)) {
+                const uint16_t level = read_half(c, voice + VOICE_LEVEL);
+                write_half(c, voice + VOICE_COUNTDOWN, 1);
+                write_half(c, voice + VOICE_THRESHOLD, level);
+                rp_w8(c, voice + VOICE_STATE, (uint8_t)((state & ~3) - 4));
+                rp_w8(c, voice + VOICE_EXPONENTIAL, 0);
+                write_half(c, voice + VOICE_STEP, 0);
+                rp_event(c, "milestone", "ME_voice_envelope_reconfigured", index, (uint32_t)state);
+            }
             advance_voice_envelope(c, voice, index);
             if (index == 0 && (rp_u32(c, SHARED + 0x190) & 1))
                 rp_block(c, "ME_first_voice_pitch_modulation_not_reconstructed", 0x1408);

@@ -179,7 +179,39 @@ int main(void)
         check_reverb_alias_order(c, phase, false);
         check_reverb_alias_order(c, phase, true);
     }
+    /* A dirty voice with unchanged ADSR must continue its current envelope.
+     * Changing ADSR takes +0x16E4 instead, preserving the instantaneous level. */
+    memset(c->regions[2].bytes, 0, c->regions[2].size);
+    set_half(c, RP_SHARED_ADDRESS(control), 0xC000);
+    rp_w32(c, RP_SHARED_ADDRESS(dirty_voice_mask), 0x80000001);
+    rp_w8(c, RP_MIXER_ADDRESS(voices[0].envelope.phase), 16);
+    set_half(c, RP_MIXER_ADDRESS(voices[0].envelope.countdown), 7);
+    set_half(c, RP_MIXER_ADDRESS(voices[0].envelope.period), 9);
+    set_half(c, RP_MIXER_ADDRESS(voices[0].envelope.level), 1234);
+    if (setjmp(c->stop) != 0) {
+        fprintf(stderr, "Unexpected envelope boundary: %s\n", c->stop_kind);
+        abort();
+    }
+    assert(rp_pops_spu_sample(c, &output));
+    assert(*(uint8_t *)rp_memory(c, RP_MIXER_ADDRESS(voices[0].envelope.phase), 1) == 16);
+    assert(get_half(c, RP_MIXER_ADDRESS(voices[0].envelope.countdown)) == 6);
+    assert(get_half(c, RP_MIXER_ADDRESS(voices[0].envelope.level)) == 1234);
+
+    rp_w8(c, RP_MIXER_ADDRESS(voices[0].envelope.phase), 23);
+    set_half(c, RP_MIXER_ADDRESS(voices[0].envelope.countdown), 8);
+    set_half(c, RP_MIXER_ADDRESS(voices[0].envelope.step), 25);
+    rp_w8(c, RP_MIXER_ADDRESS(voices[0].envelope.exponential), 1);
+    set_half(c, RP_SHARED_ADDRESS(voices[0].adsr[0]), 1);
+    rp_w32(c, RP_SHARED_ADDRESS(dirty_voice_mask), 1);
+    assert(rp_pops_spu_sample(c, &output));
+    assert(*(uint8_t *)rp_memory(c, RP_MIXER_ADDRESS(voices[0].envelope.phase), 1) == 16);
+    assert(rp_u32(c, RP_MIXER_ADDRESS(voices[0].envelope.configuration)) == 1);
+    assert(get_half(c, RP_MIXER_ADDRESS(voices[0].envelope.threshold)) == 1234);
+    assert(get_half(c, RP_MIXER_ADDRESS(voices[0].envelope.level)) == 1234);
+    assert(get_half(c, RP_MIXER_ADDRESS(voices[0].envelope.step)) == 0);
+    assert(get_half(c, RP_MIXER_ADDRESS(voices[0].envelope.countdown)) == 0);
+    assert(*(uint8_t *)rp_memory(c, RP_MIXER_ADDRESS(voices[0].envelope.exponential), 1) == 0);
     fclose(c->trace); free(c->regions[2].bytes); free(c);
-    puts("SPU: voices, wet input, reverb writes/alias order/wrap, idle postmix and CD boundary passed.");
+    puts("SPU: voice/envelope changes, wet input, reverb ordering, postmix and CD boundary passed.");
     return 0;
 }

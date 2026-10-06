@@ -26,6 +26,29 @@ typedef struct {
 } rp_master_volume_layout;
 
 typedef struct {
+    uint32_t configuration;
+    int8_t phase;
+    uint8_t exponential;
+    uint16_t threshold, countdown;
+    int16_t step;
+    uint16_t period;
+    int16_t level;
+} rp_voice_envelope_layout;
+
+typedef struct {
+    rp_volume_sweep_layout left, right;
+    uint32_t raw_volume_pair;
+    rp_voice_envelope_layout envelope;
+    int32_t sample_position;
+    uint16_t block_address;
+    uint8_t manual_repeat, block_flags;
+    uint16_t pitch, repeat_address;
+    int16_t history[3], decoded[28];
+    int8_t stopped;
+    uint8_t unknown_73;
+} rp_mixer_voice_layout;
+
+typedef struct {
     uint32_t work_area_base;
     int16_t iir_gain, comb_gain[4], wall_gain, allpass_gain[2];
 } rp_reverb_parameters_layout;
@@ -76,7 +99,8 @@ typedef struct {
 } rp_me_shared_layout;
 
 typedef struct {
-    uint8_t coefficients_and_voices[0x1338]; /* Existing voice code migrates separately. */
+    uint8_t coefficients[0x858];
+    rp_mixer_voice_layout voices[24];
     rp_master_volume_layout master_volume;
     rp_reverb_parameters_layout reverb_parameters;
     rp_reverb_channel_layout reverb_channels[2];
@@ -133,6 +157,11 @@ static inline uint32_t rp_capture_address(unsigned channel, uint32_t cursor)
 _Static_assert(offsetof(rp_core_clock_layout, event_downcount) == 0x1B0, "core clock layout");
 _Static_assert(sizeof(rp_volume_sweep_layout) == 10, "volume sweep layout");
 _Static_assert(sizeof(rp_master_volume_layout) == 24, "master volume layout");
+_Static_assert(sizeof(rp_voice_envelope_layout) == 0x10, "voice envelope layout");
+_Static_assert(sizeof(rp_mixer_voice_layout) == 0x74, "mixer voice layout");
+_Static_assert(offsetof(rp_mixer_voice_layout, envelope) == 0x18, "voice envelope offset");
+_Static_assert(offsetof(rp_mixer_voice_layout, decoded) == 0x3A, "voice decoded samples");
+_Static_assert(offsetof(rp_me_mixer_layout, voices) == 0x858, "mixer voice array");
 _Static_assert(sizeof(rp_reverb_parameters_layout) == 20, "reverb parameters layout");
 _Static_assert(sizeof(rp_reverb_channel_layout) == 64, "reverb channel layout");
 _Static_assert(offsetof(rp_me_shared_layout, pending_key_on) == 0x280, "shared mailbox layout");

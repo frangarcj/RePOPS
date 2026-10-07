@@ -772,7 +772,7 @@ uint32_t rp_pops_gpu_dma_transfer(rp_context *c, uint32_t address, uint32_t byte
     rp_function(c, 0x12C74, "pops.GPU_DMA_linked_list_partial");
     if (!(control & 0x400)) {
         if (!(control & 1))
-            rp_block(c, "GPU_DMA_VRAM_to_RAM_not_reconstructed", 0x12F90);
+            return rp_pops_gpu_dma_readback(c, address, bytes);
         uint32_t source = UINT32_C(0x09800000) | (address & 0x1FFFFF);
         uint32_t available = bytes;
         const uint32_t prefix = GPU8(packet_word_count) * sizeof(uint32_t);
@@ -1024,39 +1024,6 @@ void rp_pops_gpu_write(rp_context *c, uint32_t address, uint32_t word)
     SET_GPU8(packet_extra_words, 0); SET_GPU8(packet_word_count, 0);
 }
 
-/* +0x130BC: the scalar query branch, selected by GP1(10h). The original
- * query table returns zero for selector 7; do not substitute another GPU's ID.
- * Selectors 16/17 are transfer modes set elsewhere, not masked GP1 queries. */
-static uint32_t read_data_query(rp_context *c)
-{
-    rp_function(c, 0x130BC, "pops.gpu_data_query_partial");
-    const uint32_t selector = GPU8(read_selector);
-    uint32_t result = selector;
-    switch (selector) {
-    case 2: result = GPU32(texture_window); break;
-    case 3:
-        result = (uint32_t)(int32_t)(int16_t)GPU16(draw_area_start[0]) |
-                 ((uint32_t)(int32_t)(int16_t)GPU16(draw_area_start[1]) << 10);
-        break;
-    case 4:
-        result = (uint32_t)(int32_t)(int16_t)GPU16(draw_area_end[0]) |
-                 ((uint32_t)(int32_t)(int16_t)GPU16(draw_area_end[1]) << 10);
-        break;
-    case 5:
-        result = (GPU16(drawing_offset[0]) & 0x7FF) |
-                 ((uint32_t)(GPU16(drawing_offset[1]) & 0x7FF) << 11);
-        break;
-    case 7: result = 0; break;
-    case 16: case 17:
-        rp_block(c, "GPU_VRAM_data_transfer_not_reconstructed", 0x130BC);
-    default: break;
-    }
-    SET_GPU32(data_read_latch, result);
-    SET_GPU32(transfer_read_latch, result);
-    rp_event(c, "GPU_register_read", "data_query_and_latches", selector, result);
-    return result;
-}
-
 /* +0x12FBC..+0x130BC: status reads compose existing state and frame timing.
  * The polling debit and two timestamps are observable firmware behavior;
  * no GPU-ready bit or frame completion is supplied by the host. */
@@ -1066,7 +1033,8 @@ uint32_t rp_pops_gpu_read(rp_context *c, uint32_t address, uint32_t width)
     rp_function(c, 0x12FBC, "pops.gpu_register_read_partial");
     if (!(address & 4)) {
         rp_core_set_downcount(c, rp_core_downcount(c) - GPU32(data_read_cycle_cost));
-        return read_data_query(c);
+        rp_pops_gpu_read_data(c, RP_GPU_ADDRESS(c, data_read_latch), 4);
+        return GPU32(data_read_latch);
     }
 
     uint32_t remaining = rp_core_downcount(c) - 1;

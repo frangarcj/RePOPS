@@ -4,6 +4,22 @@ Historical native runs retain `result/retained-trace-result.json` instead of
 their full trace once superseded. Keep the latest two traces and the GE-preview
 provenance source; decompilers and focused verification outputs are not pruned.
 
+## Current: GPU buffer readback reaches the GE execution barrier
+
+`out/readback-buffer.rLqHk4/result/` clears DMA validity tags and emits the
+direct GE copy for the reached 64x256 rectangle. The request is 32,768 bytes
+to guest address 0x099A6200. It stops at the real dependency +0x13148:
+`GE_readback_execution_required`, after 357,132,214 generated-instruction
+observations and 2,540,573 transfers. No destination pixel buffer is reported
+as complete; `game_executed` remains false.
+
+The common +0x130BC buffer helper now covers query filling, direct GE emission,
+CPU halfword reads with independent X/Y wrap, continuation, odd-tail retention
+and the original latch behavior. Scalar GPUREAD and DMA share it. GPU and
+readback contract tests pass under ASan/UBSan using explicit nonzero fixture
+pixels. The native backend still refuses synchronization without GE execution.
+See `gpu_readback.md`.
+
 ## Current: GP0 C0h header passes; DMA VRAM readback is next
 
 `out/gpu-readback.7pExuj/result/` admits the three-word VRAM-to-CPU header,

@@ -19,6 +19,21 @@ static void copy_template(rp_context *c, uint32_t destination, uint32_t source, 
 {
     memcpy(rp_memory(c, destination, size), rp_module_memory(c, source, size), size);
 }
+
+/* Readback differs from headless list capture: the caller will consume the
+ * pixels immediately. Never acknowledge this dependency using untouched
+ * zero-initialized EDRAM. The actual GE backend must implement these barriers. */
+uint32_t rp_ge_readback_restart_list(rp_context *c, uint32_t old_list)
+{
+    rp_event(c, "GPU_readback_boundary", "sceGeListSync_before_restart", old_list, 0x49A00000);
+    rp_block(c, "GE_readback_previous_list_execution_required", 0x133AC);
+}
+
+uint32_t rp_ge_readback_barrier(rp_context *c, uint32_t old_list, uint32_t continuation)
+{
+    rp_event(c, "GPU_readback_boundary", "POPSMAN_7014C540_execution_required", old_list, continuation);
+    rp_block(c, "GE_readback_execution_required", 0x13148);
+}
 static void copy_template_table(rp_context *c, uint32_t destination,
                                 uint32_t table, unsigned count, int optional)
 {

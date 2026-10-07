@@ -38,6 +38,16 @@ uint32_t rp_pops_dma_delay_active(rp_context *c, uint16_t mask, uint32_t delay, 
  * two firmware templates. Their actual bytes are used by the integrated run. */
 static unsigned captured_templates;
 static uint32_t expected_closed_list;
+uint32_t rp_ge_readback_restart_list(rp_context *c, uint32_t old_list)
+{
+    (void)old_list;
+    rp_block(c, "GE_readback_previous_list_execution_required", 0x133AC);
+}
+uint32_t rp_ge_readback_barrier(rp_context *c, uint32_t old_list, uint32_t continuation)
+{
+    (void)old_list; (void)continuation;
+    rp_block(c, "GE_readback_execution_required", 0x13148);
+}
 uint32_t rp_ge_capture_state_list(rp_context *c, uint32_t address, int module_relative)
 {
     const unsigned which = captured_templates++ & 1;
@@ -400,7 +410,7 @@ static void check_readback_header(rp_context *c)
         (void)rp_pops_gpu_read(c, 0x1F801810, 2);
         assert(!"Readback returned fabricated framebuffer data");
     }
-    assert(!strcmp(c->stop_kind, "GPU_VRAM_data_transfer_not_reconstructed"));
+    assert(!strcmp(c->stop_kind, "GE_readback_execution_required"));
 }
 
 int main(void)
@@ -441,12 +451,13 @@ int main(void)
     reset_status(c);
     rp_w32(c, RP_GPU_ADDRESS(c, data_read_cycle_cost), 7);
     rp_w8(c, RP_GPU_ADDRESS(c, read_selector), 16);
+    rp_w32(c, RP_GPU_ADDRESS(c, transfer_size), 0x00010003);
     if (setjmp(c->stop) == 0) {
         (void)rp_pops_gpu_read(c, 0x1810, 2);
         assert(!"Unimplemented GPU data path returned");
     }
-    assert(strcmp(c->stop_kind, "GPU_VRAM_data_transfer_not_reconstructed") == 0);
-    assert(c->stop_address == 0x130BC && rp_core_downcount(c) == 4993);
+    assert(strcmp(c->stop_kind, "GE_readback_execution_required") == 0);
+    assert(c->stop_address == 0x13148 && rp_core_downcount(c) == 4993);
     c->regions[0] = (rp_region){0, 0x4AE730, calloc(1, 0x4AE730)};
     c->regions[1] = (rp_region){0x09A00000, 0x1000, calloc(1, 0x1000)};
     assert(c->regions[0].bytes && c->regions[1].bytes);

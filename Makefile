@@ -15,6 +15,7 @@ NATIVE_SRC += src/native/pops_cdrom.c
 NATIVE_SRC += src/native/pops_cd_block.c
 NATIVE_SRC += src/native/pops_dma.c
 NATIVE_SRC += src/native/pops_gpu.c
+NATIVE_SRC += src/native/pops_gpu_readback.c
 NATIVE_SRC += src/native/pops_gte.c
 NATIVE_SRC += src/native/pops_display.c
 NATIVE_SRC += src/native/pops_serial.c
@@ -80,13 +81,21 @@ build/repops-native: $(NATIVE_SRC) src/native/runtime.h src/native/pops_state.h 
 test:
 	python3 -m unittest discover -s tests -v
 
-build/test_native_gpu: src/native/runtime.c src/native/pops_gpu.c src/native/pops_gpu.h src/native/pops_state.h src/native/pops_cdrom.h src/native/runtime.h tests/test_native_gpu.c
+build/test_native_gpu: src/native/runtime.c src/native/pops_gpu.c src/native/pops_gpu_readback.c src/native/pops_gpu.h src/native/pops_state.h src/native/pops_cdrom.h src/native/runtime.h tests/test_native_gpu.c
 	mkdir -p build
-	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_gpu.c tests/test_native_gpu.c -o $@
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_gpu.c src/native/pops_gpu_readback.c tests/test_native_gpu.c -o $@
 
 .PHONY: test-native-gpu
 test-native-gpu: build/test_native_gpu
 	./build/test_native_gpu
+
+build/test_native_gpu_readback: src/native/runtime.c src/native/pops_gpu_readback.c src/native/pops_gpu.h src/native/runtime.h src/native/pops_state.h src/native/pops_cdrom.h tests/test_native_gpu_readback.c
+	mkdir -p build
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_gpu_readback.c tests/test_native_gpu_readback.c -o $@
+
+.PHONY: test-native-gpu-readback
+test-native-gpu-readback: build/test_native_gpu_readback
+	./build/test_native_gpu_readback
 
 build/test_native_events: src/native/runtime.c src/native/pops_events.c src/native/pops_dma.c src/native/pops_serial.c src/native/pops_memory_card.c src/native/pops_dma.h src/native/pops_serial.h src/native/runtime.h src/native/pops_state.h src/native/pops_cdrom.h tests/test_native_events.c
 	mkdir -p build

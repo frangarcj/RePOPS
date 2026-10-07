@@ -93,12 +93,21 @@ typedef struct {
 } rp_core_gpu_layout;
 
 #define RP_GPU_ADDRESS(c, member) RP_FIELD_ADDRESS((c)->gp, rp_core_gpu_layout, member)
+enum {
+    RP_GPU_READ_START = 16, RP_GPU_READ_PIXELS = 17, RP_GPU_READ_FINISHED = 255
+};
 uint32_t rp_pops_gpu_read(rp_context *, uint32_t address, uint32_t width);
+void rp_pops_gpu_read_data(rp_context *, uint32_t destination, uint32_t bytes);
+uint32_t rp_pops_gpu_dma_readback(rp_context *, uint32_t address, uint32_t bytes);
 void rp_pops_gpu_write(rp_context *, uint32_t address, uint32_t word);
 uint32_t rp_pops_gpu_dma_transfer(rp_context *, uint32_t address, uint32_t bytes, uint32_t control);
 void rp_pops_gpu_submit_pending_list(rp_context *);
 /* Existing headless adapter for bounded state lists, not a POPSMAN body. */
 uint32_t rp_ge_capture_state_list(rp_context *, uint32_t address, int module_relative);
+/* These backend barriers may return only after GE writes are visible. The
+ * current headless implementation stops; isolated tests supply known pixels. */
+uint32_t rp_ge_readback_restart_list(rp_context *, uint32_t old_list);
+uint32_t rp_ge_readback_barrier(rp_context *, uint32_t old_list, uint32_t continuation);
 enum { RP_GPU_DISPLAY_TRANSITION_ADDRESS = 0x49CBD4 };
 static inline uint32_t rp_gpu_vram_pixel(uint32_t x, uint32_t y)
 { return UINT32_C(0x44000000) | ((y & 511) << 11) | ((x & 1023) << 1); }

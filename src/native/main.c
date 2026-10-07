@@ -75,6 +75,9 @@ int main(int argc, char **argv)
         rp_pops_main_thread(c);
         rp_block(c,"unexpected_main_thread_return",0x16080);
     }
+    const char *edram_dump = getenv("REPOPS_GE_DUMP_EDRAM");
+    if (c->ge_backend_active && edram_dump && *edram_dump)
+        (void)rp_ge_live_dump_edram(c, edram_dump);
     fprintf(c->trace,"{\"kind\":\"result\",\"status\":\"%s\",\"address\":%u,"
             "\"native_function_entries\":%u,\"host_service_calls\":%u,"
             "\"execution\":\"native_C_POPS_with_Unicorn_generated_cache\",\"game_executed\":false,"

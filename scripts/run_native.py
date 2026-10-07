@@ -37,7 +37,7 @@ def main():
     ap.add_argument('--timeout',type=float,default=30,
                     help='Host execution limit in seconds; not guest-time emulation')
     args=ap.parse_args()
-    if not 0 < args.timeout <= 600: ap.error('Timeout must be in (0, 600] seconds')
+    if not 0 < args.timeout <= 1800: ap.error('Timeout must be in (0, 1800] seconds')
     if args.out.exists(): ap.error('Refusing existing output directory')
     original=Image(args.elf)
     if hashlib.sha256(original.data).hexdigest()!=SOURCE_SHA256:ap.error('Wrong original POPS hash')

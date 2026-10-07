@@ -4,7 +4,7 @@ Historical native runs retain `result/retained-trace-result.json` instead of
 their full trace once superseded. Keep the latest two traces and the GE-preview
 provenance source; decompilers and focused verification outputs are not pruned.
 
-## Current: optional PPSSPP GE executes the standalone rendering smoke
+## Current: PPSSPP SoftGPU executes RePops GE lists
 
 The pinned PPSSPP software backend now builds together with an optional native
 RePops executable. `out/ppsspp-ge-smoke-01.log` verifies an initially stalled
@@ -13,10 +13,19 @@ upper EDRAM, and completed-id recycling beyond the donor's 64-list capacity.
 No PSP CPU interpreter/JIT step is invoked. The ordinary capture backend and
 its focused GPU/display/readback checks still pass. See `ppsspp_ge.md`.
 
-The live FFVI integration is a separate test; this synthetic GE smoke does
-not by itself validate the full sequence of lists emitted by POPS or game
-graphics fidelity. GE support is a host backend, not another reconstructed
-POPS function, and is excluded from the reverse-function census.
+`out/ppsspp-frames.nylhrk_n/result/` is the first completed integrated FFVI
+diagnostic with this backend. It reaches the explicit 500,000-step host budget
+rather than a graphics blocker, after 77,923,030 generated-instruction
+observations. The run records 165 GE submissions and 163 completed list syncs.
+Its saved EDRAM contains 27,930 nonzero halfwords in the modeled PS1 VRAM and
+the PSP display buffer decodes to `out/ppsspp-frames.nylhrk_n/psp-display.png`,
+showing the PlayStation logo and licensing text. This is actual software-GE
+execution, not an offline reconstruction.
+
+`game_executed` remains false: this bounded run still stops before an FFVI
+frame or complete emulator execution claim. GE support is a host backend, not
+another reconstructed POPS function, and is excluded from the reverse-function
+census.
 
 ## Current: recovered POPSMAN provider reaches pixel-dependent GE list sync
 

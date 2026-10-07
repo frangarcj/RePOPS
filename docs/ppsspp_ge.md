@@ -59,9 +59,19 @@ These are actual SoftGPU results, not source-packet rendering or fixtures
 that fill the expected framebuffer. No PSP CPU run/step function is called.
 
 The focused capture-only GPU/display/readback checks and the three Python
-runner checks also pass (`out/ge-hook-capture-checks.log`). The live FFVI
-path is being exercised separately; a passed synthetic GE smoke is not an
-FFVI boot, full PSP timing validation or a graphics-fidelity comparison.
+runner checks also pass (`out/ge-hook-capture-checks.log`).
+
+`out/ppsspp-frames.nylhrk_n/result/` is the first bounded FFVI diagnostic
+completed with this backend. It reaches the explicit host execution budget
+after 77,923,030 generated-instruction observations, with 165 GE submissions
+and 163 completed list synchronizations. Its 4 MiB EDRAM snapshot contains
+27,930 nonzero halfwords in the modeled PS1 VRAM. Decoding the PSP display
+buffer at 0x041BC000 produces `psp-display.png`, where the PlayStation boot
+logo and licensing text are visibly rasterized. This is actual SoftGPU output
+from RePops-generated GE lists, not the older offline polygon preview.
+
+The bounded run is not an FFVI boot, full PSP timing validation or a
+graphics-fidelity comparison.
 
 Build with `sh scripts/build_ppsspp_ge.sh`; select `--ge-backend ppsspp` in
 `scripts/run_native.py`. The default `capture` backend is unchanged. CMake

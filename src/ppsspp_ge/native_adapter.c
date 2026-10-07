@@ -42,6 +42,19 @@ void rp_ge_live_close(rp_context *c) {
     rp_ppsspp_ge_close();
     c->ge_backend_active = 0;
 }
+int rp_ge_live_dump_edram(rp_context *c, const char *path) {
+    if (!c->ge_backend_active) return -1;
+    FILE *file = fopen(path, "wbx");
+    if (!file) { perror("GE EDRAM snapshot"); return -1; }
+    const size_t bytes = fwrite(c->regions[3].bytes, 1, c->regions[3].size, file);
+    const int closed = fclose(file);
+    if (bytes != c->regions[3].size || closed) {
+        fprintf(stderr, "Incomplete GE EDRAM snapshot\n");
+        return -1;
+    }
+    rp_event(c, "GE_backend", "actual_EDRAM_snapshot_written", c->regions[3].base, (uint32_t)bytes);
+    return 0;
+}
 uint32_t rp_ge_live_enqueue(rp_context *c, uint32_t start, uint32_t stall) {
     scratch_in(c);
     const int id = rp_ppsspp_ge_enqueue(start, stall);

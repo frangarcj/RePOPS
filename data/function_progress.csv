@@ -44,6 +44,7 @@ popsman_corpus_660,sceMeAudio:14447BA0,extended_header,adapter,src/native/pops_d
 popsman_ark_660,0x3590,C93C56F8,complete,src/popsman_mailbox.c,bounded_binary_comparison,isolated
 popsman_ark_660,0x35AC,0BABD960,complete,src/popsman_mailbox.c,bounded_binary_comparison,isolated
 popsman_ark_660,0x3ACC,E7F06E2B,complete,src/popsman_mailbox.c,bounded_binary_comparison,isolated
+popsman_ark_660,0x3A00,7014C540,complete,src/popsman_ge.c,original_ordered_bus_contracts_fast_poll_and_fallback_headless_only,integrated
 popsman_ark_660,0x3490,DE630CD2_registration,complete,src/me_registration.c,binary_comparison_helper_boundary,isolated
 popsman_ark_660,0x35D8,ME_startup,complete,src/me_startup.c,binary_comparison_scripted_devices,isolated
 popsman_ark_660,0x3514,ME_control,complete,src/me_startup.c,binary_comparison_scripted_devices,isolated

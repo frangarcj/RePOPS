@@ -108,6 +108,8 @@ uint32_t rp_ge_capture_state_list(rp_context *, uint32_t address, int module_rel
  * current headless implementation stops; isolated tests supply known pixels. */
 uint32_t rp_ge_readback_restart_list(rp_context *, uint32_t old_list);
 uint32_t rp_ge_readback_barrier(rp_context *, uint32_t old_list, uint32_t continuation);
+uint32_t rp_popsman_ge_finish_host(rp_context *, uint32_t old_list,
+                                  uint32_t continuation, bool require_pixels);
 enum { RP_GPU_DISPLAY_TRANSITION_ADDRESS = 0x49CBD4 };
 static inline uint32_t rp_gpu_vram_pixel(uint32_t x, uint32_t y)
 { return UINT32_C(0x44000000) | ((y & 511) << 11) | ((x & 1023) << 1); }

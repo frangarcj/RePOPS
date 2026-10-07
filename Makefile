@@ -16,6 +16,7 @@ NATIVE_SRC += src/native/pops_cd_block.c
 NATIVE_SRC += src/native/pops_dma.c
 NATIVE_SRC += src/native/pops_gpu.c
 NATIVE_SRC += src/native/pops_gpu_readback.c
+NATIVE_SRC += src/popsman_ge.c src/native/pops_ge_host.c
 NATIVE_SRC += src/native/pops_gte.c
 NATIVE_SRC += src/native/pops_display.c
 NATIVE_SRC += src/native/pops_serial.c
@@ -32,6 +33,7 @@ build/repops-native build/test_native_events build/test_native_cdrom: src/native
 build/repops-native: src/native/pops_display.h
 build/repops-native: src/native/pops_mdec.h
 build/repops-native: src/native/pops_spu_dma.h
+build/repops-native build/test_native_gpu: src/popsman_ge.h
 build/test_native_events build/test_native_cdrom: src/native/pops_spu_dma.h src/native/pops_mdec.h
 build/repops-native build/test_native_memory_card build/test_native_events build/test_native_cdrom: src/native/pops_memory_card.h
 build/test_native_gpu: src/native/pops_dma.h
@@ -81,9 +83,9 @@ build/repops-native: $(NATIVE_SRC) src/native/runtime.h src/native/pops_state.h 
 test:
 	python3 -m unittest discover -s tests -v
 
-build/test_native_gpu: src/native/runtime.c src/native/pops_gpu.c src/native/pops_gpu_readback.c src/native/pops_gpu.h src/native/pops_state.h src/native/pops_cdrom.h src/native/runtime.h tests/test_native_gpu.c
+build/test_native_gpu: src/native/runtime.c src/native/pops_gpu.c src/native/pops_gpu_readback.c src/popsman_ge.c src/native/pops_ge_host.c src/native/pops_gpu.h src/native/pops_state.h src/native/pops_cdrom.h src/native/runtime.h tests/test_native_gpu.c
 	mkdir -p build
-	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_gpu.c src/native/pops_gpu_readback.c tests/test_native_gpu.c -o $@
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_gpu.c src/native/pops_gpu_readback.c src/popsman_ge.c src/native/pops_ge_host.c tests/test_native_gpu.c -o $@
 
 .PHONY: test-native-gpu
 test-native-gpu: build/test_native_gpu
@@ -96,6 +98,14 @@ build/test_native_gpu_readback: src/native/runtime.c src/native/pops_gpu_readbac
 .PHONY: test-native-gpu-readback
 test-native-gpu-readback: build/test_native_gpu_readback
 	./build/test_native_gpu_readback
+
+build/test_popsman_ge: src/popsman_ge.c src/popsman_ge.h tests/test_popsman_ge.c
+	mkdir -p build
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/popsman_ge.c tests/test_popsman_ge.c -o $@
+
+.PHONY: test-popsman-ge
+test-popsman-ge: build/test_popsman_ge
+	./build/test_popsman_ge
 
 build/test_native_events: src/native/runtime.c src/native/pops_events.c src/native/pops_dma.c src/native/pops_serial.c src/native/pops_memory_card.c src/native/pops_dma.h src/native/pops_serial.h src/native/runtime.h src/native/pops_state.h src/native/pops_cdrom.h tests/test_native_events.c
 	mkdir -p build

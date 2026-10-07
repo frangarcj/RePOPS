@@ -4,6 +4,23 @@ Historical native runs retain `result/retained-trace-result.json` instead of
 their full trace once superseded. Keep the latest two traces and the GE-preview
 provenance source; decompilers and focused verification outputs are not pruned.
 
+## Current: recovered POPSMAN provider reaches pixel-dependent GE list sync
+
+`out/ge-provider.6czKIc/result/` calls the recovered ARK-reference provider
+7014C540 at +0x3A00 after preparing the 32,768-byte readback. Its fallback
+publishes FINISH/END, queues continuation id 186 and reaches the old-list
+wait for id 185 at provider +0x3A98. The explicit host limit there is now
+`GE_backend_execution_required`. No pixel-dependent wait returns success.
+The run records 356,342,554 generated-instruction observations and 2,540,513
+compiled transfers, with `game_executed: false`.
+
+`popsman_ge.c` is the recovered provider body; `pops_ge_host.c` is its separate
+headless bus. Ordered tests cover both original branches, while the integrated
+capture host has no completion bit and takes the fallback. GPU/readback tests
+also verify that this host refuses a pixel-dependent synchronization after
+publishing the terminators, without changing the destination pixel buffer.
+See `popsman_ge.md`. A queue/list GE executor remains the actual dependency.
+
 ## Current: GPU buffer readback reaches the GE execution barrier
 
 `out/readback-buffer.rLqHk4/result/` clears DMA validity tags and emits the

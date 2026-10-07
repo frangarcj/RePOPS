@@ -718,6 +718,19 @@ int main(void)
     check_mixed_upload(c);
     check_rectangles(c);
     check_readback_header(c);
+    /* The actual capture adapter, not the readback fixture above, must run
+     * the provider fallback and still refuse pixel-dependent completion. */
+    rp_w32(c, 0x09800800, 0x13579BDF);
+    if (!setjmp(c->stop)) {
+        (void)rp_popsman_ge_finish_host(c, 42, 0x49A00904, true);
+        assert(!"Headless provider completed a pixel-dependent list");
+    }
+    assert(!strcmp(c->stop_kind, "GE_backend_execution_required"));
+    assert(c->stop_address == 0x3A98);
+    assert(rp_u32(c, 0x49A00900) == 0x0F000000);
+    assert(rp_u32(c, 0x49A00904) == 0x0C000000);
+    assert(c->ge_stalled_list == 0x49A00904);
+    assert(rp_u32(c, 0x09800800) == 0x13579BDF);
     fclose(c->trace); free(c->regions[0].bytes); free(c->regions[1].bytes);
     free(c->regions[2].bytes); free(c);
     puts("GPU: uploads, primitives and readback header/state boundary passed; rendering pending.");

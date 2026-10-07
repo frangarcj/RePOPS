@@ -54,12 +54,12 @@ a GPU-ready event or copy the SPU transfer's completion policy.
 
 ## Synchronization and verification limits
 
-`rp_ge_readback_restart_list` represents the direct GE sync/enqueue pair;
-`rp_ge_readback_barrier` represents the POPSMAN 7014C540 service. These are
-explicit host-backend dependencies, not reconstructed POPSMAN bodies. The
-live headless versions stop rather than acknowledge untouched EDRAM as valid
-pixels. Zero-length, non-word-aligned and inconsistent-state domains also
-stop instead of reproducing unsafe original loops.
+`rp_ge_readback_restart_list` represents the direct GE sync/enqueue pair.
+`rp_ge_readback_barrier` now calls the recovered ARK-reference POPSMAN
+7014C540 provider through an explicit host bus; see `popsman_ge.md`. Its
+pixel-dependent list synchronization stops rather than acknowledging untouched
+EDRAM as valid pixels. Zero-length, non-word-aligned and inconsistent-state
+domains also stop instead of reproducing unsafe original loops.
 
 `make test-native-gpu-readback` verifies the six GE words, nonzero pixel data,
 partial reads, X/Y wrap, odd-tail preservation, surplus words, latch changes,

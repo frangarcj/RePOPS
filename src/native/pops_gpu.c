@@ -18,20 +18,12 @@ static uint32_t emit_ge_word(rp_context *c, uint32_t cursor, uint32_t word)
     return cursor + 4;
 }
 
-/* POPS +0x12624/+0x128C8 call POPSMAN's 7014C540 with cursor+4. This
- * headless adapter models its enqueue/sync fallback, not the MMIO fast path:
- * FINISH closes the old list, END starts the stalled continuation. Neither
- * the returned synthetic id nor these writes imply that GE work rendered. */
+/* POPS +0x12624/+0x128C8 call the recovered POPSMAN provider with cursor+4.
+ * The capture host takes its enqueue/sync fallback without rendering. */
 static void capture_ge_boundary(rp_context *c, uint32_t boundary)
 {
     const uint32_t old_id = GPU32(list_id);
-    (void)emit_ge_word(c, boundary - 4, 0x0F000000);
-    (void)emit_ge_word(c, boundary, 0x0C000000);
-    c->ge_stalled_list = boundary;
-    ++c->services;
-    SET_GPU32(list_id, ++c->next_id);
-    rp_event(c, "headless_adapter", "POPSMAN_7014C540_submit_captured_not_rendered",
-             old_id, GPU32(list_id));
+    SET_GPU32(list_id, rp_popsman_ge_finish_host(c, old_id, boundary, false));
 }
 
 void rp_pops_gpu_submit_pending_list(rp_context *c)

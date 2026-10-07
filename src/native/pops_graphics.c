@@ -31,8 +31,7 @@ uint32_t rp_ge_readback_restart_list(rp_context *c, uint32_t old_list)
 
 uint32_t rp_ge_readback_barrier(rp_context *c, uint32_t old_list, uint32_t continuation)
 {
-    rp_event(c, "GPU_readback_boundary", "POPSMAN_7014C540_execution_required", old_list, continuation);
-    rp_block(c, "GE_readback_execution_required", 0x13148);
+    return rp_popsman_ge_finish_host(c, old_list, continuation, true);
 }
 static void copy_template_table(rp_context *c, uint32_t destination,
                                 uint32_t table, unsigned count, int optional)

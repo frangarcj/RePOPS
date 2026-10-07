@@ -4,6 +4,20 @@ Historical native runs retain `result/retained-trace-result.json` instead of
 their full trace once superseded. Keep the latest two traces and the GE-preview
 provenance source; decompilers and focused verification outputs are not pruned.
 
+## Current: configured-PC hook passes; next access is PS1 scratchpad
+
+`out/specialpc.tgdpkx3h/result/` passes the +0x6088 emitter branch and
+continues to a byte write at 0x1F8003D3 through +0x1DD0. It records
+360,183,713 generated-instruction observations, 2,538,634 compiled transfers,
+185 GE submissions and 182 completed GE syncs. `game_executed` remains false.
+
+The hook emits the original halfword dispatch marker before the ordinary
+record. Configuration bit zero additionally subtracts T9 from the deadline,
+clears T9 and stores that deadline, preserving the guest-cycle value. Named
+wire fields describe the configured PC and dispatch control. The emitter
+fixture checks both original instruction sequences under ASan/UBSan; this
+is a contract check, not a full instruction-level equivalence proof.
+
 ## Current: PPSSPP SoftGPU executes RePops GE lists
 
 The pinned PPSSPP software backend now builds together with an optional native

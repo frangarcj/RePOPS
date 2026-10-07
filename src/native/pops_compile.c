@@ -205,7 +205,8 @@ uint32_t rp_pops_emit_block_records(rp_context *c, uint32_t out)
             }
         }
         if (flags & 0x1000)
-            rp_block(c, "compiler_special_PC_hook_not_reconstructed", 0x6088);
+            out = rp_emit_special_pc_hook(c, out,
+                rp_u32(c, RP_COMPILE_CONTROL_ADDRESS(c, special_pc_hook_address_flags)));
 
         const uint16_t next_flags = h(c, record + 16);
         if (!(next_flags & 1)) {

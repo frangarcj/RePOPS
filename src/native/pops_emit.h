@@ -83,6 +83,7 @@ uint32_t rp_emit_jump_delay(rp_context *, uint32_t, uint32_t);
 uint32_t rp_emit_pair(rp_context *, uint32_t, uint32_t, uint32_t, uint32_t *, uint32_t *);
 uint32_t rp_emit_immediate(rp_context *, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
 uint32_t rp_emit_debit(rp_context *, int32_t, uint32_t);
+uint32_t rp_emit_special_pc_hook(rp_context *, uint32_t, uint32_t);
 uint32_t rp_emit_load_state(rp_context *, uint32_t, uint32_t, uint32_t);
 uint32_t rp_emit_known_value(rp_context *, uint32_t, uint32_t, uint32_t, uint32_t);
 uint32_t rp_emit_record(rp_context *, rp_pops_category, uint32_t, uint32_t, uint32_t);

@@ -105,6 +105,27 @@ uint32_t rp_emit_debit(rp_context *c, int32_t cost, uint32_t out)
     return cost > 0 ? emit(c, out, 0x27390000 | ((0u - (uint32_t)cost) & 0xFFFF)) : out;
 }
 
+/* +0x6088..+0x611C: a configured guest PC injects an event-dispatch marker
+ * before the ordinary record. Bit zero additionally folds the current T9
+ * cycle debit into the event deadline and clears T9. */
+uint32_t rp_emit_special_pc_hook(rp_context *c, uint32_t out, uint32_t control)
+{
+    const uint32_t temp = rp_emit_temp(c, 4, 0);
+    out = emit(c, out, 0x34000001 | ((temp & 31) << 16));
+    out = emit(c, out, 0xA7800000 | ((temp & 31) << 16) |
+               (uint32_t)offsetof(rp_core_clock_layout, dispatch_control));
+    if (control & 1) {
+        out = emit(c, out, 0x8F800000 | ((temp & 31) << 16) |
+                   (uint32_t)offsetof(rp_core_clock_layout, event_deadline));
+        out = emit(c, out, 0x00190023 | ((temp & 31) << 21) | ((temp & 31) << 11));
+        out = emit(c, out, 0x34190000);
+        out = emit(c, out, 0xAF800000 | ((temp & 31) << 16) |
+                   (uint32_t)offsetof(rp_core_clock_layout, event_deadline));
+    }
+    rp_emit_release_temp(c, temp);
+    return out;
+}
+
 uint32_t rp_emit_spill_slot(rp_context *c, uint32_t slot, uint32_t out)
 {
     rp_function(c, 0x2C34, "pops.spill_temporary_slot");

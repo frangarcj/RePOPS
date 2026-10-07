@@ -58,6 +58,25 @@ int main(void)
     for (unsigned i = 0; i < 12; ++i) assert(rp_emit_temp(c, 2, 0) == 8 + i);
     rp_w32(c, c->gp + 0x744, 123);
     assert(rp_emit_temp(c, 2, 0) == 2 && rp_u32(c, c->gp + 0x744) == 0);
+
+    /* +0x6088 special-PC prologue: always mark dispatch control, optionally
+     * fold T9 into the event deadline before the ordinary guest record. */
+    const uint32_t hook = 0x09B80800;
+    rp_emit_init_registers(c, hook);
+    uint32_t hook_end = rp_emit_special_pc_hook(c, hook, 0x800417F8);
+    assert(hook_end == hook + 8);
+    assert(rp_u32(c, hook) == 0x34080001);
+    assert(rp_u32(c, hook + 4) == 0xA78801C0);
+    rp_emit_init_registers(c, hook + 0x40);
+    hook_end = rp_emit_special_pc_hook(c, hook + 0x40, 0x800417F9);
+    assert(hook_end == hook + 0x40 + 24);
+    const uint32_t adjusted[] = {
+        0x34080001, 0xA78801C0, 0x8F8801AC,
+        0x01194023, 0x34190000, 0xAF8801AC,
+    };
+    for (unsigned i = 0; i < sizeof(adjusted) / sizeof(adjusted[0]); ++i)
+        assert(rp_u32(c, hook + 0x40 + i * 4) == adjusted[i]);
+
     /* Capture S0 before a delay-slot write; the branch consumes that temporary
      * rather than comparing the later value of the guest register. */
     rp_emit_init_registers(c, cursor);

@@ -8,7 +8,13 @@ typedef struct {
     uint8_t earlier_state[0x1AC];
     uint32_t event_deadline, event_downcount;
     uint32_t event_resume_code, event_head_next, event_head_prev;
+    uint16_t dispatch_control;
 } rp_core_clock_layout;
+
+typedef struct {
+    uint8_t earlier_state[0x6F4];
+    uint32_t special_pc_hook_address_flags;
+} rp_core_compile_control_layout;
 
 typedef struct {
     uint8_t earlier_state[0x1CC];
@@ -134,6 +140,7 @@ enum { RP_CAPTURE_SAMPLES = 512, RP_GUEST_SAMPLE_CYCLES = 0x300 };
 #define RP_ME_MIXER_BASE UINT32_C(0x09FF0000)
 #define RP_FIELD_ADDRESS(base, type, member) ((uint32_t)(base) + (uint32_t)offsetof(type, member))
 #define RP_CORE_CLOCK_ADDRESS(c, member) RP_FIELD_ADDRESS((c)->gp, rp_core_clock_layout, member)
+#define RP_COMPILE_CONTROL_ADDRESS(c, member) RP_FIELD_ADDRESS((c)->gp, rp_core_compile_control_layout, member)
 #define RP_CORE_CACHE_ADDRESS(c, member) RP_FIELD_ADDRESS((c)->gp, rp_core_code_cache_layout, member)
 #define RP_SHARED_ADDRESS(member) RP_FIELD_ADDRESS(RP_ME_SHARED_BASE, rp_me_shared_layout, member)
 #define RP_MIXER_ADDRESS(member) RP_FIELD_ADDRESS(RP_ME_MIXER_BASE, rp_me_mixer_layout, member)
@@ -166,6 +173,9 @@ static inline uint32_t rp_capture_address(unsigned channel, uint32_t cursor)
 }
 
 _Static_assert(offsetof(rp_core_clock_layout, event_downcount) == 0x1B0, "core clock layout");
+_Static_assert(offsetof(rp_core_clock_layout, dispatch_control) == 0x1C0, "dispatch control");
+_Static_assert(offsetof(rp_core_compile_control_layout, special_pc_hook_address_flags) == 0x6F4,
+               "special PC hook control");
 _Static_assert(sizeof(rp_volume_sweep_layout) == 10, "volume sweep layout");
 _Static_assert(sizeof(rp_master_volume_layout) == 24, "master volume layout");
 _Static_assert(sizeof(rp_voice_envelope_layout) == 0x10, "voice envelope layout");

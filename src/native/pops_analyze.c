@@ -1,5 +1,6 @@
 #include "runtime.h"
 #include "pops_ir.h"
+#include "pops_state.h"
 
 #define RECORD_BASE UINT32_C(0x041B0000)
 
@@ -63,7 +64,8 @@ static void analyze(rp_context *c, uint32_t p, unsigned depth)
         uint32_t rd = (instruction >> 11) & 31;
         uint16_t kind = RP_CAT_EMPTY;
         uint32_t cost = 1;
-        if (pc == (rp_u32(c, c->gp + 0x6F4) & UINT32_C(0xFFFFFFFE))) flags |= 0x1000;
+        if (pc == (rp_u32(c, RP_COMPILE_CONTROL_ADDRESS(c, special_pc_hook_address_flags)) &
+                   UINT32_C(0xFFFFFFFE))) flags |= 0x1000;
         if (op == RP_OP_SPECIAL) op = (instruction & 63) | 0x40;
 
         switch (op) {

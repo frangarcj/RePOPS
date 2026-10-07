@@ -53,6 +53,22 @@ int main(void)
     rp_unicorn_run(c);
     assert(c->run_pc == 0x2888 && rp_u32(c, c->gp + 0x28) == 25);
     assert(rp_u32(c, c->gp + 0x24) == 7);
+    /* +0x7E60 rewinds allocation while +0x1A68 can still return into the
+     * unchanged old block. Do not confuse that PC with a firmware helper. */
+    rp_w32(c, c->gp + 0x1CC, ram);
+    assert(rp_generated_known_address(c, ram + 4));
+    assert(!rp_generated_known_address(c, ram + 12));
+    assert(!rp_generated_known_address(c, 0x1A68));
+    c->run_pc = ram;
+    rp_unicorn_run(c);
+    assert(c->run_pc == 0x2888 && rp_u32(c, c->gp + 0x28) == 25);
+    assert(rp_u32(c, c->gp + 0x1CC) == ram);
+    /* Reuse of the old address still executes the new bytes, not a cached
+     * translation made valid forever by the retained executable extent. */
+    rp_w32(c, ram, 0x2402001F);
+    c->run_pc = ram;
+    rp_unicorn_run(c);
+    assert(c->run_pc == 0x2888 && rp_u32(c, c->gp + 0x28) == 31);
     /* Same callsite: a RAM halfword write, then an I/O address. The latter
      * must return to C instead of corrupting a RAM alias. */
     const uint32_t probe = start + 0x100;

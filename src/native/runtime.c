@@ -1,4 +1,5 @@
 #include "runtime.h"
+#include "pops_state.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -40,6 +41,22 @@ void rp_generated_code_access(rp_context *c, uint32_t address, size_t length)
     if (length && ((address < RP_GENERATED_RAM_END && end > RP_GENERATED_RAM_BEGIN) ||
                    (address < RP_GENERATED_BIOS_END && end > RP_GENERATED_BIOS_BEGIN)))
         ++c->generated_code_revision;
+}
+
+/* +0x7E60 rewinds allocation and invalidates lookup tags, but does not erase
+ * emitted bytes or the in-flight return PC. Keep that known executable prefix
+ * separate from the next allocation cursor. Later overwrites still invalidate
+ * Unicorn translations through generated_code_revision. */
+bool rp_generated_known_address(rp_context *c, uint32_t address)
+{
+    const uint32_t ram = rp_u32(c, RP_CORE_CACHE_ADDRESS(c, ram_code_cursor));
+    const uint32_t bios = rp_u32(c, RP_CORE_CACHE_ADDRESS(c, bios_code_cursor));
+    if (ram >= RP_GENERATED_RAM_BEGIN && ram <= RP_GENERATED_RAM_END &&
+            ram > c->generated_ram_high_water) c->generated_ram_high_water = ram;
+    if (bios >= RP_GENERATED_BIOS_BEGIN && bios <= RP_GENERATED_BIOS_END &&
+            bios > c->generated_bios_high_water) c->generated_bios_high_water = bios;
+    return (address >= RP_GENERATED_RAM_BEGIN && address < c->generated_ram_high_water) ||
+           (address >= RP_GENERATED_BIOS_BEGIN && address < c->generated_bios_high_water);
 }
 
 void *rp_memory(rp_context *c, uint32_t address, size_t length)

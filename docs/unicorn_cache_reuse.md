@@ -28,6 +28,24 @@ Original PRX memory stays nonexecutable. GPR/FPR/HI/LO transfer and execution
 budgets are unchanged. Recovered code-cursor fields now have named native
 layout accessors rather than fresh GP offset literals.
 
+## Allocation rewind is not destruction of in-flight code
+
+The configured-PC hook exposed a separate lifetime error in the adapter.
+POPS +0x7E60 clears lookup tags and rewinds its RAM allocation cursor, but
+does not erase the emitted bytes or rewrite the saved continuation. The
+scheduler can still return that continuation through +0x1A68.
+
+`out/scratchpad-warm.z3s4pqd1/result/` reached this case at 0x09542B38;
+the adapter incorrectly labelled it an unreconstructed native helper after
+the allocation cursor had moved below it. Execution-range checks now retain
+the known emitted prefix separately from the current cursor. They do not
+enable the entire reserved cache or any original PRX page. Reused addresses
+still execute their current bytes through the revision invalidation above.
+
+The focused Unicorn test covers returning to an old RAM-cache block after
+rewind, rejecting the unpublished suffix, and observing a later overwrite.
+This changes host execution bookkeeping, not POPS's tags, cursor or cycles.
+
 ## Checks and measurements
 
 `make test-unicorn-cache` and the same executable with

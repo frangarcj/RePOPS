@@ -29,11 +29,7 @@ bool rp_pops_scratchpad_store(rp_context *c)
     r[6] = 0x4C;
     if (!specialized) {
         const uint32_t patch = r[31] - 8;
-        const bool in_ram = patch >= RP_GENERATED_RAM_BEGIN &&
-            patch < rp_u32(c, RP_CORE_CACHE_ADDRESS(c, ram_code_cursor));
-        const bool in_bios = patch >= RP_GENERATED_BIOS_BEGIN &&
-            patch < rp_u32(c, RP_CORE_CACHE_ADDRESS(c, bios_code_cursor));
-        if ((!in_ram && !in_bios) || (rp_u32(c, patch) >> 26) != 3)
+        if (!rp_generated_known_address(c, patch) || (rp_u32(c, patch) >> 26) != 3)
             rp_block(c, "scratchpad_specialization_callsite_invalid", patch);
         r[2] = 0x0C000000 | (target >> 2);
         rp_w32(c, patch, r[2]);

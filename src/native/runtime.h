@@ -47,6 +47,7 @@ typedef struct rp_context {
     uint32_t run_gpr[32], run_fpr[32], run_pc, run_next_pc, run_hi, run_lo;
     uint64_t generated_instructions;
     uint64_t generated_code_revision, generated_cache_invalidations;
+    uint32_t generated_ram_high_water, generated_bios_high_water;
     uint32_t compiled_transfers;
     void *generated_engine;
     const char *generated_executor;
@@ -66,6 +67,7 @@ void rp_event(rp_context *, const char *kind, const char *name, uint32_t address
 _Noreturn void rp_block(rp_context *, const char *kind, uint32_t address);
 void *rp_memory(rp_context *, uint32_t address, size_t length);
 void rp_generated_code_access(rp_context *, uint32_t address, size_t length);
+bool rp_generated_known_address(rp_context *, uint32_t address);
 void *rp_module_memory(rp_context *, uint32_t offset, size_t length);
 uint32_t rp_module_u32(rp_context *, uint32_t offset);
 uint32_t rp_u32(rp_context *, uint32_t);

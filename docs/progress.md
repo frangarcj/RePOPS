@@ -14,9 +14,12 @@ snapshot is black; these counts alone do not demonstrate an FFVI screen.
 
 The three store widths now use the recovered core scratchpad layout and
 patch to +0x1DB4/+0x20F4/+0x2434. Their warm RAM fallback is also recovered
-and tested without repatching the caller or changing T9. That fallback's
-next integrated check is `out/scratchpad-warm.z3s4pqd1/result/`, in progress
-when this entry was written. See `scratchpad_stores.md` for the exact scope.
+and tested without repatching the caller or changing T9. It passes in
+`out/scratchpad-warm.z3s4pqd1/result/`: 428,556,276 instruction observations,
+2,904,022 compiled transfers, and 7,712 completed GE syncs. The next stop at
+0x09542B38 revealed that the execution adapter incorrectly treated an old
+generated continuation as a firmware helper after the allocation cursor was
+rewound. See `scratchpad_stores.md` and `unicorn_cache_reuse.md`.
 
 ## Current: configured-PC hook passes; next access is PS1 scratchpad
 

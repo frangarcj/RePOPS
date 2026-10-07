@@ -203,8 +203,10 @@ void rp_unicorn_run(rp_context *c)
     generated_engine *engine = c->generated_engine;
     if (!engine || !engine->uc) rp_block(c, "unicorn_not_initialized", c->run_pc);
     uc_engine *uc = engine->uc;
-    engine->published_end = rp_u32(c, RP_CORE_CACHE_ADDRESS(c, bios_code_cursor));
-    engine->ram_published_end = rp_u32(c, RP_CORE_CACHE_ADDRESS(c, ram_code_cursor));
+    if (!rp_generated_known_address(c, c->run_pc))
+        rp_block(c, "unicorn_entry_outside_generated_cache", c->run_pc);
+    engine->published_end = c->generated_bios_high_water;
+    engine->ram_published_end = c->generated_ram_high_water;
     engine->outside_published_code = 0;
     engine->previous_pc = 0;
     engine->scalar_pc = 0;

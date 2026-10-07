@@ -97,8 +97,7 @@ static uint32_t lookup_block(rp_context *c, uint32_t pc)
 
 static bool generated_address(rp_context *c, uint32_t address)
 {
-    return (address >= 0x09B80000 && address < rp_u32(c, c->gp + 0x1D0)) ||
-           (address >= 0x09540000 && address < rp_u32(c, c->gp + 0x1CC));
+    return rp_generated_known_address(c, address);
 }
 
 static void specialize_generated_call(rp_context *c, uint32_t return_address,

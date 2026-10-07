@@ -40,6 +40,7 @@ typedef struct rp_context {
     uint32_t me_last_sample_cycles; /* Cooperative host clock, not firmware state. */
     uint32_t ge_commands[512], ge_command_count, ge_lists_captured;
     uint32_t ge_stalled_list, ge_edram_translation;
+    uint32_t ge_backend_active, ge_backend_submissions, ge_backend_completed;
     /* Temporary execution adapter for code emitted by the reconstructed C.
      * Original firmware instructions are never fetched by this adapter.
      */

@@ -1,6 +1,7 @@
 #include "pops_gpu.h"
 #include "pops_cdrom.h"
 #include "pops_dma.h"
+#include "pops_ge_backend.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -650,8 +651,9 @@ static uint32_t consume_packet(rp_context *c, uint32_t source, uint32_t bytes)
         SET_GPU8(ge_transfer_pending, 0);
         c->services += 2;
         rp_event(c, "headless_adapter", "GE_list_sync_request_captured", GPU32(list_id), 0);
+        if (c->ge_backend_active) rp_ge_live_sync(c, GPU32(list_id));
         c->ge_stalled_list = 0x49A00000;
-        SET_GPU32(list_id, ++c->next_id);
+        SET_GPU32(list_id, c->ge_backend_active ? rp_ge_live_enqueue(c, 0x49A00000, 0x49A00000) : ++c->next_id);
         rp_event(c, "headless_adapter", "GE_list_queued_at_stall_not_rendered", c->ge_stalled_list, c->next_id);
     }
     unsigned mode = GPU8(command_mode);
@@ -785,6 +787,7 @@ uint32_t rp_pops_gpu_dma_transfer(rp_context *c, uint32_t address, uint32_t byte
         SET_GPU32(status, GPU32(status) & ~UINT32_C(0x14000000));
         const uint32_t work = consume_packet(c, source, available);
         c->ge_stalled_list = GPU32(list_cursor);
+        if (c->ge_backend_active) rp_ge_live_stall(c, GPU32(list_id), c->ge_stalled_list);
         ++c->services;
         rp_event(c, "headless_adapter", "POPSMAN_E7F06E2B_DMA_stall_captured_not_rendered",
                  c->ge_stalled_list, work);
@@ -854,6 +857,7 @@ uint32_t rp_pops_gpu_dma_transfer(rp_context *c, uint32_t address, uint32_t byte
      * host service, not a reconstructed provider body or a rendered list. */
     ++c->services;
     c->ge_stalled_list = GPU32(list_cursor);
+    if (c->ge_backend_active) rp_ge_live_stall(c, GPU32(list_id), c->ge_stalled_list);
     rp_event(c, "headless_adapter", "POPSMAN_E7F06E2B_GE_stall_request", c->ge_stalled_list, 0);
     (void)rp_pops_dma_delay_active(c, 2, consumed, horizon);
     if ((int32_t)horizon < (int32_t)(consumed << 1)) {
@@ -888,6 +892,7 @@ static void reset_control(rp_context *c)
         (void)emit_ge_word(c, cursor + 4, 0x0C000000);
         (void)emit_ge_word(c, cursor, 0x0F000000);
         c->ge_stalled_list = 0;
+        if (c->ge_backend_active) rp_ge_live_stall(c, old_list, 0);
         ++c->services;
         rp_event(c, "headless_adapter", "sceGeListUpdateStallAddr_request_not_rendered", old_list, 0);
     }
@@ -911,7 +916,7 @@ static void reset_control(rp_context *c)
     ++c->services;
     rp_event(c, "headless_adapter", "sceGeDrawSync_request_not_rendered", 0, c->ge_lists_captured);
     c->ge_stalled_list = 0x49A00000;
-    SET_GPU32(list_id, ++c->next_id);
+    SET_GPU32(list_id, c->ge_backend_active ? rp_ge_live_enqueue(c, 0x49A00000, 0x49A00000) : ++c->next_id);
     ++c->services;
     rp_event(c, "headless_adapter", "sceGeListEnQueue_empty_at_stall", c->ge_stalled_list, c->next_id);
     SET_GPU8(command_mode, 0); SET_GPU8(packet_extra_words, 0); SET_GPU8(packet_word_count, 0);

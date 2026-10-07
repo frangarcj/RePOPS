@@ -1,6 +1,7 @@
 #include "runtime.h"
 #include <stdlib.h>
 #include <string.h>
+#include "pops_ge_backend.h"
 
 static void load_data(rp_context *c, const char *image, const char *imports)
 {
@@ -66,6 +67,7 @@ int main(int argc, char **argv)
     }
     c->disc_path=argc==5?argv[4]:NULL;
     rp_event(c,"metadata","compact_trace_enabled",0,(uint32_t)c->trace_compact);
+    if (rp_ge_live_open(c) < 0) return 70;
     if (setjmp(c->stop)==0) {
         load_data(c,argv[1],argv[2]);
         rp_pops_module_start(c);
@@ -78,18 +80,22 @@ int main(int argc, char **argv)
             "\"execution\":\"native_C_POPS_with_Unicorn_generated_cache\",\"game_executed\":false,"
             "\"generated_executor\":\"%s\",\"generated_instruction_hook_events\":%llu,\"compiled_block_transfers\":%u,"
             "\"psx_pc\":%u,\"generated_pc\":%u,"
-            "\"diagnostic_ui_bypassed\":%s}\n",
+            "\"diagnostic_ui_bypassed\":%s,\"ge_backend\":\"%s\",\"ge_submissions\":%u,\"ge_completed_syncs\":%u}\n",
             c->stop_kind,c->stop_address,c->functions,c->services,
             c->generated_executor ? c->generated_executor : "not_started",
             (unsigned long long)c->generated_instructions,c->compiled_transfers,
             rp_u32(c,c->gp+0x1A0),c->run_pc,
-            c->diagnostic_skip_ui ? "true" : "false");
+            c->diagnostic_skip_ui ? "true" : "false",
+            c->ge_backend_active ? "PPSSPP_software" : "capture_only",
+            c->ge_backend_submissions,c->ge_backend_completed);
     printf("Native C stopped: %s at 0x%08X; %u function entries, %u host calls\n",
             c->stop_kind,c->stop_address,c->functions,c->services);
     if (c->disc) fclose(c->disc);
     rp_unicorn_close(c);
     fclose(c->trace);
-    for (unsigned i=0;i<RP_REGION_COUNT;++i) free(c->regions[i].bytes);
+    for (unsigned i=0;i<RP_REGION_COUNT;++i)
+        if (i < 2 || !c->ge_backend_active) free(c->regions[i].bytes);
+    rp_ge_live_close(c);
     free(c);
     return 78; /* Explicitly incomplete execution; never report game success. */
 }

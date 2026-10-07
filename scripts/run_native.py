@@ -29,6 +29,8 @@ def main():
     ap.add_argument('--image',type=Path,required=True)
     ap.add_argument('--out',type=Path,required=True)
     ap.add_argument('--pbp',type=Path)
+    ap.add_argument('--ge-backend', choices=('capture', 'ppsspp'), default='capture',
+                    help='Use captured GE operations or the optional PPSSPP software backend')
     ap.add_argument('--diagnostic-skip-ui',action='store_true',
                     help='Explicitly bypass PSP startup UI to investigate core initialization')
     ap.add_argument('--elf',type=Path,default=ROOT/'build/pops_660.prx.dec')
@@ -52,9 +54,17 @@ def main():
     imports_file=args.out/'imports.tsv'
     imports_file.write_text(''.join(f"{fn['stub']:08X}\t{lib['name']}\t{fn['nid']:08X}\n"
                                   for lib in imports for fn in lib['functions']))
-    subprocess.run(['make','native'],cwd=ROOT,check=True)
+    if args.ge_backend == 'ppsspp':
+        build_dir=ROOT/'.tools/ppsspp-ge-build'
+        if not (build_dir/'build.ninja').is_file():
+            ap.error('Run sh scripts/build_ppsspp_ge.sh before selecting the PPSSPP GE backend')
+        subprocess.run(['cmake','--build',str(build_dir),'--target','repops-native-ge','-j','4'],cwd=ROOT,check=True)
+        executable=build_dir/'repops-ge/repops-native-ge'
+    else:
+        subprocess.run(['make','native'],cwd=ROOT,check=True)
+        executable=ROOT/'build/repops-native'
     trace=args.out/'trace.jsonl'
-    command=[str(ROOT/'build/repops-native'),str(binary.resolve()),str(imports_file.resolve()),str(trace.resolve())]
+    command=[str(executable),str(binary.resolve()),str(imports_file.resolve()),str(trace.resolve())]
     if args.pbp is not None:command.append(str(args.pbp.resolve()))
     if args.diagnostic_skip_ui:command.append('--diagnostic-skip-ui')
     started=time.perf_counter()
@@ -66,9 +76,14 @@ def main():
             'host_timeout_seconds':args.timeout,
             'host_execution_seconds':elapsed,
             'diagnostic_ui_bypassed':args.diagnostic_skip_ui,
-            'image_sha256':manifest['image_sha256'],'native_binary_sha256':hashlib.sha256((ROOT/'build/repops-native').read_bytes()).hexdigest(),
+            'image_sha256':manifest['image_sha256'],'native_binary_sha256':hashlib.sha256(executable.read_bytes()).hexdigest(),
+            'ge_backend_requested':args.ge_backend,
             'scope':'Reconstructed POPS C plus Unicorn MIPS32 execution of the generated cache; original PRX pages are nonexecutable',
             'limitations':'Not a complete emulator; POPSMAN startup, callbacks, hardware, remaining functions and game execution are incomplete'}
+    if args.ge_backend == 'ppsspp':
+        report['ppsspp_revision']=subprocess.check_output(
+            ['git','-C',str(ROOT/'.tools/ppsspp-ge-source'),'rev-parse','HEAD'],text=True).strip()
+        report['ppsspp_patch_sha256']=hashlib.sha256((ROOT/'src/ppsspp_ge/ppsspp.patch').read_bytes()).hexdigest()
     (args.out/'run.json').write_text(json.dumps(report,indent=2)+'\n')
     print(run.stdout,end='')
     print('Trace:',trace)

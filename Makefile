@@ -34,6 +34,7 @@ build/repops-native: src/native/pops_display.h
 build/repops-native: src/native/pops_mdec.h
 build/repops-native: src/native/pops_spu_dma.h
 build/repops-native build/test_native_gpu: src/popsman_ge.h
+build/repops-native build/test_native_gpu build/test_native_display: src/native/pops_ge_backend.h
 build/test_native_events build/test_native_cdrom: src/native/pops_spu_dma.h src/native/pops_mdec.h
 build/repops-native build/test_native_memory_card build/test_native_events build/test_native_cdrom: src/native/pops_memory_card.h
 build/test_native_gpu: src/native/pops_dma.h

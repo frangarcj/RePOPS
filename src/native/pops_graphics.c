@@ -2,6 +2,7 @@
 #include "pops_cdrom.h"
 #include "pops_gpu.h"
 #include "pops_display.h"
+#include "pops_ge_backend.h"
 #include <math.h>
 #include <string.h>
 
@@ -25,6 +26,10 @@ static void copy_template(rp_context *c, uint32_t destination, uint32_t source, 
  * zero-initialized EDRAM. The actual GE backend must implement these barriers. */
 uint32_t rp_ge_readback_restart_list(rp_context *c, uint32_t old_list)
 {
+    if (c->ge_backend_active) {
+        rp_ge_live_sync(c, old_list);
+        return rp_ge_live_enqueue(c, 0x49A00000, 0x49A00000);
+    }
     rp_event(c, "GPU_readback_boundary", "sceGeListSync_before_restart", old_list, 0x49A00000);
     rp_block(c, "GE_readback_previous_list_execution_required", 0x133AC);
 }
@@ -61,6 +66,8 @@ uint32_t rp_ge_capture_state_list(rp_context *c, uint32_t address, int module_re
         c->ge_commands[c->ge_command_count++] = word;
         if (word == 0x0C000000) {
             ++c->ge_lists_captured; ++c->services;
+            if (c->ge_backend_active)
+                return rp_ge_live_state(c, c->ge_commands + start, c->ge_command_count - start);
             rp_event(c, "headless_adapter", "GE_state_list_captured_not_rendered", address,
                      c->ge_command_count - start);
             return ++c->next_id;
@@ -223,6 +230,8 @@ static void finish_refresh_timing(rp_context *c, uint32_t next_frame, bool relea
              next_frame, 0);
     if (release_stall) {
         c->ge_stalled_list = 0;
+        if (c->ge_backend_active)
+            rp_ge_live_stall(c, rp_u32(c, RP_GPU_ADDRESS(c, list_id)), 0);
         ++c->services;
         rp_event(c, "headless_adapter", "GE_stall_release_captured_not_rendered",
                  0xE7F06E2B, 0);
@@ -306,7 +315,9 @@ static void refresh_display(rp_context *c)
         c->services += 2;
         rp_event(c, "headless_adapter", "previous_GE_list_sync_completed", 0x12504,
                  rp_u32(c, RP_GPU_ADDRESS(c, list_id)));
-        rp_w32(c, RP_GPU_ADDRESS(c, list_id), ++c->next_id);
+        if (c->ge_backend_active) rp_ge_live_sync(c, rp_u32(c, RP_GPU_ADDRESS(c, list_id)));
+        rp_w32(c, RP_GPU_ADDRESS(c, list_id), c->ge_backend_active ?
+               rp_ge_live_enqueue(c, 0x49A00000, 0x49A00000) : ++c->next_id);
         rp_event(c, "headless_adapter", "GE_list_enqueue_captured", 0x49A00000,
                  c->next_id);
     }

@@ -1,5 +1,6 @@
 #include "pops_gpu.h"
 #include "../popsman_ge.h"
+#include "pops_ge_backend.h"
 
 /* Single-threaded capture adapter for the recovered provider. With no GE
  * executor there is no completion bit: take the original fallback, never
@@ -40,6 +41,8 @@ static void write32(void *context, uint32_t address, uint32_t value)
     rp_context *c = host->c;
     if (address == REPOPS_PM_GE_STALL) {
         c->ge_stalled_list = value;
+        if (c->ge_backend_active)
+            rp_ge_live_stall(c, rp_u32(c, RP_GPU_ADDRESS(c, list_id)), value);
         rp_event(c, "headless_adapter", "POPSMAN_GE_stall_write_not_executed", address, value);
     } else if (address == REPOPS_PM_GE_ACK) {
         rp_block(c, "GE_capture_has_no_completion_to_acknowledge", address);
@@ -58,6 +61,7 @@ static uint32_t enqueue(void *context, uint32_t start, uint32_t stall,
     if (start != stall || callback_id != -1 || arguments)
         rp_block(c, "GE_capture_enqueue_contract_unknown", start);
     c->ge_stalled_list = stall;
+    if (c->ge_backend_active) return rp_ge_live_enqueue(c, start, stall);
     rp_event(c, "headless_adapter", "GE_continuation_enqueued_not_executed", start, c->next_id + 1);
     return ++c->next_id;
 }
@@ -67,6 +71,10 @@ static uint32_t list_sync(void *context, uint32_t id, uint32_t mode)
     rp_context *c = host->c;
     rp_event(c, "headless_adapter", "POPSMAN_cache_probes_elided_coherent_host", 0xA, host->cache_probes);
     if (mode) rp_block(c, "GE_capture_sync_mode_unknown", mode);
+    if (c->ge_backend_active) {
+        rp_ge_live_sync(c, id);
+        return 0;
+    }
     if (host->require_pixels) {
         rp_event(c, "GPU_readback_boundary", "GE_list_execution_needed_before_pixels", id, c->ge_stalled_list);
         rp_block(c, "GE_backend_execution_required", 0x3A98);
@@ -84,6 +92,8 @@ uint32_t rp_popsman_ge_finish_host(rp_context *c, uint32_t old_list,
     ++c->services;
     rp_event(c, "native_c_provider", "popsman_ark_7014C540", 0x3A00, old_list);
     const uint32_t next = repops_pm_7014c540(&bus, old_list, continuation);
-    rp_event(c, "headless_adapter", "POPSMAN_7014C540_submit_captured_not_rendered", old_list, next);
+    rp_event(c, c->ge_backend_active ? "GE_backend" : "headless_adapter",
+             c->ge_backend_active ? "POPSMAN_7014C540_fallback_completed" :
+             "POPSMAN_7014C540_submit_captured_not_rendered", old_list, next);
     return next;
 }

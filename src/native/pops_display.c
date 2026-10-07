@@ -1,4 +1,5 @@
 #include "pops_display.h"
+#include "pops_ge_backend.h"
 #include <string.h>
 
 #define GPU32(member) rp_u32(c, RP_GPU_ADDRESS(c, member))
@@ -106,6 +107,7 @@ uint32_t rp_pops_display_active_lists(rp_context *c, uint32_t out)
     /* POPSMAN's E7F06E2B publishes this GE stall. Capture the operation,
      * not an invented execution/completion of the newly emitted commands. */
     c->ge_stalled_list = out;
+    if (c->ge_backend_active) rp_ge_live_stall(c, GPU32(list_id), out);
     ++c->services;
     rp_event(c, "headless_adapter", "provider_E7F06E2B_display_stall_captured_not_rendered", out, 0);
 

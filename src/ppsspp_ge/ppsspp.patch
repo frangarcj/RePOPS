@@ -1,0 +1,143 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 291b570..79aac78 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1734,3 +1734,8 @@ if(UNIX AND NOT ANDROID AND NOT APPLE)
+ 		DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/mime/packages"
+ 	)
+ endif()
++
++# RePops uses the existing GE implementation without launching a PSP program.
++if(REPOPS_ROOT)
++	add_subdirectory("${REPOPS_ROOT}/src/ppsspp_ge" "${CMAKE_BINARY_DIR}/repops-ge")
++endif()
+diff --git a/Core/MemMap.cpp b/Core/MemMap.cpp
+index c925c54..d651bb8 100644
+--- a/Core/MemMap.cpp
++++ b/Core/MemMap.cpp
+@@ -100,14 +100,11 @@ static MemoryView views[] = {
+ 	// writing 0x80010000 (see docs/VSHBootInvestigation.md).
+ 	{&m_pKernelScratchPad,        0x80010000, SCRATCHPAD_SIZE, MV_MIRROR_PREVIOUS | MV_KERNEL},
+ 	{&m_pUncachedKernelScratchPad,0xC0010000, SCRATCHPAD_SIZE, MV_MIRROR_PREVIOUS | MV_KERNEL},
+-	{&m_pPhysicalVRAM[0],     0x04000000, 0x00200000, 0},
+-	{&m_pPhysicalVRAM[1],     0x04200000, 0x00200000, MV_MIRROR_PREVIOUS},
+-	{&m_pPhysicalVRAM[2],     0x04400000, 0x00200000, MV_MIRROR_PREVIOUS},
+-	{&m_pPhysicalVRAM[3],     0x04600000, 0x00200000, MV_MIRROR_PREVIOUS},
+-	{&m_pUncachedVRAM[0],     0x44000000, 0x00200000, MV_MIRROR_PREVIOUS},
+-	{&m_pUncachedVRAM[1],     0x44200000, 0x00200000, MV_MIRROR_PREVIOUS},
+-	{&m_pUncachedVRAM[2],     0x44400000, 0x00200000, MV_MIRROR_PREVIOUS},
+-	{&m_pUncachedVRAM[3],     0x44600000, 0x00200000, MV_MIRROR_PREVIOUS},
++	// RePops uses POPSMAN's 4 MiB EDRAM configuration, not the retail 2 MiB mirror.
++	{&m_pPhysicalVRAM[0],     0x04000000, 0x00400000, 0},
++	{&m_pPhysicalVRAM[1],     0x04400000, 0x00400000, MV_MIRROR_PREVIOUS},
++	{&m_pUncachedVRAM[0],     0x44000000, 0x00400000, MV_MIRROR_PREVIOUS},
++	{&m_pUncachedVRAM[1],     0x44400000, 0x00400000, MV_MIRROR_PREVIOUS},
+ 	{&m_pPhysicalRAM[0],      0x08000000, g_MemorySize, MV_IS_PRIMARY_RAM},	// only from 0x08800000 is it usable (last 24 megs)
+ 	{&m_pUncachedRAM[0],      0x48000000, g_MemorySize, MV_MIRROR_PREVIOUS | MV_IS_PRIMARY_RAM},
+ 	{&m_pKernelRAM[0],        0x88000000, g_MemorySize, MV_MIRROR_PREVIOUS | MV_IS_PRIMARY_RAM | MV_KERNEL},
+diff --git a/Core/MemMap.h b/Core/MemMap.h
+index 83fe8ec..28cc60d 100644
+--- a/Core/MemMap.h
++++ b/Core/MemMap.h
+@@ -99,7 +99,7 @@ enum {
+ 	// Used if the PSP model is PSP-2000 (Slim).
+ 	RAM_DOUBLE_SIZE = RAM_NORMAL_SIZE * 2,
+ 
+-	VRAM_SIZE       = 0x00200000,
++	VRAM_SIZE       = 0x00400000,  // RePops: POPSMAN requests 4 MiB EDRAM.
+ 
+ 	SCRATCHPAD_SIZE = 0x00004000,
+ 
+diff --git a/GPU/Software/BinManager.cpp b/GPU/Software/BinManager.cpp
+index 5d6b93c..47608e3 100644
+--- a/GPU/Software/BinManager.cpp
++++ b/GPU/Software/BinManager.cpp
+@@ -308,7 +308,7 @@ void BinManager::UpdateState() {
+ // primitives and draws see it as it was when first read (FF Type-0's 16x16 4444 blur, three passes over
+ // one buffer without a flush).
+ const RasterizerState &BinManager::SelfTextureSnapshot(const BinItem &item, const RasterizerState &state) {
+-	constexpr uint32_t mirrorMask = 0x041FFFFF;
++	constexpr uint32_t mirrorMask = 0x043FFFFF;
+ 	const uint32_t bits = textureBitsPerPixel[state.samplerID.texfmt];
+ 	const uint32_t fbBpp = state.pixelID.FBFormat() == GE_FORMAT_8888 ? 4 : 2;
+ 	const uint32_t fbStrideBytes = state.pixelID.cached.framebufStride * fbBpp;
+@@ -416,7 +416,7 @@ void BinManager::MarkPendingWrites(const Rasterizer::RasterizerState &state) {
+ 	DrawingCoords scissorTL(gstate.getScissorX1(), gstate.getScissorY1());
+ 	DrawingCoords scissorBR(std::min(gstate.getScissorX2(), gstate.getRegionX2()), std::min(gstate.getScissorY2(), gstate.getRegionY2()));
+ 
+-	constexpr uint32_t mirrorMask = 0x041FFFFF;
++	constexpr uint32_t mirrorMask = 0x043FFFFF;
+ 	const uint32_t bpp = state.pixelID.FBFormat() == GE_FORMAT_8888 ? 4 : 2;
+ 	pendingWrites_[0].Expand(gstate.getFrameBufAddress() & mirrorMask, bpp, gstate.FrameBufStride(), scissorTL, scissorBR);
+ 	if (state.pixelID.depthWrite) {
+@@ -873,7 +873,7 @@ bool BinManager::HasPendingWrite(uint32_t start, uint32_t stride, uint32_t w, ui
+ 	if (!Memory::IsVRAMAddress(start))
+ 		return false;
+ 	// Ignore mirrors for overlap detection.
+-	start &= 0x041FFFFF;
++	start &= 0x043FFFFF;
+ 
+ 	for (const auto &range : pendingWrites_) {
+ 		if (PendingWriteIn(range, start, stride, w, h))
+@@ -883,7 +883,7 @@ bool BinManager::HasPendingWrite(uint32_t start, uint32_t stride, uint32_t w, ui
+ }
+ 
+ bool BinManager::PendingWriteIn(const BinDirtyRange &range, uint32_t start, uint32_t stride, uint32_t w, uint32_t h) {
+-	start &= 0x041FFFFF;
++	start &= 0x043FFFFF;
+ 	if (range.base == 0 || range.strideBytes == 0)
+ 		return false;
+ 	uint32_t size = stride * (h - 1) + w;
+@@ -910,7 +910,7 @@ bool BinManager::PendingWriteIn(const BinDirtyRange &range, uint32_t start, uint
+ bool BinManager::HasPendingRead(uint32_t start, uint32_t stride, uint32_t w, uint32_t h) {
+ 	if (Memory::IsVRAMAddress(start)) {
+ 		// Ignore VRAM mirrors.
+-		start &= 0x041FFFFF;
++		start &= 0x043FFFFF;
+ 	} else {
+ 		// Ignore only regular RAM mirrors.
+ 		start &= 0x3FFFFFFF;
+@@ -1108,7 +1108,7 @@ void BinManager::ClearTileMarks() {
+ // Calls f(tile) for the tiles of the render target that a texel region's memory falls in.
+ template <typename F>
+ void BinManager::ForTargetTiles(const RasterizerState &state, const TexelRegion &region, F f) {
+-	constexpr uint32_t mirrorMask = 0x041FFFFF;
++	constexpr uint32_t mirrorMask = 0x043FFFFF;
+ 	const uint32_t bpp = state.pixelID.FBFormat() == GE_FORMAT_8888 ? 4 : 2;
+ 	const uint32_t fbStrideBytes = state.pixelID.cached.framebufStride * bpp;
+ 	if (fbStrideBytes == 0)
+diff --git a/GPU/Software/SoftGpu.cpp b/GPU/Software/SoftGpu.cpp
+index d13c4a7..8d506ad 100644
+--- a/GPU/Software/SoftGpu.cpp
++++ b/GPU/Software/SoftGpu.cpp
+@@ -724,7 +724,7 @@ void SoftGPU::MarkDirty(uint32_t addr, uint32_t bytes, SoftGPUVRAMDirty value) {
+ 	if (lastDirtyAddr_ == addr && lastDirtySize_ == bytes && lastDirtyValue_ == value)
+ 		return;
+ 
+-	uint32_t start = ((addr - PSP_GetVidMemBase()) & 0x001FFFFF) >> 10;
++	uint32_t start = ((addr - PSP_GetVidMemBase()) & 0x003FFFFF) >> 10;
+ 	uint32_t end = start + ((bytes + 1023) >> 10);
+ 	if (end > sizeof(vramDirty_)) {
+ 		end = sizeof(vramDirty_);
+@@ -751,7 +751,7 @@ bool SoftGPU::ClearDirty(uint32_t addr, uint32_t bytes, SoftGPUVRAMDirty value)
+ 	if (!Memory::IsVRAMAddress(addr) || !Memory::IsVRAMAddress(addr + bytes - 1))
+ 		return false;
+ 
+-	uint32_t start = ((addr - PSP_GetVidMemBase()) & 0x001FFFFF) >> 10;
++	uint32_t start = ((addr - PSP_GetVidMemBase()) & 0x003FFFFF) >> 10;
+ 	uint32_t end = start + ((bytes + 1023) >> 10);
+ 	bool result = false;
+ 	for (uint32_t i = start; i < end; ++i) {
+diff --git a/GPU/Software/SoftGpu.h b/GPU/Software/SoftGpu.h
+index 3fe79eb..d771c0c 100644
+--- a/GPU/Software/SoftGpu.h
++++ b/GPU/Software/SoftGpu.h
+@@ -227,7 +227,7 @@ class SoftGPU : public GPUCommon {
+ 	bool ClearDirty(uint32_t addr, uint32_t stride, uint32_t height, GEBufferFormat fmt, SoftGPUVRAMDirty value);
+ 	bool ClearDirty(uint32_t addr, uint32_t bytes, SoftGPUVRAMDirty value);
+ 
+-	uint8_t vramDirty_[2048];
++	uint8_t vramDirty_[4096];  // RePops 4 MiB EDRAM.
+ 	uint32_t lastDirtyAddr_ = 0;
+ 	uint32_t lastDirtySize_ = 0;
+ 	SoftGPUVRAMDirty lastDirtyValue_ = SoftGPUVRAMDirty::CLEAR;

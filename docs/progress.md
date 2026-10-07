@@ -4,6 +4,20 @@ Historical native runs retain `result/retained-trace-result.json` instead of
 their full trace once superseded. Keep the latest two traces and the GE-preview
 provenance source; decompilers and focused verification outputs are not pruned.
 
+## Current: scratchpad stores execute through the original specialized helpers
+
+`out/scratchpad.xhokp1ml/result/` passes the scratchpad write and reaches a
+later RAM write through the already-specialized byte helper. It records
+416,625,889 generated-instruction observations, 2,901,104 compiled transfers,
+7,708 GE submissions and 7,705 completed list syncs. The terminal display
+snapshot is black; these counts alone do not demonstrate an FFVI screen.
+
+The three store widths now use the recovered core scratchpad layout and
+patch to +0x1DB4/+0x20F4/+0x2434. Their warm RAM fallback is also recovered
+and tested without repatching the caller or changing T9. That fallback's
+next integrated check is `out/scratchpad-warm.z3s4pqd1/result/`, in progress
+when this entry was written. See `scratchpad_stores.md` for the exact scope.
+
 ## Current: configured-PC hook passes; next access is PS1 scratchpad
 
 `out/specialpc.tgdpkx3h/result/` passes the +0x6088 emitter branch and

@@ -8,6 +8,7 @@
 #include "pops_serial.h"
 #include "pops_mdec.h"
 #include "pops_emit.h"
+#include "pops_scratchpad.h"
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -117,6 +118,10 @@ static void native_helper(rp_context *c)
 {
     uint32_t *r = c->run_gpr;
     switch (c->run_pc) {
+    case RP_STORE_SCRATCH_BYTE: case RP_STORE_SCRATCH_HALF: case RP_STORE_SCRATCH_WORD:
+        if (!rp_pops_scratchpad_store(c))
+            rp_block(c, "scratchpad_specialized_store_fallback_not_reconstructed", r[4]);
+        return;
     case 0xF6DC:
         r[2] = rp_pops_mdec_read(c, r[4], r[5]);
         transfer(c, r[31]);
@@ -212,6 +217,7 @@ static void native_helper(rp_context *c)
         return;
     }
     case 0x1DD0:
+        if (rp_pops_scratchpad_store(c)) return;
         rp_function(c, 0x1DD0, "pops.dynamic_byte_store");
         r[2] = (r[4] >> 23) & 63;
         r[6] = 0x4C;
@@ -234,6 +240,7 @@ static void native_helper(rp_context *c)
         transfer(c, r[31]);
         return;
     case 0x2110: {
+        if (rp_pops_scratchpad_store(c)) return;
         rp_function(c, 0x2110, "pops.dynamic_halfword_store");
         const uint32_t address = r[4], region = (address >> 23) & 63;
         r[6] = 0x4C;
@@ -403,6 +410,7 @@ static void native_helper(rp_context *c)
         transfer(c, r[31]);
         return;
     case 0x2450:
+        if (rp_pops_scratchpad_store(c)) return;
         rp_function(c, 0x2450, "pops.dynamic_word_store_RAM_path");
         r[2] = (r[4] >> 23) & 63;
         r[6] = 0x4C;

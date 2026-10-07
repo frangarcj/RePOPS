@@ -22,6 +22,7 @@ NATIVE_SRC += src/native/pops_display.c
 NATIVE_SRC += src/native/pops_serial.c
 NATIVE_SRC += src/native/pops_mdec.c
 NATIVE_SRC += src/native/pops_spu_dma.c
+NATIVE_SRC += src/native/pops_scratchpad.c
 CD_LIBS = -lz
 
 .PHONY: all native analyze test test-native-disc test-native-config test-native-me test-native-spu test-native-emit test-native-memory-card test-generated-code test-unicorn-cache clean-help
@@ -33,12 +34,21 @@ build/repops-native build/test_native_events build/test_native_cdrom: src/native
 build/repops-native: src/native/pops_display.h
 build/repops-native: src/native/pops_mdec.h
 build/repops-native: src/native/pops_spu_dma.h
+build/repops-native: src/native/pops_scratchpad.h
 build/repops-native build/test_native_gpu: src/popsman_ge.h
 build/repops-native build/test_native_gpu build/test_native_display: src/native/pops_ge_backend.h
 build/test_native_events build/test_native_cdrom: src/native/pops_spu_dma.h src/native/pops_mdec.h
 build/repops-native build/test_native_memory_card build/test_native_events build/test_native_cdrom: src/native/pops_memory_card.h
 build/test_native_gpu: src/native/pops_dma.h
 build/repops-native build/repops-analyze build/test_native_emit build/test_unicorn_cache: src/native/pops_gte.h
+
+build/test_native_scratchpad: src/native/runtime.c src/native/pops_scratchpad.c src/native/pops_scratchpad.h src/native/pops_state.h src/native/runtime.h tests/test_native_scratchpad.c
+	mkdir -p build
+	$(CC) -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined src/native/runtime.c src/native/pops_scratchpad.c tests/test_native_scratchpad.c -o $@
+
+.PHONY: test-native-scratchpad
+test-native-scratchpad: build/test_native_scratchpad
+	./build/test_native_scratchpad
 
 build/test_native_gte: src/native/runtime.c src/native/pops_gte.c src/native/pops_gte.h src/native/pops_state.h src/native/runtime.h tests/test_native_gte.c
 	mkdir -p build
